@@ -1,0 +1,16 @@
+{
+  "name": "@sutras/sage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Evidential-memory engine facade: planes, sweep, exploration helper, CLI and MCP.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sutras/sage-core": "workspace:*",
+    "@sutras/sage-store": "workspace:*",
+    "@sutras/sage-sync": "workspace:*"
+  },
+  "license": "MIT"
+}

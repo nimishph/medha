@@ -1,0 +1,14 @@
+{
+  "name": "@sutras/sage-store",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "StorePort contract: episode log as source of truth, entity-state fold, and memory/file/SQLite backends.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@sutras/sage-core": "workspace:*"
+  },
+  "license": "MIT"
+}

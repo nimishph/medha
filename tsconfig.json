@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "useUnknownInCatchVariables": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@sutras/sage-core": ["./sage-core/src/index.ts"],
+      "@sutras/sage-store": ["./sage-store/src/index.ts"],
+      "@sutras/sage-sync": ["./sage-sync/src/index.ts"],
+      "@sutras/sage": ["./sage/src/index.ts"]
+    }
+  },
+  "include": ["*/src", "tooling/*.ts"],
+  "exclude": ["node_modules"]
+}

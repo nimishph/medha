@@ -1,0 +1,34 @@
+{
+  "name": "sage-workspace",
+  "private": true,
+  "type": "module",
+  "description": "sage: evidential-memory engine as a library. Four packages (core, store, sync, sage) with enforced boundaries. Self-contained so the whole directory can be extracted to its own repo.",
+  "workspaces": [
+    "sage-core",
+    "sage-store",
+    "sage-sync",
+    "sage"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs sage-core/src sage-store/src sage-sync/src sage/src",
+    "test": "bun test",
+    "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@types/bun": "^1.4.2",
+    "dependency-cruiser": "^18.3.1",
+    "typescript": "^5.9.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "nimishph",
+    "url": "https://github.com/nimishph"
+  }
+}
