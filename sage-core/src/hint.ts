@@ -1,0 +1,64 @@
+import { driftDelta, isDrifting } from './ema.ts';
+import type { EntityKey, EntityState, LifecycleStatus } from './entity.ts';
+import { ACTIVE_THRESHOLD, TRUSTED_THRESHOLD } from './thresholds.ts';
+import { statusFor, type TrustComponents, trustOf } from './trust.ts';
+import { wilsonLowerBound } from './wilson.ts';
+
+/**
+ * The read-plane record for one entity, library spec §5.4.
+ *
+ * `SageRoutingHint.recommendation` is intentionally absent: a recommendation reads as a command,
+ * and Sage is a hinter, not a decider (model §1, §2). The consumer compares `trustScore` (or
+ * `clearsThreshold`) against its own break-even.
+ */
+
+export interface EvidentialHint {
+  readonly key: EntityKey;
+  readonly asOf: number;
+  /** T in [0,1]. */
+  readonly trustScore: number;
+  readonly components: TrustComponents;
+  readonly evidence: {
+    readonly successes: number;
+    readonly totalTrials: number;
+    readonly lowerBound: number;
+  };
+  readonly temporal: {
+    readonly emaWeight: number;
+    readonly isDrifting: boolean;
+    readonly driftDelta: number;
+  };
+  readonly status: LifecycleStatus;
+  readonly clearsThreshold: {
+    readonly trusted: boolean;
+    readonly active: boolean;
+  };
+}
+
+/** Build a hint from a state and `now`. Pure; no I/O. */
+export function buildHint(state: EntityState, now: number): EvidentialHint {
+  const result = trustOf(state, now);
+  const status = statusFor(state, now);
+  return {
+    key: state.key,
+    asOf: now,
+    trustScore: result.trust,
+    components: result.components,
+    evidence: {
+      successes: state.evidence.k,
+      totalTrials: state.evidence.n,
+      lowerBound: wilsonLowerBound(state.evidence.k, state.evidence.n),
+    },
+    temporal: {
+      emaWeight: state.ema.mu,
+      isDrifting: isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n),
+      driftDelta: driftDelta(state.ema.mu, state.ema.theta0),
+    },
+    status,
+    clearsThreshold: {
+      trusted:
+        result.trust >= TRUSTED_THRESHOLD && state.guard.lastOk === true && state.evidence.n >= 5,
+      active: result.trust >= ACTIVE_THRESHOLD,
+    },
+  };
+}

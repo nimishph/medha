@@ -259,6 +259,48 @@ export function toSageError(thrown: unknown, operation: string, context?: ErrorC
   return new UnexpectedFailureError(operation, thrown, context ? { context } : {});
 }
 
+/** An explicit name was not found in a registry. Loud by design — a typo is a bug. */
+export class UnknownRegistryEntryError extends SageError {
+  readonly code = 'CORE_UNKNOWN_REGISTRY_ENTRY';
+  readonly subsystem = 'core';
+  readonly entries: readonly string[];
+
+  constructor(kind: string, name: string, entries: readonly string[], init: ErrorInit = {}) {
+    super(`Unknown ${kind} '${name}'`, {
+      ...init,
+      context: { kind, name, entries, ...init.context },
+    });
+    this.entries = entries;
+  }
+}
+
+/** A signal name resolved to nothing. Registration list is included for self-healing. */
+export class UnknownSignalError extends UnknownRegistryEntryError {
+  constructor(name: string, registered: string, init: ErrorInit = {}) {
+    super('signal', name, registered.split(', ').filter(Boolean), init);
+  }
+}
+
+/** An entity kind resolved to nothing. Registered kinds are included for self-healing. */
+export class UnknownKindError extends UnknownRegistryEntryError {
+  constructor(name: string, registered: readonly string[], init: ErrorInit = {}) {
+    super('kind', name, registered, init);
+  }
+}
+
+/** One of the guarded registries (signals, kinds, anchors) rejected a definition. */
+export class RegistryEntryViolationError extends SageError {
+  readonly code = 'CORE_REGISTRY_VIOLATION';
+  readonly subsystem = 'core';
+
+  constructor(registry: string, message: string, init: ErrorInit = {}) {
+    super(message, {
+      ...init,
+      context: { registry, ...init.context },
+    });
+  }
+}
+
 /** Exhaustiveness guard for `switch` over closed unions. */
 export function assertNever(value: never, where: string): never {
   throw new InvariantViolationError(`Unhandled variant in ${where}`, { context: { value } });
