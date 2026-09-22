@@ -39,9 +39,28 @@ export function ceilingFor(unguarded: boolean): number {
   return unguarded ? 0.5 : 1;
 }
 
+const CEILING_GUARDED = 1;
+
 /** Clamp T into [0,1] (the hint's contract) and to 6 decimals. */
 function clampTrust(value: number): number {
   return round6(value < 0 ? 0 : value > 1 ? 1 : value);
+}
+
+/**
+ * The pure, cell-by-cell composition step of §5, model §7:
+ *     T = min( ceiling, L · G · R · D ),  clamped to [0,1] and to 6 decimals.
+ * Exposed so the composition itself — the model §7 worked example included — is unit-testable
+ * without contorting a real evidence/guard/anchor profile.
+ */
+export function composeTrust(
+  l: number,
+  g: number,
+  r: number,
+  d: number,
+  ceiling: number = CEILING_GUARDED,
+): number {
+  const raw = l * g * r * d;
+  return clampTrust(raw > ceiling ? ceiling : raw);
 }
 
 /**
@@ -74,9 +93,7 @@ export function computeTrust(
   // Unguarded entities get neutral durability (nothing was ever checked, §4.3 invariant).
   const durability = unguarded ? 1 : durabilityFromAnchors(anchors, lastUsedAt);
 
-  let raw = wilsonValue * guardValue * recency * durability;
-  if (!unguarded && raw > ceiling) raw = ceiling;
-  let trust = clampTrust(raw);
+  let trust = composeTrust(wilsonValue, guardValue, recency, durability, ceiling);
   // Unguarded entities must never reach 0.50 — they stay strictly under the cap even when radical
   // rounding would push them onto it, so they can never be confused with a guarded half-cap.
   if (unguarded && trust >= ceiling) trust = round6(ceiling - 1e-6);

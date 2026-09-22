@@ -4,6 +4,7 @@ import { emaStep } from '../ema.ts';
 import { type EntityState, freshState } from '../entity.ts';
 import { InvariantViolationError, UnknownKindError, UnknownSignalError } from '../errors.ts';
 import { applySignal, reportGuard, weekAnchor } from '../fold.ts';
+import { guardFactor } from '../guard.ts';
 import { buildHint } from '../hint.ts';
 import { KindRegistry } from '../kinds.ts';
 import { recencyDecay } from '../recency.ts';
@@ -17,7 +18,7 @@ import {
   validateSignalSpec,
 } from '../signals.ts';
 import { DEFAULT_THETA0, RETIRED_TRUST_THRESHOLD } from '../thresholds.ts';
-import { computeTrust, statusFor, trustOf } from '../trust.ts';
+import { composeTrust, computeTrust, statusFor, trustOf } from '../trust.ts';
 import { wilsonLowerBound } from '../wilson.ts';
 
 const START = 1_700_000_000_000;
@@ -85,6 +86,29 @@ describe('unguarded entities — invariant IV', () => {
     }
   });
 
+  test('guard multiplier table reproduces the model §4.1', () => {
+    // 1.0 passed, 0.8 declared-but-unevaluated, 0.5 none, 0.0 failed.
+    expect(guardFactor({ kind: 'ci', lastOk: true, lastOkAt: START })).toBe(1);
+    expect(guardFactor({ kind: 'ci', lastOk: null, lastOkAt: null })).toBe(0.8);
+    expect(guardFactor({ kind: 'none', lastOk: null, lastOkAt: null })).toBe(0.5);
+    expect(guardFactor({ kind: 'ci', lastOk: false, lastOkAt: START })).toBe(0);
+  });
+
+  test('recency half-life is the model §4.2 45 days and floor 0.30', () => {
+    const half = 45 * 24 * 60 * 60 * 1000;
+    expect(recencyDecay(START, START + half)).toBeCloseTo(0.5, 6);
+    expect(recencyDecay(START, START + 400 * half)).toBeCloseTo(0.3, 6);
+  });
+
+  test('durability formula reproduces the model §4.3 for 0,1,2,3 heads', () => {
+    // D(h) = min(1.5, 1 + 0.15·ln(1+h))
+    expect(durabilityFactor(0)).toBeCloseTo(1, 6);
+    expect(durabilityFactor(1)).toBeCloseTo(1 + 0.15 * Math.log(2), 6);
+    expect(durabilityFactor(2)).toBeCloseTo(1 + 0.15 * Math.log(3), 6);
+    expect(durabilityFactor(3)).toBeCloseTo(1 + 0.15 * Math.log(4), 6);
+    expect(durabilityFactor(100)).toBeLessThanOrEqual(1.5);
+  });
+
   test('guard failure zeroes trust and quarantines', () => {
     const t = computeTrust(
       { k: 50, n: 50, contextRejects: 0 },
@@ -99,6 +123,18 @@ describe('unguarded entities — invariant IV', () => {
     state = { ...state, guard: { kind: 'ci', lastOk: false, lastOkAt: START } };
     expect(statusFor(state, START)).toBe('quarantined');
     expect(trustOf(state, START).trust).toBe(0);
+  });
+
+  test('composition reproduces the model §7 worked example', () => {
+    // T = min(C, L·G·R·D) = min(1, 0.78·1.0·0.95·1.10) = 0.8151, printed 0.81 in the model.
+    const t = composeTrust(0.78, 1.0, 0.95, 1.1);
+    expect(t).toBeCloseTo(0.8151, 4);
+    expect(t).toBeGreaterThan(0.6);
+  });
+
+  test('composition respects the unguarded ceiling', () => {
+    expect(composeTrust(0.99, 0.5, 1, 1, 0.5)).toBeCloseTo(0.495, 6);
+    expect(composeTrust(0.99, 0.5, 1, 1, 0.5)).toBeLessThan(0.5);
   });
 });
 
