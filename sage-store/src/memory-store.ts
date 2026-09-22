@@ -121,9 +121,11 @@ export class MemoryStore implements StorePort {
 
   async list(): Promise<EntityState[]> {
     this.assertOpen('list');
-    return [...this.projection.values()].sort((a, b) =>
-      entityKeyString(a.key) < entityKeyString(b.key) ? -1 : 1,
-    );
+    // Key-string order matches foldLog (the rebuilt index) so both stay byte-identical.
+    // The projection is already keyed by entityKeyString, so sort the pairs directly.
+    const entries = [...this.projection.entries()];
+    entries.sort(([ka], [kb]) => (ka < kb ? -1 : 1));
+    return entries.map(([, state]) => state);
   }
 
   async rebuild(): Promise<EntityState[]> {

@@ -1,8 +1,7 @@
 import { driftDelta, isDrifting } from './ema.ts';
 import type { EntityKey, EntityState, LifecycleStatus } from './entity.ts';
 import { ACTIVE_THRESHOLD, TRUSTED_THRESHOLD } from './thresholds.ts';
-import { statusFor, type TrustComponents, trustOf } from './trust.ts';
-import { wilsonLowerBound } from './wilson.ts';
+import { statusFrom, type TrustComponents, trustOf } from './trust.ts';
 
 /**
  * The read-plane record for one entity, library spec §5.4.
@@ -35,10 +34,10 @@ export interface EvidentialHint {
   };
 }
 
-/** Build a hint from a state and `now`. Pure; no I/O. */
+/** Build a hint from a state and `now`. Pure; no I/O. Single trust computation per hint. */
 export function buildHint(state: EntityState, now: number): EvidentialHint {
   const result = trustOf(state, now);
-  const status = statusFor(state, now);
+  const status = statusFrom(state, result);
   return {
     key: state.key,
     asOf: now,
@@ -47,7 +46,7 @@ export function buildHint(state: EntityState, now: number): EvidentialHint {
     evidence: {
       successes: state.evidence.k,
       totalTrials: state.evidence.n,
-      lowerBound: wilsonLowerBound(state.evidence.k, state.evidence.n),
+      lowerBound: result.components.wilson,
     },
     temporal: {
       emaWeight: state.ema.mu,

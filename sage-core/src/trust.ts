@@ -135,18 +135,10 @@ export function trustOf(state: EntityState, now: number): TrustResult {
 }
 
 /**
- * The status the numbers justify, independent of the stored one. Model §5.1 transitions:
- * probation → active → trusted; exits: quarantine (G=0 or drift) and retire (T < 0.10).
- * Drift is a pure function of the EMA state, so it belongs in the kernel: an entity whose
- * learned weight has moved ≥ 0.40 away from its author baseline cannot be trusted.
+ * The status the trust level justifies, independent of the stored one (the trust is already
+ * computed — `statusFor` and the hint builder share this tail to avoid double work).
  */
-export function statusFor(state: EntityState, now: number): LifecycleStatus {
-  if (state.status === 'retired') return 'retired';
-  if (guardFailed(state.guard)) return 'quarantined';
-  if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) return 'quarantined';
-
-  const trust = trustOf(state, now);
-
+export function statusForTrust(state: EntityState, trust: TrustResult): LifecycleStatus {
   // T < 0.10 retires an entity that had evidence — it has outlived its usefulness.
   if (trust.trust < 0.1 && state.evidence.n > 0) return 'retired';
 
@@ -157,4 +149,30 @@ export function statusFor(state: EntityState, now: number): LifecycleStatus {
 
   if (trust.trust >= 0.25) return 'active';
   return 'probation';
+}
+
+/**
+ * The status the numbers justify, independent of the stored one. Model §5.1 transitions:
+ * probation → active → trusted; exits: quarantine (G=0 or drift) and retire (T < 0.10).
+ * Drift is a pure function of the EMA state, so it belongs in the kernel: an entity whose
+ * learned weight has moved ≥ 0.40 away from its author baseline cannot be trusted.
+ *
+ * `trust` is already computed by the caller (statusFor here, the hint builder when it holds the
+ * same TrustResult) — this is the single-pass core shared by both, so a batch never pays for the
+ * trust twice.
+ */
+export function statusFrom(state: EntityState, trust: TrustResult): LifecycleStatus {
+  // Explicit lifecycle overrides are terminal until restored — the host decided, numbers don't
+  // overrule it (a stored retire also stays put for states built before overrides were tracked).
+  if (state.override === 'retired') return 'retired';
+  if (state.override === 'quarantined') return 'quarantined';
+  if (state.status === 'retired') return 'retired';
+  if (guardFailed(state.guard)) return 'quarantined';
+  if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) return 'quarantined';
+  return statusForTrust(state, trust);
+}
+
+/** The status the numbers justify, independent of the stored one. */
+export function statusFor(state: EntityState, now: number): LifecycleStatus {
+  return statusFrom(state, trustOf(state, now));
 }

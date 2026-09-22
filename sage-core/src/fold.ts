@@ -1,7 +1,7 @@
 import type { Anchor } from './durability.ts';
 import { weekEpoch } from './durability.ts';
 import { emaStep } from './ema.ts';
-import type { EntityState, LifecycleStatus } from './entity.ts';
+import type { EntityState, LifecycleStatus, Override } from './entity.ts';
 import { InvalidArgumentError } from './errors.ts';
 import type { GuardState } from './guard.ts';
 import type { SignalSpec } from './signals.ts';
@@ -115,22 +115,26 @@ export function reportGuard(
 }
 
 /** A lifecycle override from the host (retire/quarantine/restore). */
-export type Override = Extract<LifecycleStatus, 'retired' | 'quarantined'> | 'restore';
+export type { Override } from './entity.ts';
 
 export function overrideStatus(state: EntityState, override: Override): FoldResult {
   let status: LifecycleStatus;
+  let activeOverride: Override | null;
   switch (override) {
     case 'retired':
       status = 'retired';
+      activeOverride = 'retired';
       break;
     case 'quarantined':
       status = 'quarantined';
+      activeOverride = 'quarantined';
       break;
     case 'restore':
       status = 'probation';
+      activeOverride = null;
       break;
     default:
       throw new InvalidArgumentError('override', "'retired' | 'quarantined' | 'restore'", override);
   }
-  return { state: { ...state, status }, status };
+  return { state: { ...state, status, override: activeOverride }, status };
 }

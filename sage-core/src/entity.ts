@@ -43,6 +43,9 @@ export interface EmaState {
 /** Five lifecycle states from the model §5.1. */
 export type LifecycleStatus = 'probation' | 'active' | 'trusted' | 'quarantined' | 'retired';
 
+/** A lifecycle override from the host (retire/quarantine/restore); `null` = none. */
+export type Override = 'retired' | 'quarantined' | 'restore';
+
 /** `updater` names a weight-updater strategy; 'ema' is the kernel default. */
 export type UpdaterName = string;
 
@@ -54,6 +57,8 @@ export interface EntityState {
   /** Distinct anchor values seen on successful uses, per anchor kind. */
   readonly anchors: readonly Anchor[];
   readonly status: LifecycleStatus;
+  /** The last lifecycle override; persists until an explicit `restore`. */
+  readonly override: Override | null;
   readonly updater: UpdaterName;
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
@@ -83,6 +88,7 @@ export function freshState(
     guard: init.guard ?? newGuard('none'),
     anchors: [],
     status: 'probation',
+    override: null,
     updater: init.updater ?? 'ema',
     createdAt: at,
     lastSignalAt: null,

@@ -12,6 +12,7 @@ import {
 import type { KindRegistry } from './kinds.ts';
 import type { SignalRegistry, SignalSpec } from './signals.ts';
 import { validateSignalSpec } from './signals.ts';
+import { statusFor } from './trust.ts';
 
 /**
  * Episodes, library spec §3 and §7.1.
@@ -44,6 +45,19 @@ export interface SignalEpisode extends BaseEpisode {
   readonly ensure: boolean;
   /** Optional run / session attribution for the read plane. */
   readonly runRef?: string;
+  /** Free-form note from the write plane (e.g. host justification); the fold ignores it. */
+  readonly note?: string;
+  /**
+   * The weight-updater that produced `weight`, when the write plane used one. Self-describing:
+   * the fold needs no registry to apply the episode.
+   */
+  readonly updater?: string;
+  /**
+   * Post-fold `ema.mu` computed by the configured weight-updater. When present the fold uses this
+   * instead of re-deriving the EMA step, so non-EMA strategies (wilson, sliding-window,
+   * asymmetric) are real without ever breaking fold-equivalence.
+   */
+  readonly weight?: number;
 }
 
 export interface GuardEpisode extends BaseEpisode {
@@ -141,6 +155,27 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
           );
         }
       }
+      if (
+        input.updater !== undefined &&
+        (typeof input.updater !== 'string' || input.updater.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.updater', 'a non-empty string', input.updater);
+      }
+      if (
+        input.weight !== undefined &&
+        (typeof input.weight !== 'number' ||
+          !Number.isFinite(input.weight) ||
+          input.weight < 0 ||
+          input.weight > 1)
+      ) {
+        throw new InvalidArgumentError('episode.weight', 'a finite number in [0,1]', input.weight);
+      }
+      if (
+        input.note !== undefined &&
+        (typeof input.note !== 'string' || input.note.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.note', 'a non-empty string', input.note);
+      }
       break;
     }
     case 'guard':
@@ -209,7 +244,16 @@ export function foldEpisode(
         episode.anchors === undefined
           ? { spec: episode.spec }
           : { spec: episode.spec, anchors: episode.anchors };
-      return applySignal(prev, applied, { now: episode.at }).state;
+      const base = applySignal(prev, applied, { now: episode.at }).state;
+      if (episode.weight === undefined) return base;
+      // Self-describing weight-updater result: the episode carries the mu the configured strategy
+      // produced, and the fold re-derives status from it — determinism, no registry in the way.
+      const withWeight: EntityState = {
+        ...base,
+        ema: { mu: episode.weight, theta0: prev.ema.theta0, updatedAt: episode.at },
+      };
+      const status = statusFor(withWeight, episode.at);
+      return { ...withWeight, status };
     }
     case 'guard': {
       if (prev === undefined) {

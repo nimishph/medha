@@ -10,6 +10,7 @@ export * from './hint.ts';
 export * from './kinds.ts';
 export * from './limits.ts';
 export * from './recency.ts';
+export * from './rng.ts';
 export * from './rounding.ts';
 export * from './signals.ts';
 export * from './store-port.ts';
