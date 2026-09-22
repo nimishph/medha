@@ -6,6 +6,7 @@ import {
   type Episode,
   type EpisodeInput,
   entityKeyString,
+  episodeToInput,
   foldEpisode,
   foldLog,
   InvalidArgumentError,
@@ -13,6 +14,7 @@ import {
   type StorePort,
   type StoreRegistries,
   validateEpisodeInput,
+  validateLog,
 } from '@sutras/sage-core';
 import { CorruptStoreError, StoreClosedError } from './errors.ts';
 import { kindRegistryFor, resolveRegistries, signalRegistryFor } from './registries.ts';
@@ -44,6 +46,7 @@ export class MemoryStore implements StorePort {
   private opened = false;
   private loaded = false;
   private corruptAt: number | null = null;
+  private readonly meta = new Map<string, string>();
   private readonly baseRegistries: StoreRegistries;
   constructor(options: MemoryStoreOptions = {}) {
     this.initialEpisodes = options.initialEpisodes ?? [];
@@ -133,6 +136,37 @@ export class MemoryStore implements StorePort {
     return foldLog(this.log);
   }
 
+  async replaceLog(
+    episodes: readonly Episode[],
+  ): Promise<{ readonly from: number; readonly to: number }> {
+    this.assertOpen('replaceLog');
+    if (this.corruptAt !== null) {
+      throw new CorruptStoreError(
+        { source: '', atSeq: this.corruptAt },
+        `Cannot replace the log of a corrupt store: unrecoverable from seq ${this.corruptAt}`,
+      );
+    }
+    const kinds = kindRegistryFor(this.baseRegistries.kinds);
+    const signals = signalRegistryFor(this.baseRegistries.signalSpecs);
+    validateLog(episodes, { kinds, signals });
+    const replaced = { from: 0, to: this.log.length - 1 };
+    this.log = [];
+    this.projection.clear();
+    this.nextSeq = 0;
+    for (const episode of episodes) this.accept(episode);
+    return replaced;
+  }
+
+  async getMeta(key: string): Promise<string | undefined> {
+    this.assertOpen('getMeta');
+    return this.meta.get(key);
+  }
+
+  async setMeta(key: string, value: string): Promise<void> {
+    this.assertOpen('setMeta');
+    this.meta.set(key, value);
+  }
+
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
     const key = entityKeyString(episode.key);
@@ -146,9 +180,4 @@ export class MemoryStore implements StorePort {
   private assertOpen(operation: string): void {
     if (!this.opened) throw new StoreClosedError(operation);
   }
-}
-
-function episodeToInput(episode: Episode): EpisodeInput {
-  const { seq: _seq, ...rest } = episode;
-  return rest as EpisodeInput;
 }

@@ -59,6 +59,16 @@ export interface EntityState {
   readonly status: LifecycleStatus;
   /** The last lifecycle override; persists until an explicit `restore`. */
   readonly override: Override | null;
+  /**
+   * When the entity was (last) retired, epoch ms. Papered on the state so retention survives
+   * compaction (a baseline reproduces it); `null` when never retired or since restored.
+   */
+  readonly retiredAt: number | null;
+  /**
+   * When a human last restored it, epoch ms. The session-start sweep never re-retires an entity
+   * that has had no evidence since its restore (§8 exception); stamped by the fold.
+   */
+  readonly restoredAt: number | null;
   readonly updater: UpdaterName;
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
@@ -89,6 +99,8 @@ export function freshState(
     anchors: [],
     status: 'probation',
     override: null,
+    retiredAt: null,
+    restoredAt: null,
     updater: init.updater ?? 'ema',
     createdAt: at,
     lastSignalAt: null,

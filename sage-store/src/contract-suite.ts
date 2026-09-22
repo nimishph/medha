@@ -1,13 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import type { EntityKey, Episode, EpisodeInput, SignalSpec, StorePort } from '@sutras/sage-core';
-import { APPLY, REJECT_CONTEXT, REJECT_RULE, SageError, UnknownKindError } from '@sutras/sage-core';
+import type {
+  EntityKey,
+  EntityState,
+  Episode,
+  EpisodeInput,
+  SignalSpec,
+  StorePort,
+} from '@sutras/sage-core';
+import {
+  APPLY,
+  foldLog,
+  REJECT_CONTEXT,
+  REJECT_RULE,
+  SageError,
+  UnknownKindError,
+} from '@sutras/sage-core';
 import { CorruptStoreError, StoreClosedError } from './errors.ts';
 
 /**
- * The one StorePort contract suite (spec §7.1). Every backend (memory now; file and SQLite later)
- * runs this exact suite with no per-backend branch. The suite owns the shared vocabulary — the
- * same key, the same host-registered kind and signal — so backends are compared on identical
- * episodes, and a backend that passes here is interchangeable with the others.
+ * The one StorePort contract suite (spec §7.1). Every backend (memory, file, SQLite) runs this exact
+ * suite with no per-backend branch. The suite owns the shared vocabulary — the same key, the same
+ * host-registered kind and signal — so backends are compared on identical episodes, and a backend
+ * that passes here is interchangeable with the others.
  */
 
 export interface StoreContractSetup {
@@ -192,6 +206,9 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       await expect(store.episodes()).rejects.toThrow(StoreClosedError);
       await expect(store.rebuild()).rejects.toThrow(StoreClosedError);
       await expect(store.append(applyAt(KEY, NOW))).rejects.toThrow(StoreClosedError);
+      await expect(store.getMeta('sweep:lastRun')).rejects.toThrow(StoreClosedError);
+      await expect(store.setMeta('sweep:lastRun', '1')).rejects.toThrow(StoreClosedError);
+      await expect(store.replaceLog([])).rejects.toThrow(StoreClosedError);
     });
 
     test('close ends the session: everything refuses again and reopen sees the fold', async () => {
@@ -261,6 +278,108 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       }
     });
   });
+
+  describe('store contract — replaceLog & meta (§8.4)', () => {
+    test('meta round-trips and persists across reopen; missing keys read undefined', async () => {
+      const store = await setup.create();
+      await store.open();
+      expect(await store.getMeta('sweep:lastRun')).toBeUndefined();
+      await store.setMeta('sweep:lastRun', '123');
+      expect(await store.getMeta('sweep:lastRun')).toBe('123');
+      await store.close();
+      const reopened = await store.open();
+      expect(reopened.status).toBe('ok');
+      expect(await store.getMeta('sweep:lastRun')).toBe('123');
+    });
+
+    test('replaceLog is atomic and idempotent for an unchanged log', async () => {
+      const store = await setup.create();
+      await store.open();
+      await store.append(applyAt(KEY, NOW));
+      await store.append(rejectAt(KEY, NOW + 1));
+      const before = await store.list();
+      const log = await store.episodes();
+      const result = await store.replaceLog(log);
+      expect(result.from).toBe(0);
+      expect(result.to).toBe(1);
+      expect(await store.list()).toEqual(before);
+      expect(await store.episodes()).toEqual(log);
+    });
+
+    test('a fold-equivalent compacted log replaces the log without moving the projection', async () => {
+      const store = await setup.create();
+      await store.open();
+      await store.append(applyAt(KEY, NOW));
+      await store.append(applyAt(KEY, NOW + 1));
+      await store.append(rejectAt(KEY, NOW + 2));
+      await store.append(applyAt(KEY, NOW + 3));
+      const before = await store.rebuild();
+      const log = await store.episodes();
+
+      // Compact everything but the last apply into one baseline; the suffix keeps the newest signal.
+      const prefix = log.slice(0, log.length - 1);
+      const baseline = foldLog(prefix)[0];
+      const compacted = compactIntoBaseline(KEY, prefix, baseline, log.slice(log.length - 1));
+      expect(baseline).toBeDefined();
+      expect(compacted.length).toBe(2);
+
+      await store.replaceLog(compacted);
+      const after = await store.rebuild();
+      expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+      expect(await store.list()).toEqual(after);
+      expect(await store.episodes()).toHaveLength(compacted.length);
+      const last = await store.episodes();
+      expect(last[last.length - 1]).toMatchObject({ type: 'signal' });
+    });
+
+    test('replaceLog refuses a non-contiguous log and leaves the store unchanged', async () => {
+      const store = await setup.create();
+      await store.open();
+      await store.append(applyAt(KEY, NOW));
+      await store.append(rejectAt(KEY, NOW + 1));
+      const before = await store.episodes();
+      const bad = (await store.episodes()).map((e) =>
+        e.seq === 1 ? { ...e, seq: 5 } : e,
+      ) as Episode[];
+      let failure: unknown;
+      try {
+        await store.replaceLog(bad);
+      } catch (thrown) {
+        failure = thrown;
+      }
+      expect(SageError.is(failure)).toBe(true);
+      expect(await store.episodes()).toEqual(before);
+    });
+
+    test('replaceLog refuses on a corrupt store, like every other write', async () => {
+      const store = await setup.createCorrupt();
+      await store.open();
+      await expect(store.replaceLog([])).rejects.toThrow(CorruptStoreError);
+    });
+  });
+}
+
+/** Turn a compacted prefix + retained suffix into a contiguous, validated log starting at seq 0.
+ *  A prefix that folds to `undefined` (purged) is dropped; fold-equivalence still holds. */
+function compactIntoBaseline(
+  key: EntityKey,
+  prefix: readonly Episode[],
+  foldedState: EntityState | undefined,
+  suffix: readonly Episode[],
+): Episode[] {
+  const baseline: Episode[] =
+    foldedState === undefined
+      ? []
+      : [
+          {
+            type: 'baseline',
+            seq: 0,
+            key,
+            at: prefix[prefix.length - 1]?.at ?? 0,
+            state: foldedState,
+          },
+        ];
+  return [...baseline, ...suffix.map((episode, i) => ({ ...episode, seq: i + baseline.length }))];
 }
 
 const rebuildablePrefix: (log: readonly Episode[]) => boolean = (log) => {

@@ -61,4 +61,13 @@ export type StorePort = {
   list(): Promise<EntityState[]>;
   /** Rebuild every entity state by folding the whole log. */
   rebuild(): Promise<EntityState[]>;
+  /**
+   * Atomically replace the whole log with a validated, contiguous one (compaction, restore).
+   * Returns the seq range that was replaced. Fold-equivalent input leaves the projection unchanged.
+   */
+  replaceLog(episodes: readonly Episode[]): Promise<{ readonly from: number; readonly to: number }>;
+  /** Read a backend meta value (e.g. the last-sweep marker); `undefined` when absent. */
+  getMeta(key: string): Promise<string | undefined>;
+  /** Persist a backend meta value. Keys are opaque; values are strings. */
+  setMeta(key: string, value: string): Promise<void>;
 }>;

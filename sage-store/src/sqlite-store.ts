@@ -9,6 +9,7 @@ import {
   type Episode,
   type EpisodeInput,
   entityKeyString,
+  episodeToInput,
   foldEpisode,
   foldLog,
   InvalidArgumentError,
@@ -16,6 +17,7 @@ import {
   type StorePort,
   type StoreRegistries,
   validateEpisodeInput,
+  validateLog,
 } from '@sutras/sage-core';
 import { CorruptStoreError, StoreClosedError, StoreLayoutError } from './errors.ts';
 import { kindRegistryFor, resolveRegistries, signalRegistryFor } from './registries.ts';
@@ -69,18 +71,20 @@ export class SQLiteStore implements StorePort {
 
   async open(): Promise<OpenResult> {
     this.opened = true;
+    // Every open re-establishes the connection (close() releases it); the ingestion loop below
+    // runs once per stored configuration so a reopen never double-folds the log.
+    mkdirSync(dirname(this.path), { recursive: true });
+    const db = new Database(this.path, { create: true });
+    this.db = db;
+    db.run('PRAGMA journal_mode = WAL');
+    db.run('PRAGMA synchronous = FULL');
+    db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    db.run('CREATE TABLE IF NOT EXISTS episodes (seq INTEGER PRIMARY KEY, json TEXT NOT NULL)');
+
     if (!this.loaded) {
       this.loaded = true;
-      mkdirSync(dirname(this.path), { recursive: true });
-      const db = new Database(this.path, { create: true });
-      this.db = db;
-      db.run('PRAGMA journal_mode = WAL');
-      db.run('PRAGMA synchronous = FULL');
-      db.run('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-      db.run('CREATE TABLE IF NOT EXISTS episodes (seq INTEGER PRIMARY KEY, json TEXT NOT NULL)');
-
       const layout = this.readMeta(db, 'layout');
-      if (layout === null) {
+      if (layout === undefined) {
         // Layout 0 baseline: an empty database with no meta yet. Migrate by stamping version 1.
         this.writeMeta(db, 'layout', String(CURRENT_LAYOUT_VERSION));
       } else if (Number(layout) > CURRENT_LAYOUT_VERSION) {
@@ -177,6 +181,43 @@ export class SQLiteStore implements StorePort {
     return foldLog(this.log);
   }
 
+  async replaceLog(
+    episodes: readonly Episode[],
+  ): Promise<{ readonly from: number; readonly to: number }> {
+    this.assertOpen('replaceLog');
+    if (this.corruptAt !== null) {
+      throw new CorruptStoreError(
+        { source: this.path, atSeq: this.corruptAt },
+        `Cannot replace the log of a corrupt store: unrecoverable from seq ${this.corruptAt}`,
+      );
+    }
+    const db = this.requireDb();
+    const kinds = kindRegistryFor(this.effective.kinds);
+    const signals = signalRegistryFor(this.effective.signalSpecs);
+    validateLog(episodes, { kinds, signals });
+    const replaced = { from: 0, to: this.log.length - 1 };
+    db.transaction(() => {
+      db.query('DELETE FROM episodes').run();
+      const insert = db.query('INSERT INTO episodes (seq, json) VALUES (?, ?)');
+      for (const episode of episodes) insert.run(episode.seq, JSON.stringify(episode));
+    })();
+    this.log = [];
+    this.projection.clear();
+    this.nextSeq = 0;
+    for (const episode of episodes) this.accept(episode);
+    return replaced;
+  }
+
+  async getMeta(key: string): Promise<string | undefined> {
+    this.assertOpen('getMeta');
+    return this.readMeta(this.requireDb(), key);
+  }
+
+  async setMeta(key: string, value: string): Promise<void> {
+    this.assertOpen('setMeta');
+    this.writeMeta(this.requireDb(), key, value);
+  }
+
   // -------------------------------------------------------------------------
   // internals
   // -------------------------------------------------------------------------
@@ -196,11 +237,11 @@ export class SQLiteStore implements StorePort {
     return this.db;
   }
 
-  private readMeta(db: Database, key: string): string | null {
+  private readMeta(db: Database, key: string): string | undefined {
     const row = db
       .query<{ value: string }, [string]>('SELECT value FROM meta WHERE key = ?')
       .get(key);
-    return row?.value ?? null;
+    return row?.value;
   }
 
   private writeMeta(db: Database, key: string, value: string): void {
@@ -212,9 +253,4 @@ export class SQLiteStore implements StorePort {
   private assertOpen(operation: string): void {
     if (!this.opened) throw new StoreClosedError(operation);
   }
-}
-
-function episodeToInput(episode: Episode): EpisodeInput {
-  const { seq: _seq, ...rest } = episode;
-  return rest as EpisodeInput;
 }

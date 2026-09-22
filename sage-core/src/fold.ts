@@ -138,3 +138,31 @@ export function overrideStatus(state: EntityState, override: Override): FoldResu
   }
   return { state: { ...state, status, override: activeOverride }, status };
 }
+
+/**
+ * Stamp the lifecycle clock the maintenance plane reads (`retiredAt` / `restoredAt`). The fold
+ * emits the stamp whenever a lifecycle episode lands, so the §8 retention and stale rules are a
+ * pure function of the log — and the clock survives compaction, because a baseline reproduces the
+ * folded state it carries.
+ *
+ * A second retirement (e.g. a sweep `archive` of an already-retired entity) keeps the original
+ * clock so retention is never reset by re-stating what the fold already produced.
+ */
+export function stampLifecycle(
+  state: EntityState,
+  override: Override,
+  at: number,
+  before: EntityState,
+): EntityState {
+  switch (override) {
+    case 'retired':
+      if (before.status === 'retired' && before.retiredAt !== null) return state;
+      return { ...state, retiredAt: at, restoredAt: null };
+    case 'quarantined':
+      return state;
+    case 'restore':
+      return { ...state, retiredAt: null, restoredAt: at };
+    default:
+      throw new InvalidArgumentError('override', "'retired' | 'quarantined' | 'restore'", override);
+  }
+}

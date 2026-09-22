@@ -33,9 +33,27 @@ const makeStore = (file: ConstructorParameters<typeof SQLiteStore>[0]): SQLiteSt
   tracked.push(store);
   return store;
 };
-afterAll(() => {
-  for (const store of tracked) void store.close();
-  rmSync(TMP, { recursive: true, force: true });
+// On Windows the file is only actually released after the async DB handles and the SQLite VFS
+// settle, so the temp-dir cleanup retries the unlink for a short while instead of flaking.
+function rmSyncWithRetry(path: string): void {
+  const gate = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt >= 9) throw error;
+      Atomics.wait(gate, 0, 0, 100);
+    }
+  }
+}
+
+afterAll(async () => {
+  await Promise.all(tracked.map((store) => store.close()));
+  // bun:sqlite only releases the connection once its query/statement handles are collected; on
+  // Windows the file stays locked until then, so force a GC before unlinking the temp directory.
+  Bun.gc(true);
+  rmSyncWithRetry(TMP);
 });
 
 const setup: StoreContractSetup = {

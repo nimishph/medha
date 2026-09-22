@@ -19,6 +19,7 @@ import {
   type Episode,
   type EpisodeInput,
   entityKeyString,
+  episodeToInput,
   foldEpisode,
   foldLog,
   InvalidArgumentError,
@@ -26,6 +27,7 @@ import {
   type StorePort,
   type StoreRegistries,
   validateEpisodeInput,
+  validateLog,
 } from '@sutras/sage-core';
 import { CorruptStoreError, StoreClosedError, StoreLayoutError } from './errors.ts';
 import { kindRegistryFor, resolveRegistries, signalRegistryFor } from './registries.ts';
@@ -55,6 +57,8 @@ export interface StoreDocumentV1 {
   /** The effective registries this store validates episodes against. */
   readonly registries: StoreRegistries;
   readonly episodes: readonly Episode[];
+  /** Backend meta (e.g. the last-sweep marker). Additive, optional in layout 1. */
+  readonly meta?: Record<string, string>;
 }
 
 /** Layout 0 (baseline): a bare `{ episodes }` document with no version or registries meta. */
@@ -86,6 +90,7 @@ export class FilePolicyStore implements StorePort {
   private opened = false;
   private loaded = false;
   private corruptAt: number | null = null;
+  private readonly meta = new Map<string, string>();
 
   constructor(options: FilePolicyStoreOptions) {
     this.dir = options.dir;
@@ -140,6 +145,10 @@ export class FilePolicyStore implements StorePort {
       }
 
       const migrated = this.migrateToV1(doc);
+      this.meta.clear();
+      for (const [metaKey, metaValue] of Object.entries(migrated.meta ?? {})) {
+        this.meta.set(metaKey, metaValue);
+      }
       const corrupted = main === null; // main unreadable → the backup is the last good snapshot.
       this.corruptAt = this.foldDocument(migrated, corrupted);
       return this.corruptAt === null
@@ -170,6 +179,39 @@ export class FilePolicyStore implements StorePort {
     const state = this.accept(episode);
     this.persist();
     return { episode, state };
+  }
+
+  async replaceLog(
+    episodes: readonly Episode[],
+  ): Promise<{ readonly from: number; readonly to: number }> {
+    this.assertOpen('replaceLog');
+    if (this.corruptAt !== null) {
+      throw new CorruptStoreError(
+        { source: this.documentPath, atSeq: this.corruptAt },
+        `Cannot replace the log of a corrupt store: unrecoverable from seq ${this.corruptAt}`,
+      );
+    }
+    const kinds = kindRegistryFor(this.effective.kinds);
+    const signals = signalRegistryFor(this.effective.signalSpecs);
+    validateLog(episodes, { kinds, signals });
+    const replaced = { from: 0, to: this.log.length - 1 };
+    this.log = [];
+    this.projection.clear();
+    this.nextSeq = 0;
+    for (const episode of episodes) this.accept(episode);
+    this.persist();
+    return replaced;
+  }
+
+  async getMeta(key: string): Promise<string | undefined> {
+    this.assertOpen('getMeta');
+    return this.meta.get(key);
+  }
+
+  async setMeta(key: string, value: string): Promise<void> {
+    this.assertOpen('setMeta');
+    this.meta.set(key, value);
+    this.persist();
   }
 
   async episodes(afterSeq?: number, limit?: number): Promise<Episode[]> {
@@ -263,10 +305,12 @@ export class FilePolicyStore implements StorePort {
 
   /** Atomic commit: temp → fsync → roll prior doc into .bak → rename. Crash-safe at every point. */
   private persist(): void {
+    const meta = this.meta.size === 0 ? {} : Object.fromEntries([...this.meta.entries()]);
     const doc: StoreDocumentV1 = {
       layoutVersion: 1,
       registries: this.effective,
       episodes: this.log,
+      ...(Object.keys(meta).length === 0 ? {} : { meta }),
     };
     const tmp = `${this.documentPath}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(doc, null, 2)}\n`, 'utf8');
@@ -292,11 +336,6 @@ function isDocumentShape(parsed: unknown): parsed is StoreDocument {
   }
   // Layout 0: a bare episodes array.
   return Array.isArray(candidate.episodes);
-}
-
-function episodeToInput(episode: Episode): EpisodeInput {
-  const { seq: _seq, ...rest } = episode;
-  return rest as EpisodeInput;
 }
 
 function fsyncFile(path: string): void {

@@ -8,6 +8,7 @@ import {
   overrideStatus,
   reportGuard,
   type SignalApplication,
+  stampLifecycle,
 } from './fold.ts';
 import type { KindRegistry } from './kinds.ts';
 import type { SignalRegistry, SignalSpec } from './signals.ts';
@@ -91,12 +92,24 @@ export interface SweepEpisode extends BaseEpisode {
   readonly reason: string;
 }
 
+/**
+ * A compaction checkpoint (§8): the folded entity state as of the last episode of the compacted
+ * prefix. Compaction replaces an entity's pre-cutoff episodes with one baseline that reproduces the
+ * same fold, so the log shrinks without the state ever changing (fold-equivalence is structural).
+ */
+export interface BaselineEpisode extends BaseEpisode {
+  readonly type: 'baseline';
+  /** The folded state as of `at`; its `key` must equal the episode's key. */
+  readonly state: EntityState;
+}
+
 export type Episode =
   | SignalEpisode
   | GuardEpisode
   | OverrideEpisode
   | ProposalEpisode
-  | SweepEpisode;
+  | SweepEpisode
+  | BaselineEpisode;
 
 /** An episode the host submits: everything but the store-assigned `seq`. */
 export type EpisodeInput =
@@ -104,7 +117,8 @@ export type EpisodeInput =
   | Omit<GuardEpisode, 'seq'>
   | Omit<OverrideEpisode, 'seq'>
   | Omit<ProposalEpisode, 'seq'>
-  | Omit<SweepEpisode, 'seq'>;
+  | Omit<SweepEpisode, 'seq'>
+  | Omit<BaselineEpisode, 'seq'>;
 
 /** Deterministic map key for an entity. The separator is NUL (illegal in ids). */
 export function entityKeyString(key: EntityKey): string {
@@ -202,8 +216,46 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
         throw new InvalidArgumentError('episode.reason', 'a non-empty string', input.reason);
       }
       break;
+    case 'baseline':
+      // The checkpoint must describe the key it carries, or the fold would be ambiguous.
+      if (entityKeyString(input.state.key) !== entityKeyString(input.key)) {
+        throw new InvalidArgumentError(
+          'episode.state.key',
+          `to equal the episode key (${entityKeyString(input.key)})`,
+          input.state.key,
+        );
+      }
+      if (typeof input.state.evidence?.n !== 'number' || input.state.evidence.n < 0) {
+        throw new InvalidArgumentError(
+          'episode.state.evidence',
+          'a well-formed Evidence',
+          input.state.evidence,
+        );
+      }
+      break;
     default:
       assertNever(input, 'episode input type');
+  }
+}
+
+/**
+ * Validate a whole log before it replaces the store's (compaction / restore): seqs must be exactly
+ * contiguous from 0 and every episode must validate. Throws the typed error naming the first break.
+ */
+export function validateLog(episodes: readonly Episode[], validation: EpisodeValidation): void {
+  for (let i = 0; i < episodes.length; i++) {
+    const episode = episodes[i];
+    if (episode === undefined) {
+      throw new InvalidArgumentError('episodes', `a dense log; missing seq ${i}`, i);
+    }
+    if (episode.seq !== i) {
+      throw new InvalidArgumentError(
+        'episodes[].seq',
+        `contiguous from 0 (expected ${i})`,
+        episode.seq,
+      );
+    }
+    validateEpisodeInput(episodeToInput(episode), validation);
   }
 }
 
@@ -220,9 +272,17 @@ export function assignSeq(input: EpisodeInput, seq: number): Episode {
       return { ...input, seq };
     case 'sweep':
       return { ...input, seq };
+    case 'baseline':
+      return { ...input, seq };
     default:
       return assertNever(input, 'episode input type');
   }
+}
+
+/** Strip the store-assigned `seq`, yielding the episode as it entered the log (for validation). */
+export function episodeToInput(episode: Episode): EpisodeInput {
+  const { seq: _seq, ...rest } = episode;
+  return rest as EpisodeInput;
 }
 
 /**
@@ -266,7 +326,12 @@ export function foldEpisode(
     }
     case 'override': {
       if (prev === undefined) return undefined;
-      return overrideStatus(prev, episode.override).state;
+      return stampLifecycle(
+        overrideStatus(prev, episode.override).state,
+        episode.override,
+        episode.at,
+        prev,
+      );
     }
     case 'proposal': {
       if (prev !== undefined) return prev;
@@ -278,17 +343,27 @@ export function foldEpisode(
       if (prev === undefined) return undefined;
       switch (episode.action) {
         case 'quarantine':
-          return overrideStatus(prev, 'quarantined').state;
+          return stampLifecycle(
+            overrideStatus(prev, 'quarantined').state,
+            'quarantined',
+            episode.at,
+            prev,
+          );
         case 'retire':
         case 'archive':
-          return overrideStatus(prev, 'retired').state;
+          return stampLifecycle(overrideStatus(prev, 'retired').state, 'retired', episode.at, prev);
         case 'restore':
-          return overrideStatus(prev, 'restore').state;
+          return stampLifecycle(overrideStatus(prev, 'restore').state, 'restore', episode.at, prev);
         case 'purge':
           return undefined;
         default:
           return assertNever(episode.action, 'sweep action');
       }
+    }
+    case 'baseline': {
+      // The checkpoint reproduces the folded prefix: apply as-is, re-derive the status at its
+      // clock so recency/trust stay live — determinism is structural, not cached.
+      return { ...episode.state, status: statusFor({ ...episode.state }, episode.at) };
     }
     default:
       return assertNever(episode, 'episode type');

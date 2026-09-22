@@ -13,6 +13,8 @@ import {
   type Anchor,
   buildHint,
   type Context,
+  type CorruptLocation,
+  DAY_MS,
   type EntityKey,
   type EntityState,
   type Episode,
@@ -22,9 +24,11 @@ import {
   foldEpisode,
   freshState,
   InvalidArgumentError,
+  InvariantViolationError,
   KindRegistry,
   type LifecycleStatus,
   mulberry32,
+  type OpenResult,
   type Page,
   type PageRequest,
   paginate,
@@ -37,6 +41,26 @@ import {
   validateSignalSpec,
   wilsonWidth,
 } from '@sutras/sage-core';
+import { CorruptStoreError } from '@sutras/sage-store';
+import {
+  type CompactionReport,
+  compactPrefix,
+  DEFAULT_FOLD_DAYS,
+  DEFAULT_RETENTION_DAYS,
+  DEFAULT_SWEEP_INTERVAL_MS,
+  LAST_SWEEP_META_KEY,
+  type PreflightReport,
+  planSweep,
+  resolveSweepOption,
+  type SageSnapshot,
+  type SessionOpenResult,
+  SNAPSHOT_FORMAT,
+  type SweepActionKind,
+  type SweepChange,
+  type SweepOptions,
+  type SweepReport,
+  statesEquivalent,
+} from './maintenance.ts';
 import { UpdaterRegistry, type WeightUpdateContext } from './updaters.ts';
 
 export interface SageOptions {
@@ -69,7 +93,8 @@ function compareKeyString(a: { readonly key: EntityKey }, b: { readonly key: Ent
 export class Sage {
   readonly store: StorePort;
   readonly updaters: UpdaterRegistry;
-  private openResult: { readonly status: 'ok' | 'corrupt' } | undefined;
+  /** The last `store.open()` result, retained so maintenance can report a corrupt location. */
+  private openResult: OpenResult | undefined;
 
   constructor(options: SageOptions) {
     this.store = options.store;
@@ -80,10 +105,16 @@ export class Sage {
   // plumbing
   // -------------------------------------------------------------------------------------------
 
-  private async ensureOpen(): Promise<void> {
-    if (this.openResult !== undefined) return;
-    const result = await this.store.open();
-    this.openResult = { status: result.status };
+  private async ensureOpen(): Promise<OpenResult> {
+    if (this.openResult === undefined) this.openResult = await this.store.open();
+    return this.openResult;
+  }
+
+  private assertMaintainable(location: CorruptLocation): void {
+    throw new CorruptStoreError(
+      location,
+      `Cannot maintain corrupt store: log is unrecoverable from seq ${location.atSeq}`,
+    );
   }
 
   private kindRegistry(): KindRegistry {
@@ -326,6 +357,273 @@ export class Sage {
         }),
       ),
     ];
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // maintenance plane (§6.4)
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * The session-start sweep (§8). Cheap by design: a last-sweep marker (default once per 24 h,
+   * `sweepEvery` overridable) means most opens do nothing. When it runs it folds episodes older
+   * than `olderThan` days, then records every lifecycle decision (drift → quarantine, stale →
+   * retire, retention → archive + purge) as an episode and reports each. A sweep that is skipped
+   * says why.
+   */
+  async open(context: Context, options: SweepOptions = {}): Promise<SessionOpenResult> {
+    sanitizeContext(context);
+    const sweepEvery = resolveSweepOption(
+      'sweepEvery',
+      options.sweepEvery,
+      DEFAULT_SWEEP_INTERVAL_MS,
+    );
+    const retentionDays = resolveSweepOption(
+      'retentionDays',
+      options.retentionDays,
+      DEFAULT_RETENTION_DAYS,
+    );
+    const olderThanDays = resolveSweepOption('olderThan', options.olderThan, DEFAULT_FOLD_DAYS);
+    const opened = await this.ensureOpen();
+
+    if (opened.status === 'corrupt') {
+      return { skipped: 'store-corrupt', asOf: context.now, location: opened.location };
+    }
+
+    const lastSweepRaw = await this.store.getMeta(LAST_SWEEP_META_KEY);
+    if (lastSweepRaw !== undefined) {
+      const lastSweep = Number(lastSweepRaw);
+      if (Number.isFinite(lastSweep) && context.now - lastSweep < sweepEvery) {
+        return {
+          skipped: 'within-interval',
+          asOf: context.now,
+          lastSweep,
+          dueAt: lastSweep + sweepEvery,
+        };
+      }
+    }
+
+    const compact = await this.runCompaction(context.now, olderThanDays);
+    const steps = planSweep(await this.store.list(), context.now, {
+      retentionMs: retentionDays * DAY_MS,
+    });
+    const changes: SweepChange[] = [];
+    for (const step of steps) {
+      const appended = await this.store.append({
+        type: 'sweep',
+        key: step.key,
+        at: context.now,
+        action: step.action,
+        reason: step.reason,
+      });
+      changes.push({
+        seq: appended.episode.seq,
+        action: step.action,
+        key: step.key,
+        reason: step.reason,
+        at: context.now,
+      });
+    }
+
+    await this.store.setMeta(LAST_SWEEP_META_KEY, String(context.now));
+    return this.buildSweepReport(context.now, retentionDays, olderThanDays, compact, changes);
+  }
+
+  /**
+   * Explicit episode compaction: fold everything older than `olderThan` days (default 90) into
+   * per-entity baselines. The report names the compacted range — the recomputability the fold
+   * consumes — and the projection after compaction is verified to equal the one before.
+   */
+  async compact(
+    context: Context,
+    options: { readonly olderThan?: number } = {},
+  ): Promise<CompactionReport> {
+    sanitizeContext(context);
+    const olderThanDays = resolveSweepOption('olderThan', options.olderThan, DEFAULT_FOLD_DAYS);
+    const opened = await this.ensureOpen();
+    if (opened.status === 'corrupt') {
+      this.assertMaintainable(opened.location);
+    }
+    const cutoffAt = context.now - olderThanDays * DAY_MS;
+    const log = await this.store.episodes();
+    const compacted = compactPrefix(log, cutoffAt);
+    const entities = (await this.store.list()).length;
+    if (compacted.folded === null) {
+      return {
+        asOf: context.now,
+        olderThanDays,
+        cutoffAt,
+        compacted: null,
+        baselinesWritten: 0,
+        remainingEpisodes: log.length,
+        entities,
+      };
+    }
+
+    const before = await this.store.list();
+    await this.store.replaceLog(compacted.episodes);
+    const after = await this.store.list();
+    if (!statesEquivalent(before, after)) {
+      throw new InvariantViolationError('compact', {
+        context: { folded: compacted.folded, olderThanDays },
+      });
+    }
+    return {
+      asOf: context.now,
+      olderThanDays,
+      cutoffAt,
+      compacted: compacted.folded,
+      baselinesWritten: compacted.baselinesWritten,
+      remainingEpisodes: compacted.episodes.length,
+      entities: after.length,
+    };
+  }
+
+  /**
+   * Diagnostic read over the store (§9 `maintain preflight`): open status, log/entity counts,
+   * fold-equivalence and the last-sweep marker. Never mutates and never throws for a bad store —
+   * it reports, which is its whole job.
+   */
+  async preflight(context: Context): Promise<PreflightReport> {
+    sanitizeContext(context);
+    const opened = await this.ensureOpen();
+    const status = opened.status;
+    const location = opened.status === 'corrupt' ? opened.location : null;
+    const episodes = await this.store.episodes();
+    const list = await this.store.list();
+    const rebuild = await this.store.rebuild();
+    const lastSweepRaw = await this.store.getMeta(LAST_SWEEP_META_KEY);
+    const lastSweep = lastSweepRaw === undefined ? null : Number(lastSweepRaw) || null;
+    return {
+      asOf: context.now,
+      status,
+      location: status === 'corrupt' ? location : null,
+      episodeCount: episodes.length,
+      entityCount: list.length,
+      integrity: statesEquivalent(list, rebuild) ? 'ok' : 'fold-mismatch',
+      lastSweep,
+      registries: {
+        kinds: this.store.registries.kinds.length,
+        signals: this.store.registries.signalSpecs.length,
+        anchors: this.store.registries.anchorKinds.length,
+      },
+    };
+  }
+
+  /**
+   * Capture the store's source of truth as a portable, JSON-serialisable snapshot. The host owns
+   * persisting it. `backup(context)` uses `context.now` only to stamp a deterministic
+   * `exportedAt`; restore never reads it, so a wall-clock fallback stays fold-neutral.
+   */
+  async backup(context?: Context): Promise<{ readonly snapshot: SageSnapshot }> {
+    if (context !== undefined) sanitizeContext(context);
+    await this.ensureOpen();
+    const [episodes, lastSweep] = await Promise.all([
+      this.store.episodes(),
+      this.store.getMeta(LAST_SWEEP_META_KEY),
+    ]);
+    const meta = lastSweep === undefined ? {} : { [LAST_SWEEP_META_KEY]: lastSweep };
+    return {
+      snapshot: {
+        format: SNAPSHOT_FORMAT,
+        exportedAt: context?.now ?? Date.now(),
+        registries: this.store.registries,
+        episodes,
+        meta,
+      },
+    };
+  }
+
+  /**
+   * Restore a snapshot: atomically replace the episode log (validated contiguous, against this
+   * store's registries) and the engine meta it carries. Returns the seq range that was replaced.
+   * Accept only snapshots this build wrote — `format` is checked, mismatched registries fail loud.
+   */
+  async restore(
+    source: SageSnapshot,
+  ): Promise<{ readonly restored: { from: number; to: number } }> {
+    const opened = await this.ensureOpen();
+    if (opened.status === 'corrupt') {
+      this.assertMaintainable(opened.location);
+    }
+    this.validateSnapshot(source);
+    const restored = await this.store.replaceLog(source.episodes);
+    for (const [key, value] of Object.entries(source.meta)) {
+      await this.store.setMeta(key, value);
+    }
+    return { restored };
+  }
+
+  private validateSnapshot(source: SageSnapshot): void {
+    if (typeof source !== 'object' || source === null) {
+      throw new InvalidArgumentError('source', 'a SageSnapshot', source);
+    }
+    if (source.format !== SNAPSHOT_FORMAT) {
+      throw new InvalidArgumentError('source.format', `'${SNAPSHOT_FORMAT}'`, source.format);
+    }
+    if (typeof source.exportedAt !== 'number' || !Number.isFinite(source.exportedAt)) {
+      throw new InvalidArgumentError('source.exportedAt', 'a finite epoch', source.exportedAt);
+    }
+    if (!Array.isArray(source.episodes)) {
+      throw new InvalidArgumentError('source.episodes', 'an episode array', source.episodes);
+    }
+    if (typeof source.meta !== 'object' || source.meta === null || Array.isArray(source.meta)) {
+      throw new InvalidArgumentError('source.meta', 'a record of strings', source.meta);
+    }
+    const registries = source.registries;
+    if (
+      typeof registries !== 'object' ||
+      registries === null ||
+      !Array.isArray(registries.kinds) ||
+      !Array.isArray(registries.signalSpecs) ||
+      !Array.isArray(registries.anchorKinds)
+    ) {
+      throw new InvalidArgumentError('source.registries', 'a StoreRegistries object', registries);
+    }
+  }
+
+  /** Run one episode compaction pass; used by both `open` (self-cleaning) and `compact` (explicit). */
+  private async runCompaction(now: number, olderThanDays: number): Promise<SweepReport['compact']> {
+    const cutoffAt = now - olderThanDays * DAY_MS;
+    const log = await this.store.episodes();
+    const compacted = compactPrefix(log, cutoffAt);
+    if (compacted.folded === null) {
+      return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
+    }
+    const before = await this.store.list();
+    await this.store.replaceLog(compacted.episodes);
+    const after = await this.store.list();
+    if (!statesEquivalent(before, after)) {
+      throw new InvariantViolationError('open', {
+        context: { folded: compacted.folded, olderThanDays },
+      });
+    }
+    return {
+      folded: compacted.folded,
+      baselinesWritten: compacted.baselinesWritten,
+      remainingEpisodes: compacted.episodes.length,
+    };
+  }
+
+  private buildSweepReport(
+    asOf: number,
+    retentionDays: number,
+    olderThanDays: number,
+    compact: SweepReport['compact'],
+    changes: readonly SweepChange[],
+  ): SweepReport {
+    const count = (action: SweepActionKind): number =>
+      changes.filter((change) => change.action === action).length;
+    return {
+      asOf,
+      retentionDays,
+      olderThanDays,
+      changes,
+      quarantineCount: count('quarantine'),
+      retireCount: count('retire'),
+      archiveCount: count('archive'),
+      purgeCount: count('purge'),
+      compact,
+    };
   }
 
   // -------------------------------------------------------------------------------------------
