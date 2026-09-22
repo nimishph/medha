@@ -46,3 +46,16 @@ export class StoreIntegrityError extends SageError {
     });
   }
 }
+
+/** The on-disk store was written by a newer (or unknown) layout than this build reads. */
+export class StoreLayoutError extends SageError {
+  readonly code = 'STORE_LAYOUT_UNSUPPORTED';
+  readonly subsystem = 'store' as const;
+
+  constructor(layoutVersion: number, supported: number, init: ErrorInit = {}) {
+    super(
+      `Store layout version ${layoutVersion} is not supported by this build (supports up to ${supported})`,
+      { ...init, context: { layoutVersion, supported, ...init.context } },
+    );
+  }
+}
