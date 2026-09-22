@@ -1,7 +1,11 @@
 /**
  * sage-store: the `StorePort` contract and its backends.
  *
- * Scaffold slice (Loom-ujs3.2). The one storage contract with memory / file (git-trackable JSON) /
- * SQLite backends and the shared contract suite land in later slices (Loom-ujs3.4, Loom-ujs3.5).
+ * One storage contract (spec §7.1) and one shared contract suite; memory now, file and SQLite
+ * backends later (Loom-ujs3.5). Each backend re-runs the exact same suite with no per-backend
+ * branch, so any passing backend is interchangeable with the others.
  */
-export {};
+
+export * from './contract-suite.ts';
+export * from './errors.ts';
+export * from './memory-store.ts';
