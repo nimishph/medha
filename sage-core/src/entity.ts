@@ -82,6 +82,7 @@ export function freshState(
     readonly theta0?: number;
     readonly guard?: GuardState;
     readonly updater?: UpdaterName;
+    readonly anchor?: Anchor;
   } = {},
 ): EntityState {
   if (key.id.trim() === '') throw new InvalidArgumentError('key.id', 'a non-empty string', key.id);
@@ -96,7 +97,7 @@ export function freshState(
     evidence: { k: 0, n: 0, contextRejects: 0 },
     ema: { mu: theta0, theta0, updatedAt: at },
     guard: init.guard ?? newGuard('none'),
-    anchors: [],
+    anchors: init.anchor !== undefined ? [init.anchor] : [],
     status: 'probation',
     override: null,
     retiredAt: null,

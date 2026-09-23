@@ -9,6 +9,7 @@ export * from './guard.ts';
 export * from './hint.ts';
 export * from './kinds.ts';
 export * from './limits.ts';
+export * from './miner-port.ts';
 export * from './recency.ts';
 export * from './rng.ts';
 export * from './rounding.ts';

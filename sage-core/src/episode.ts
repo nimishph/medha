@@ -80,8 +80,16 @@ export interface ProposalEpisode extends BaseEpisode {
   /** Who mined this (digest clusterer, host policy, …); shown with the entity. */
   readonly provenance: string;
   /** Prior for the fresh probation entity; defaults to DEFAULT_THETA0. */
-  readonly theta0?: number;
-  readonly description?: string;
+  readonly theta0?: number | undefined;
+  readonly description?: string | undefined;
+  /** Evidence references supporting this proposal (digest IDs, run refs, etc.). */
+  readonly evidenceRefs?: readonly string[] | undefined;
+  /** Optional anchor observed at the time of proposal. */
+  readonly anchor?: Anchor | undefined;
+  /** Whether this proposal was promoted by Sage's promotion policy. */
+  readonly promoted?: boolean | undefined;
+  /** Reason associated with the promotion decision. */
+  readonly promotionReason?: string | undefined;
 }
 
 export type SweepAction = 'quarantine' | 'retire' | 'restore' | 'archive' | 'purge';
@@ -210,6 +218,39 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       if (input.theta0 !== undefined && (input.theta0 < 0 || input.theta0 > 1)) {
         throw new InvalidArgumentError('episode.theta0', 'a number in [0,1]', input.theta0);
       }
+      if (input.description !== undefined && typeof input.description !== 'string') {
+        throw new InvalidArgumentError('episode.description', 'a string', input.description);
+      }
+      if (input.evidenceRefs !== undefined) {
+        if (!Array.isArray(input.evidenceRefs)) {
+          throw new InvalidArgumentError(
+            'episode.evidenceRefs',
+            'an array of strings',
+            input.evidenceRefs,
+          );
+        }
+        for (const ref of input.evidenceRefs) {
+          if (typeof ref !== 'string' || ref.trim() === '') {
+            throw new InvalidArgumentError('episode.evidenceRefs[]', 'a non-empty string', ref);
+          }
+        }
+      }
+      if (input.anchor !== undefined) {
+        if (typeof input.anchor.kind !== 'string' || input.anchor.kind === '') {
+          throw new InvalidArgumentError(
+            'episode.anchor.kind',
+            'a non-empty string',
+            input.anchor.kind,
+          );
+        }
+        if (typeof input.anchor.value !== 'string' || input.anchor.value === '') {
+          throw new InvalidArgumentError(
+            'episode.anchor.value',
+            'a non-empty string',
+            input.anchor.value,
+          );
+        }
+      }
       break;
     case 'sweep':
       if (typeof input.reason !== 'string' || input.reason.trim() === '') {
@@ -335,8 +376,10 @@ export function foldEpisode(
     }
     case 'proposal': {
       if (prev !== undefined) return prev;
-      const init: { readonly theta0?: number } =
-        episode.theta0 === undefined ? {} : { theta0: episode.theta0 };
+      const init: { readonly theta0?: number; readonly anchor?: Anchor } = {
+        ...(episode.theta0 === undefined ? {} : { theta0: episode.theta0 }),
+        ...(episode.anchor === undefined ? {} : { anchor: episode.anchor }),
+      };
       return freshState(episode.key, episode.at, init);
     }
     case 'sweep': {

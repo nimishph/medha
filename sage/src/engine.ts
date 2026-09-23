@@ -14,6 +14,7 @@ import {
   buildHint,
   type Context,
   type CorruptLocation,
+  convergingSourcesPolicy,
   DAY_MS,
   type EntityKey,
   type EntityState,
@@ -27,11 +28,18 @@ import {
   InvariantViolationError,
   KindRegistry,
   type LifecycleStatus,
+  type MinerPort,
   mulberry32,
   type OpenResult,
   type Page,
   type PageRequest,
+  type PromotionContext,
+  type PromotionDecision,
+  type PromotionPolicy,
+  type Proposal,
+  type ProposalEpisode,
   paginate,
+  resolveProposalKey,
   round6,
   type SageError,
   SignalRegistry,
@@ -65,7 +73,8 @@ import { UpdaterRegistry, type WeightUpdateContext } from './updaters.ts';
 
 export interface SageOptions {
   readonly store: StorePort;
-  readonly updaters?: UpdaterRegistry;
+  readonly updaters?: UpdaterRegistry | undefined;
+  readonly promotionPolicy?: PromotionPolicy | undefined;
 }
 
 /** Build every number the updaters see from the entity state + the incoming signal. */
@@ -93,12 +102,14 @@ function compareKeyString(a: { readonly key: EntityKey }, b: { readonly key: Ent
 export class Sage {
   readonly store: StorePort;
   readonly updaters: UpdaterRegistry;
+  readonly promotionPolicy: PromotionPolicy;
   /** The last `store.open()` result, retained so maintenance can report a corrupt location. */
   private openResult: OpenResult | undefined;
 
   constructor(options: SageOptions) {
     this.store = options.store;
     this.updaters = options.updaters ?? new UpdaterRegistry();
+    this.promotionPolicy = options.promotionPolicy ?? convergingSourcesPolicy({ minSources: 2 });
   }
 
   // -------------------------------------------------------------------------------------------
@@ -218,11 +229,11 @@ export class Sage {
     const episodes = log.filter((episode) => entityKeyString(episode.key) === keyString);
     const recentN = options.recent ?? 10;
     const recentEpisodes = [...episodes].sort((a, b) => b.seq - a.seq).slice(0, recentN);
-    const provenance = episodes
-      .filter(
-        (episode): episode is Extract<Episode, { type: 'proposal' }> => episode.type === 'proposal',
-      )
-      .map((episode) => episode.provenance);
+    const proposalEpisodes = episodes.filter(
+      (episode): episode is Extract<Episode, { type: 'proposal' }> => episode.type === 'proposal',
+    );
+    const provenance = [...new Set(proposalEpisodes.map((episode) => episode.provenance))];
+    const promoted = proposalEpisodes.some((episode) => episode.promoted === true);
     if (state === undefined) {
       // Spec §5.2: an unknown id reads back as a probation hint with the prior.
       return {
@@ -230,9 +241,16 @@ export class Sage {
         known: false,
         recentEpisodes,
         provenance,
+        promoted,
       };
     }
-    return { hint: buildHint(state, context.now), known: true, recentEpisodes, provenance };
+    return {
+      hint: buildHint(state, context.now),
+      known: true,
+      recentEpisodes,
+      provenance,
+      promoted,
+    };
   }
 
   /** Every entity currently drifting, most drifted first. */
@@ -722,6 +740,134 @@ export class Sage {
       : buildHint(appended.state, context.now);
   }
 
+  /**
+   * Record a proposal (§6.2, §7.3). Enters on probation with provenance, evaluated
+   * under Sage's promotion policy. Miners never write state.
+   */
+  async propose(
+    proposal: Proposal,
+    context: Context,
+    options: ProposeOptions = {},
+  ): Promise<ProposeOutcome> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    const key = resolveProposalKey(proposal);
+    this.validateKey(key);
+    this.requireKind(key);
+
+    const provenance = proposal.provenance ?? options.provenance ?? 'propose';
+    if (typeof provenance !== 'string' || provenance.trim() === '') {
+      throw new InvalidArgumentError('provenance', 'a non-empty string', provenance);
+    }
+
+    const keyString = entityKeyString(key);
+    const [currentState, log] = await Promise.all([this.store.get(key), this.store.episodes()]);
+    const existingProposals = log.filter(
+      (e): e is Extract<Episode, { type: 'proposal' }> =>
+        e.type === 'proposal' && entityKeyString(e.key) === keyString,
+    );
+
+    const priorProvenances = new Set(existingProposals.map((e) => e.provenance));
+    priorProvenances.add(provenance);
+    const allProvenances = [...priorProvenances];
+
+    const priorEvidenceRefs = new Set<string>();
+    for (const p of existingProposals) {
+      for (const r of p.evidenceRefs ?? []) priorEvidenceRefs.add(r);
+    }
+    for (const r of proposal.evidenceRefs ?? []) priorEvidenceRefs.add(r);
+    const allEvidenceRefs = [...priorEvidenceRefs];
+
+    const policy = options.promotionPolicy ?? this.promotionPolicy;
+    const promotionCtx: PromotionContext = {
+      proposal,
+      key,
+      state: currentState,
+      proposalEpisodes: existingProposals,
+      provenances: allProvenances,
+      evidenceRefs: allEvidenceRefs,
+      context,
+    };
+
+    const decisionResult = await policy(promotionCtx);
+    const decision: PromotionDecision =
+      typeof decisionResult === 'boolean' ? { promoted: decisionResult } : decisionResult;
+
+    const episodeInput: EpisodeInput = {
+      type: 'proposal',
+      key,
+      at: context.now,
+      provenance,
+      ...(proposal.description === undefined ? {} : { description: proposal.description }),
+      ...(proposal.theta0 === undefined ? {} : { theta0: proposal.theta0 }),
+      ...(proposal.evidenceRefs === undefined ? {} : { evidenceRefs: proposal.evidenceRefs }),
+      ...(proposal.anchor === undefined ? {} : { anchor: proposal.anchor }),
+      promoted: decision.promoted,
+      ...(decision.reason === undefined ? {} : { promotionReason: decision.reason }),
+    };
+
+    const appended = await this.store.append(episodeInput);
+    const state =
+      appended.state ??
+      freshState(key, context.now, {
+        ...(proposal.theta0 === undefined ? {} : { theta0: proposal.theta0 }),
+        ...(proposal.anchor === undefined ? {} : { anchor: proposal.anchor }),
+      });
+    const hint = buildHint(state, context.now);
+
+    return {
+      ...hint,
+      hint,
+      state,
+      episode: appended.episode as ProposalEpisode,
+      promoted: decision.promoted,
+      ...(decision.reason === undefined ? {} : { promotionReason: decision.reason }),
+      provenances: allProvenances,
+    };
+  }
+
+  /**
+   * Run a host-supplied miner over an evidence stream (§6.2, §7.3).
+   * Miners never mutate state; candidate proposals are routed through `propose()`.
+   */
+  async mine<TEvidence = unknown>(
+    evidence: AsyncIterable<TEvidence> | Iterable<TEvidence>,
+    miner: MinerPort<TEvidence>,
+    context: Context,
+    options: MineOptions = {},
+  ): Promise<readonly MinedProposal[]> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    if (typeof miner !== 'object' || miner === null) {
+      throw new InvalidArgumentError('miner', 'a MinerPort object', miner);
+    }
+    if (typeof miner.name !== 'string' || miner.name.trim() === '') {
+      throw new InvalidArgumentError('miner.name', 'a non-empty string', miner.name);
+    }
+    if (typeof miner.mine !== 'function') {
+      throw new InvalidArgumentError('miner.mine', 'a function', miner.mine);
+    }
+
+    const proposals = await miner.mine(evidence, context);
+    if (!Array.isArray(proposals)) {
+      throw new InvalidArgumentError('miner.mine return value', 'an array of proposals', proposals);
+    }
+
+    const minedProposals: MinedProposal[] = [];
+    for (const proposal of proposals) {
+      const outcome = await this.propose(proposal, context, {
+        ...options,
+        provenance: proposal.provenance ?? miner.name,
+      });
+      minedProposals.push({
+        ...proposal,
+        outcome,
+      });
+    }
+
+    return minedProposals;
+  }
+
   /** A human lifecycle override. Unknown entity → logged, no-op, `null`. */
   async override(
     key: EntityKey,
@@ -776,6 +922,8 @@ export interface EntityDetail {
   readonly recentEpisodes: readonly Episode[];
   /** `provenance` strings from the key's proposal episodes (MinerPort flow). */
   readonly provenance: readonly string[];
+  /** True if any proposal episode for this key was promoted by Sage's promotion policy. */
+  readonly promoted: boolean;
 }
 
 export interface DriftEntry {
@@ -859,6 +1007,40 @@ function pickWeighted<T>(
 // ---------------------------------------------------------------------------------------------
 // write-plane contracts
 // ---------------------------------------------------------------------------------------------
+
+export interface ProposeOptions {
+  /** Overrides the engine's promotion policy for this proposal. */
+  readonly promotionPolicy?: PromotionPolicy | undefined;
+  /** Fallback provenance if not defined on the proposal. Defaults to 'propose'. */
+  readonly provenance?: string | undefined;
+}
+
+export interface ProposeOutcome extends EvidentialHint {
+  /** The evidential hint for the entity after recording the proposal. */
+  readonly hint: EvidentialHint;
+  /** The entity state after folding the proposal episode. */
+  readonly state: EntityState | undefined;
+  /** The appended proposal episode. */
+  readonly episode: ProposalEpisode;
+  /** Whether the proposal satisfied the active promotion policy. */
+  readonly promoted: boolean;
+  /** The explanation reason from the promotion policy. */
+  readonly promotionReason?: string | undefined;
+  /** Distinct provenances observed across all proposal episodes for this key. */
+  readonly provenances: readonly string[];
+}
+
+export interface MineOptions {
+  /** Overrides the engine's promotion policy for all proposals from this miner run. */
+  readonly promotionPolicy?: PromotionPolicy | undefined;
+  /** Fallback provenance for proposals that omit it; defaults to miner.name. */
+  readonly provenance?: string | undefined;
+}
+
+export interface MinedProposal extends Proposal {
+  /** The outcome of submitting this proposal through the engine's propose flow. */
+  readonly outcome: ProposeOutcome;
+}
 
 export interface RecordOptions {
   /** Unknown id: create the entity only when true (spec §5.2). Default false. */
