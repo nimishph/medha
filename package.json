@@ -1,8 +1,8 @@
 {
-  "name": "sage-workspace",
+  "name": "medha-workspace",
   "private": true,
   "type": "module",
-  "description": "sage: evidential-memory engine as a library. Four packages (core, store, sync, sage) with enforced boundaries. Self-contained so the whole directory can be extracted to its own repo.",
+  "description": "medha: evidential-memory engine as a library. Four packages (core, store, sync, sage) with enforced boundaries. Self-contained so the whole directory can be extracted to its own repo.",
   "workspaces": [
     "sage-core",
     "sage-store",

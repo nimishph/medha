@@ -5,7 +5,7 @@ import {
   SignalRegistry,
   type SignalSpec,
   type StoreRegistries,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 /**
  * Rehydrate the guarded registries from the store's persisted lists. Built-ins (the three model

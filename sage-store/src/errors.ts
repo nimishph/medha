@@ -1,13 +1,13 @@
-import type { CorruptLocation } from '@sutras/sage-core';
-import { type ErrorInit, SageError } from '@sutras/sage-core';
+import type { CorruptLocation } from '@cntxt-labs/medha-core';
+import { type ErrorInit, MedhaError } from '@cntxt-labs/medha-core';
 
 /**
- * Typed errors for the store subsystem. Everything a backend can fail with is a `SageError`
+ * Typed errors for the store subsystem. Everything a backend can fail with is a `MedhaError`
  * subclass branching on `code`; no bare `Error` crosses a store boundary.
  */
 
 /** The store's log is damaged past a known sequence. Reads are snapshot-backed; writes refuse. */
-export class CorruptStoreError extends SageError {
+export class CorruptStoreError extends MedhaError {
   readonly code = 'STORE_LOG_CORRUPT';
   readonly subsystem = 'store' as const;
   readonly location: CorruptLocation;
@@ -22,7 +22,7 @@ export class CorruptStoreError extends SageError {
 }
 
 /** The backend was not opened (or was already closed) when an operation ran. */
-export class StoreClosedError extends SageError {
+export class StoreClosedError extends MedhaError {
   readonly code = 'STORE_NOT_OPEN';
   readonly subsystem = 'store' as const;
 
@@ -35,7 +35,7 @@ export class StoreClosedError extends SageError {
 }
 
 /** The store already folded the rebuild and found it diverged from what it keeps. */
-export class StoreIntegrityError extends SageError {
+export class StoreIntegrityError extends MedhaError {
   readonly code = 'STORE_FOLD_MISMATCH';
   readonly subsystem = 'store' as const;
 
@@ -48,7 +48,7 @@ export class StoreIntegrityError extends SageError {
 }
 
 /** The on-disk store was written by a newer (or unknown) layout than this build reads. */
-export class StoreLayoutError extends SageError {
+export class StoreLayoutError extends MedhaError {
   readonly code = 'STORE_LAYOUT_UNSUPPORTED';
   readonly subsystem = 'store' as const;
 

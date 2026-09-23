@@ -12,8 +12,8 @@ import {
   type MinerPort,
   neverPromotePolicy,
   type Proposal,
-} from '@sutras/sage-core';
-import { FilePolicyStore, MemoryStore, SQLiteStore } from '@sutras/sage-store';
+} from '@cntxt-labs/medha-core';
+import { FilePolicyStore, MemoryStore, SQLiteStore } from '@cntxt-labs/medha-store';
 import { Sage } from '../engine.ts';
 
 const NOW = 1_700_000_000_000;
@@ -72,7 +72,7 @@ class FakeMiner implements MinerPort<TestEvidence> {
 }
 
 function makeEngine(
-  options: { readonly promotionPolicy?: import('@sutras/sage-core').PromotionPolicy } = {},
+  options: { readonly promotionPolicy?: import('@cntxt-labs/medha-core').PromotionPolicy } = {},
 ) {
   const store = new MemoryStore({
     registries: {
@@ -263,7 +263,7 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
 
   test('neverPromotePolicy always rejects promotion', async () => {
     const policy = neverPromotePolicy();
-    const ctx: import('@sutras/sage-core').PromotionContext = {
+    const ctx: import('@cntxt-labs/medha-core').PromotionContext = {
       proposal: { kind: 'rule', id: 'r1' },
       key: { namespace: '', kind: 'rule', id: 'r1' },
       state: undefined,
@@ -326,7 +326,7 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
   });
 
   test('custom predicate promotion policy', async () => {
-    const customPolicy = (ctx: import('@sutras/sage-core').PromotionContext) => {
+    const customPolicy = (ctx: import('@cntxt-labs/medha-core').PromotionContext) => {
       const isCritical = ctx.proposal.description?.includes('CRITICAL') ?? false;
       return {
         promoted: isCritical,

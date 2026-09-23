@@ -12,10 +12,10 @@ are published.
 
 | Package | Contains | Depends on |
 |---|---|---|
-| `@sutras/sage-core` | Types, the math (Wilson, EMA, guards, decay, durability, thresholds), signal and kind registries, the ports, typed errors | nothing |
-| `@sutras/sage-store` | Memory, file and SQLite backends, the shared contract suite | `sage-core` |
-| `@sutras/sage-sync` | Optional sync-port adapters | `sage-core` |
-| `@sutras/sage` | Engine facade (planes, sweep, exploration helper), CLI, MCP | `sage-core`, `sage-store`, `sage-sync` |
+| `@cntxt-labs/medha-core` | Types, the math (Wilson, EMA, guards, decay, durability, thresholds), signal and kind registries, the ports, typed errors | nothing |
+| `@cntxt-labs/medha-store` | Memory, file and SQLite backends, the shared contract suite | `sage-core` |
+| `@cntxt-labs/medha-sync` | Optional sync-port adapters | `sage-core` |
+| `@cntxt-labs/medha` | Engine facade (planes, sweep, exploration helper), CLI, MCP | `sage-core`, `sage-store`, `sage-sync` |
 
 Boundaries are enforced from the first commit by dependency-cruiser (inward only, through each
 package's `index`).
@@ -26,8 +26,8 @@ The same standards as `@sutras/code-lens`:
 
 - no static caps or blind truncation — limits derive from real constraints, are caller-supplied,
   and are always reported (`LimitReport`); overflow chunks or paginates instead of cutting
-- no empty `catch` — every catch handles, wraps with a typed `SageError` carrying context, or rethrows
-- no bare `Error` — throw typed `SageError` subclasses with a stable `code`, `subsystem`, `context` and cause chain
+- no empty `catch` — every catch handles, wraps with a typed `MedhaError` carrying context, or rethrows
+- no bare `Error` — throw typed `MedhaError` subclasses with a stable `code`, `subsystem`, `context` and cause chain
 
 These are enforced by Biome, four Grit plugin rules in `tooling/plugins/`, and the fixture suite in
 `tooling/standards.test.ts` (the same fixtures as `code-lens`, proving the rules do what they claim).
@@ -46,7 +46,7 @@ Sage ships with both a unified command line interface and an MCP (Model Context 
 
 ### CLI Subcommands
 
-- **`sage init`**: Initialize engine home (`.sutra/sage/config.json` + store).
+- **`medha init`**: Initialize engine home (`.medha/config.json` + store). Use `--home <path>` to place the home elsewhere; standalone sage never touches `.sutra/` unless told to.
 - **`sage list`**: List evidential entities filtered by kind, status, namespace, or drift.
 - **`sage show`**: Inspect an entity with its trust breakdown, temporal state, and recent episodes.
 - **`sage status`**: Check overall store health, preflight status, and entity lifecycle distribution.
@@ -54,16 +54,16 @@ Sage ships with both a unified command line interface and an MCP (Model Context 
 - **`sage params`**: Print the canonical mathematical constants and thresholds used by the kernel.
 - **`sage simulate`**: Compute the hypothetical trust delta of a signal without persisting changes.
 - **`sage explain-threshold`**: Show which thresholds an entity clears (trusted, active) and why.
-- **`sage maintain`**: Maintenance commands:
-  - `sage maintain preflight`: Check store integrity and verify registry match.
-  - `sage maintain compact [--older-than <days>]`: Fold historical episodes into baselines and name the folded range.
-  - `sage maintain backup <path>`: Export an atomic, portable `SageSnapshot` JSON file.
-  - `sage maintain restore <path>`: Headlessly restore store state from a snapshot.
-- **`sage updater`**: Weight-updater commands:
-  - `sage updater list`: List all registered updaters (project -> user -> built-in).
-  - `sage updater show <name>`: Inspect an updater's strategy and details.
-  - `sage updater fork <name> [--out <path>]`: Scaffold a custom TypeScript updater template.
-- **`sage mcp [serve]`**: Run the stdio Model Context Protocol (MCP) server.
+- **`medha maintain`**: Maintenance commands:
+  - `medha maintain preflight`: Check store integrity and verify registry match.
+  - `medha maintain compact [--older-than <days>]`: Fold historical episodes into baselines and name the folded range.
+  - `medha maintain backup <path>`: Export an atomic, portable `MedhaSnapshot` JSON file.
+  - `medha maintain restore <path>`: Headlessly restore store state from a snapshot.
+- **`medha updater`**: Weight-updater commands:
+  - `medha updater list`: List all registered updaters (project -> user -> built-in).
+  - `medha updater show <name>`: Inspect an updater's strategy and details.
+  - `medha updater fork <name> [--out <path>]`: Scaffold a custom TypeScript updater template.
+- **`medha mcp [serve]`**: Run the stdio Model Context Protocol (MCP) server.
 
 ### MCP Tools
 

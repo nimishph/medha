@@ -6,31 +6,36 @@ import {
   type StorePort,
   type StoreRegistries,
   validateSignalSpec,
-} from '@sutras/sage-core';
-import { FilePolicyStore, MemoryStore, resolveRegistries, SQLiteStore } from '@sutras/sage-store';
+} from '@cntxt-labs/medha-core';
+import {
+  FilePolicyStore,
+  MemoryStore,
+  resolveRegistries,
+  SQLiteStore,
+} from '@cntxt-labs/medha-store';
 import { ConfigFileError, type RegistryDiff } from './errors.ts';
 
 /**
- * Engine-home layout (owner decision, Loom-ujs3.11.2 — no version suffix): one directory under
- * `.sutra/`, with `config.json` as the single source of truth for registries and backend/path.
+ * Engine-home layout (owner decision, Loom-ujs3.11.2 — no version suffix): one directory
+ * (`.medha/` by default, `--home` to override), with `config.json` as the single source of truth for registries and backend/path.
  * One distinct store file per backend: sqlite writes `store.sqlite` (+ `-wal`/`-shm`), the file
  * backend writes `state.jsonl` (+ `state.jsonl.bak`) as a git-trackable, human-diffable document
- * (the FilePolicyStore's `document`/`backup` names), memory persists nothing. Legacy
- * `.sutra/sage/` files are read by nothing until the Loom-ujs3.12 importer.
+ * (the FilePolicyStore's `document`/`backup` names), memory persists nothing. Standalone sage
+ * never touches `.sutra/`; pass `--home .sutra/sage` to opt in to a host-shared home.
  */
 
 export type Backend = 'sqlite' | 'file' | 'memory';
 
 export const BACKENDS: readonly Backend[] = ['sqlite', 'file', 'memory'];
 
-export const SAGE_HOME_REL = '.sutra/sage';
+export const MEDHA_HOME_REL = '.medha';
 export const CONFIG_FILE = 'config.json';
 export const SQLITE_STORE_FILE = 'store.sqlite';
 export const FILE_STORE_DOCUMENT = 'state.jsonl';
 
 export const CONFIG_LAYOUT_VERSION = 1;
 
-export interface SageConfigV1 {
+export interface MedhaConfigV1 {
   readonly layoutVersion: 1;
   readonly backend: Backend;
   /** The absolute store path: the db file (sqlite), the document file (file), null (memory). */
@@ -39,8 +44,9 @@ export interface SageConfigV1 {
   readonly registries: StoreRegistries;
 }
 
-export function homeFor(dir: string): string {
-  return resolve(dir, SAGE_HOME_REL);
+/** `home` (from `--home`) overrides the default `<dir>/.medha`; relative paths resolve against `dir`. */
+export function homeFor(dir: string, home?: string): string {
+  return resolve(dir, home ?? MEDHA_HOME_REL);
 }
 
 export function configPathFor(home: string): string {
@@ -82,7 +88,7 @@ export function resolveStorePath(backend: Backend, home: string, explicit?: stri
  * read-plane command (list/show/…) reopens the home through this, so a configured home is always
  * read with the same backend, files, and registries it was written with.
  */
-export function storeForConfig(config: SageConfigV1): StorePort {
+export function storeForConfig(config: MedhaConfigV1): StorePort {
   switch (config.backend) {
     case 'sqlite':
       return new SQLiteStore({ path: config.path as string, registries: config.registries });
@@ -155,7 +161,7 @@ function isNameList(value: unknown): value is readonly string[] {
 }
 
 /** Read + validate the home's existing config.json. Returns null when the home is empty. */
-export function readConfig(home: string): SageConfigV1 | null {
+export function readConfig(home: string): MedhaConfigV1 | null {
   const path = configPathFor(home);
   if (!existsSync(path)) {
     return null;
@@ -169,7 +175,7 @@ export function readConfig(home: string): SageConfigV1 | null {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new ConfigFileError(path, 'expected a JSON object');
   }
-  const candidate = parsed as Partial<SageConfigV1>;
+  const candidate = parsed as Partial<MedhaConfigV1>;
   if (candidate.layoutVersion !== CONFIG_LAYOUT_VERSION) {
     throw new ConfigFileError(path, `unsupported layoutVersion ${String(candidate.layoutVersion)}`);
   }
@@ -216,7 +222,7 @@ function describeThrowable(value: unknown): string {
   return value instanceof Error ? value.message : String(value);
 }
 
-export function writeConfig(home: string, config: SageConfigV1): string {
+export function writeConfig(home: string, config: MedhaConfigV1): string {
   const path = configPathFor(home);
   mkdirSync(home, { recursive: true });
   writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, 'utf8');

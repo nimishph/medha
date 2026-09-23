@@ -1,4 +1,4 @@
-// Throw a SageError subclass with a code, subsystem and context, never a built-in Error.
+// Throw a MedhaError subclass with a code, subsystem and context, never a built-in Error.
 `new $ctor($args)` where {
   $ctor <: or {
     `Error`,
@@ -9,5 +9,5 @@
     `EvalError`,
     `URIError`
   },
-  register_diagnostic(span=$ctor, message="Do not construct built-in errors. Throw a SageError subclass carrying a code, subsystem, context and cause (see @sutras/sage-core).", severity="error")
+  register_diagnostic(span=$ctor, message="Do not construct built-in errors. Throw a MedhaError subclass carrying a code, subsystem, context and cause (see @cntxt-labs/medha-core).", severity="error")
 }

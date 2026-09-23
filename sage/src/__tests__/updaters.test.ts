@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { APPLY, InvalidArgumentError, REJECT_RULE } from '@sutras/sage-core';
+import { APPLY, InvalidArgumentError, REJECT_RULE } from '@cntxt-labs/medha-core';
 import {
   asymmetricUpdater,
   emaUpdater,
@@ -174,5 +174,8 @@ describe('updater registry — tiers', () => {
     expect(names).toContain('also-mine');
     expect(list.find((u) => u.name === 'also-mine')?.source).toBe('project');
     expect(list.find((u) => u.name === 'mine')?.source).toBe('user');
+    // The `asymmetric` alias must not surface as a second `asymmetric-penalty` row.
+    expect(names.filter((n) => n === 'asymmetric-penalty')).toHaveLength(1);
+    expect(new Set(names).size).toBe(names.length);
   });
 });

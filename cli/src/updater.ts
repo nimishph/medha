@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import type { UpdaterInfo, UpdaterSource } from '@sutras/sage';
-import { InvalidArgumentError } from '@sutras/sage-core';
+import type { UpdaterInfo, UpdaterSource } from '@cntxt-labs/medha';
+import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
 import { UpdaterForkError, UpdaterNotFoundError } from './errors.ts';
 import { openHome } from './open.ts';
 
 export interface UpdaterCommonOptions {
   readonly dir?: string | undefined;
+  readonly home?: string | undefined;
 }
 
 export interface UpdaterListOptions extends UpdaterCommonOptions {}
@@ -21,7 +22,7 @@ export async function runUpdaterList(
   options: UpdaterListOptions,
   environment: Environment,
 ): Promise<UpdaterListReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const updaters = opened.engine.updaters.listUpdaters();
     return { home: opened.home, updaters };
@@ -57,7 +58,7 @@ export async function runUpdaterShow(
     throw new InvalidArgumentError('name', 'a non-empty updater name', options.name);
   }
   const name = options.name;
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const updaters = opened.engine.updaters.listUpdaters();
     const found = updaters.find((u) => u.name.toLowerCase() === name.toLowerCase());
@@ -101,7 +102,7 @@ export async function runUpdaterFork(
     throw new InvalidArgumentError('name', 'a non-empty updater name', options.name);
   }
   const name = options.name;
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const updaters = opened.engine.updaters.listUpdaters();
     const found = updaters.find((u) => u.name.toLowerCase() === name.toLowerCase());
@@ -132,7 +133,7 @@ export async function runUpdaterFork(
 }
 
 function generateUpdaterTemplate(baseName: string, fileName: string): string {
-  return `import type { SageWeightUpdater, WeightUpdateContext, WeightUpdateOutcome } from '@sutras/sage';
+  return `import type { MedhaWeightUpdater, WeightUpdateContext, WeightUpdateOutcome } from '@cntxt-labs/medha';
 
 /**
  * Custom weight updater scaffolded from '${baseName}'.
@@ -140,7 +141,7 @@ function generateUpdaterTemplate(baseName: string, fileName: string): string {
  * LOADING / REGISTRATION:
  * Pass this updater to the Sage engine via SageOptions.updaters at host initialization:
  *
- *   import { Sage, UpdaterRegistry } from '@sutras/sage';
+ *   import { Sage, UpdaterRegistry } from '@cntxt-labs/medha';
  *   import { ${toCamelCase(baseName)}CustomUpdater } from './${fileName}';
  *
  *   const updaters = new UpdaterRegistry({
@@ -148,7 +149,7 @@ function generateUpdaterTemplate(baseName: string, fileName: string): string {
  *   });
  *   const sage = new Sage({ store, updaters });
  */
-export const ${toCamelCase(baseName)}CustomUpdater: SageWeightUpdater = {
+export const ${toCamelCase(baseName)}CustomUpdater: MedhaWeightUpdater = {
   name: '${baseName}-custom',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
     // Current state + incoming signal:

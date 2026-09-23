@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { Episode, EpisodeInput } from '@sutras/sage-core';
-import { REJECT_CONTEXT, REJECT_RULE } from '@sutras/sage-core';
+import type { Episode, EpisodeInput } from '@cntxt-labs/medha-core';
+import { REJECT_CONTEXT, REJECT_RULE } from '@cntxt-labs/medha-core';
 import { runStoreContractSuite, type StoreContractSetup } from '../contract-suite.ts';
 import { MemoryStore } from '../memory-store.ts';
 

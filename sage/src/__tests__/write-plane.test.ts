@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { type EntityKey, InvalidArgumentError } from '@sutras/sage-core';
-import { MemoryStore } from '@sutras/sage-store';
+import { type EntityKey, InvalidArgumentError } from '@cntxt-labs/medha-core';
+import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Sage } from '../engine.ts';
 
 /**

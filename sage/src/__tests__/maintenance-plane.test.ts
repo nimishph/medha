@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { DAY_MS, type EntityKey, entityKeyString, InvalidArgumentError } from '@sutras/sage-core';
-import { MemoryStore } from '@sutras/sage-store';
+import {
+  DAY_MS,
+  type EntityKey,
+  entityKeyString,
+  InvalidArgumentError,
+} from '@cntxt-labs/medha-core';
+import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Sage } from '../engine.ts';
 import {
   type PreflightReport,

@@ -1,12 +1,17 @@
 import { basename, dirname } from 'node:path';
 import {
+  type MedhaSnapshot,
   type PreflightReport,
   Sage,
-  type SageSnapshot,
   type SessionOpenResult,
-} from '@sutras/sage';
-import { InvalidArgumentError, type StorePort, type StoreRegistries } from '@sutras/sage-core';
-import { FilePolicyStore, MemoryStore, resolveRegistries, SQLiteStore } from '@sutras/sage-store';
+} from '@cntxt-labs/medha';
+import { InvalidArgumentError, type StorePort, type StoreRegistries } from '@cntxt-labs/medha-core';
+import {
+  FilePolicyStore,
+  MemoryStore,
+  resolveRegistries,
+  SQLiteStore,
+} from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
 import type { RegistryDiff } from './errors.ts';
 import { HomeExistsError, RegistryDriftError, StoreCorruptError } from './errors.ts';
@@ -17,18 +22,18 @@ import {
   configPathFor,
   effectiveRegistriesFrom,
   homeFor,
+  type MedhaConfigV1,
   readConfig,
   registryDiff,
   registryEquals,
   removeStoreArtifacts,
   resolveStorePath,
-  type SageConfigV1,
   writeConfig,
   writeSnapshot,
 } from './layout.ts';
 
 /**
- * `sage init` (spec §9.1, the write-plane bootstrap): resolve the engine home under `--dir`, build
+ * `medha init` (spec §9.1, the write-plane bootstrap): resolve the engine home under `--dir`, build
  * registries from `--config` (or the built-ins), construct the store the configured backend asked
  * for, stamp the last-sweep marker with a host-invoked `open`, gate on preflight, and write the
  * registries into `config.json` as the single source of truth — plus an optional bootstrap
@@ -38,6 +43,7 @@ import {
 
 export interface InitOptions {
   readonly dir: string;
+  readonly home?: string | undefined;
   readonly backend: string;
   readonly path?: string;
   readonly config?: string;
@@ -70,7 +76,7 @@ export function normalizeBackend(value: string): Backend {
 
 export async function runInit(options: InitOptions, environment: Environment): Promise<InitReport> {
   const backend = normalizeBackend(options.backend);
-  const home = homeFor(options.dir);
+  const home = homeFor(options.dir, options.home);
   const storePath = resolveStorePath(backend, home, options.path);
   const now = environment.now();
   const requested =
@@ -144,7 +150,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
 
   const preflight = await bootstrap(store, options.backup);
 
-  const config: SageConfigV1 = {
+  const config: MedhaConfigV1 = {
     layoutVersion: CONFIG_LAYOUT_VERSION,
     backend,
     path: forcedStorePath,
@@ -152,7 +158,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
   };
   const writtenPath = writeConfig(home, config);
 
-  const stamp = readConfig(home) as SageConfigV1;
+  const stamp = readConfig(home) as MedhaConfigV1;
   const registryDrift = registryEquals(stamp.registries, store.registries)
     ? null
     : {
@@ -173,4 +179,4 @@ export async function runInit(options: InitOptions, environment: Environment): P
   };
 }
 
-export type { SageSnapshot };
+export type { MedhaSnapshot };

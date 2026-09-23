@@ -10,7 +10,7 @@ import type {
   StorePort,
   SyncPort,
   SyncStatus,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 export class NoopSyncAdapter implements SyncPort {
   readonly name = 'noop';

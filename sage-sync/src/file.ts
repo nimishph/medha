@@ -18,7 +18,7 @@ import {
   type SyncPort,
   type SyncStatus,
   serializeSnapshot,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import { mergeEntityStates, mergeEpisodes } from './merge.ts';
 
 export interface FileSyncOptions {

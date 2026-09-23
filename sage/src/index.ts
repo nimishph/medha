@@ -1,4 +1,4 @@
-export * from '@sutras/sage-core';
+export * from '@cntxt-labs/medha-core';
 /**
  * sage: the engine facade — read/write/maintenance planes, session-start sweep, exploration
  * helper, plus the CLI and MCP servers.
@@ -9,7 +9,7 @@ export * from '@sutras/sage-core';
  * under the write plane in the spec; they need the miner flow, not this facade).
  */
 
-export * from '@sutras/sage-sync';
+export * from '@cntxt-labs/medha-sync';
 export * from './engine.ts';
 export * from './maintenance.ts';
 export * from './updaters.ts';

@@ -15,7 +15,7 @@ import {
   type StoreRegistries,
   validateEpisodeInput,
   validateLog,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import { CorruptStoreError, StoreClosedError } from './errors.ts';
 import { kindRegistryFor, resolveRegistries, signalRegistryFor } from './registries.ts';
 

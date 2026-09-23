@@ -1,6 +1,6 @@
 /**
  * Minimal in-memory StorePort for sage-sync unit tests (§7.1, §7.2).
- * Conforms to @sutras/sage-core StorePort without violating dependency boundaries.
+ * Conforms to @cntxt-labs/medha-core StorePort without violating dependency boundaries.
  */
 
 import {
@@ -15,7 +15,7 @@ import {
   type OpenResult,
   type StorePort,
   type StoreRegistries,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 export function createTestStore(registries?: StoreRegistries): StorePort {
   let log: Episode[] = [];

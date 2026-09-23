@@ -1,4 +1,4 @@
-import { InvalidArgumentError } from '@sutras/sage-core';
+import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 
 /**
  * What the `sage` CLI reads from and writes to, so it can be driven by a test as well as a

@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { type EntityState, type Episode, foldLog, type SignalEpisode } from '@sutras/sage-core';
+import {
+  type EntityState,
+  type Episode,
+  foldLog,
+  type SignalEpisode,
+} from '@cntxt-labs/medha-core';
 import { mergeEntityStates, mergeEpisodes } from '../index.ts';
 
 const CANONICAL_APPLY = {

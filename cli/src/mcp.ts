@@ -1,8 +1,8 @@
+import type { Sage } from '@cntxt-labs/medha';
+import { type LifecycleStatus, MedhaError, toMedhaError } from '@cntxt-labs/medha-core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { Sage } from '@sutras/sage';
-import { type LifecycleStatus, SageError, toSageError } from '@sutras/sage-core';
 import { z } from 'zod';
 import type { Environment } from './environment.ts';
 import { openHome } from './open.ts';
@@ -17,7 +17,7 @@ import { VERSION } from './version.ts';
  * propose, drift, simulate, status.
  */
 export function createMcpServer(engine: Sage, environment: Environment): McpServer {
-  const server = new McpServer({ name: 'sage', version: VERSION });
+  const server = new McpServer({ name: 'medha', version: VERSION });
 
   const respond = async (run: () => Promise<unknown>) => {
     try {
@@ -25,7 +25,7 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
       return { content: [{ type: 'text' as const, text: toJson(value) }] };
     } catch (failure) {
       const error =
-        failure instanceof SageError ? failure : toSageError(failure, 'answer a tool call');
+        failure instanceof MedhaError ? failure : toMedhaError(failure, 'answer a tool call');
       return {
         isError: true,
         content: [{ type: 'text' as const, text: toJson({ error }) }],
@@ -308,6 +308,7 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
 
 export interface ServeMcpOptions {
   readonly dir?: string | undefined;
+  readonly home?: string | undefined;
 }
 
 /**
@@ -318,7 +319,7 @@ export async function serveMcp(
   environment: Environment,
   transport: Transport = new StdioServerTransport(),
 ): Promise<void> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   const server = createMcpServer(opened.engine, environment);
   const closed = new Promise<void>((resolve) => {
     server.server.onclose = () => resolve();
@@ -331,7 +332,7 @@ export async function serveMcp(
     process.stdin.once('end', handleClose);
   }
   await server.connect(transport);
-  environment.stderr(`sage mcp: serving ${opened.home}\n`);
+  environment.stderr(`medha mcp: serving ${opened.home}\n`);
   await closed;
   await opened.engine.close();
 }

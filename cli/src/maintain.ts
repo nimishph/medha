@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import type { CompactionReport, PreflightReport, SageSnapshot } from '@sutras/sage';
-import { InvalidArgumentError } from '@sutras/sage-core';
+import type { CompactionReport, MedhaSnapshot, PreflightReport } from '@cntxt-labs/medha';
+import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
 import { SnapshotFileError } from './errors.ts';
 import { writeSnapshot } from './layout.ts';
@@ -16,6 +16,7 @@ import { positiveInt } from './read.ts';
 
 export interface MaintainCommonOptions {
   readonly dir?: string | undefined;
+  readonly home?: string | undefined;
 }
 
 export interface MaintainPreflightOptions extends MaintainCommonOptions {}
@@ -30,7 +31,7 @@ export async function runMaintainPreflight(
   options: MaintainPreflightOptions,
   environment: Environment,
 ): Promise<MaintainPreflightReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const preflight = await opened.engine.preflight({ now });
@@ -57,7 +58,7 @@ export async function runMaintainCompact(
   options: MaintainCompactOptions,
   environment: Environment,
 ): Promise<MaintainCompactReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const report = await opened.engine.compact(
@@ -80,7 +81,7 @@ export interface MaintainBackupReport {
   readonly home: string;
   readonly asOf: number;
   readonly path: string;
-  readonly snapshot: SageSnapshot;
+  readonly snapshot: MedhaSnapshot;
 }
 
 export async function runMaintainBackup(
@@ -90,7 +91,7 @@ export async function runMaintainBackup(
   if (!options.path || typeof options.path !== 'string') {
     throw new InvalidArgumentError('path', 'a non-empty string path', options.path);
   }
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const { snapshot } = await opened.engine.backup({ now });
@@ -120,7 +121,7 @@ export async function runMaintainRestore(
     throw new InvalidArgumentError('path', 'a non-empty string path', options.path);
   }
   const snapshot = readSnapshotFile(options.path);
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const { restored } = await opened.engine.restore(snapshot);
     const now = environment.now();
@@ -130,7 +131,7 @@ export async function runMaintainRestore(
   }
 }
 
-export function readSnapshotFile(path: string): SageSnapshot {
+export function readSnapshotFile(path: string): MedhaSnapshot {
   let content: string;
   try {
     content = readFileSync(path, 'utf8');
@@ -154,14 +155,14 @@ export function readSnapshotFile(path: string): SageSnapshot {
       ? parsed.snapshot
       : parsed;
   const cand = snapObj as Record<string, unknown>;
-  if (cand.format !== 'sutras.sage/v1') {
+  if (cand.format !== 'sutras.medha/v1') {
     throw new SnapshotFileError(
       path,
-      `unsupported snapshot format: '${cand.format}', expected 'sutras.sage/v1'`,
+      `unsupported snapshot format: '${cand.format}', expected 'sutras.medha/v1'`,
     );
   }
   if (!Array.isArray(cand.episodes)) {
     throw new SnapshotFileError(path, 'snapshot missing episodes array');
   }
-  return cand as unknown as SageSnapshot;
+  return cand as unknown as MedhaSnapshot;
 }

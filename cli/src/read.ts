@@ -18,7 +18,7 @@ import {
   type ListFilter,
   type PreflightReport,
   type Sage,
-} from '@sutras/sage';
+} from '@cntxt-labs/medha';
 import {
   ACTIVE_THRESHOLD,
   DEFAULT_EMA_ALPHA,
@@ -40,7 +40,7 @@ import {
   TRUSTED_THRESHOLD,
   UNGUARDED_TRUST_CEILING,
   WILSON_Z,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
 import type { Backend } from './layout.ts';
 import { openHome } from './open.ts';
@@ -82,6 +82,7 @@ export function keyFromFlags(args: KeyFlags): EntityKey {
 
 export interface ListOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
   readonly kind?: string;
   readonly status?: string;
   readonly namespace?: string;
@@ -98,7 +99,7 @@ export interface ListReport {
 }
 
 export async function runList(options: ListOptions, environment: Environment): Promise<ListReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const filter: ListFilter = {
@@ -134,6 +135,7 @@ function requireStatus(raw: string): LifecycleStatus {
 
 export interface ShowOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
   readonly namespace?: string;
   readonly kind?: string;
   readonly id?: string;
@@ -148,7 +150,7 @@ export interface ShowReport {
 }
 
 export async function runShow(options: ShowOptions, environment: Environment): Promise<ShowReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const key = keyFromFlags(options);
@@ -169,6 +171,7 @@ export async function runShow(options: ShowOptions, environment: Environment): P
 
 export interface StatusOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
 }
 
 export interface StatusReport {
@@ -186,7 +189,7 @@ export async function runStatus(
   options: StatusOptions,
   environment: Environment,
 ): Promise<StatusReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const [preflight, all] = await Promise.all([
@@ -234,6 +237,7 @@ export async function pageAll(engine: Sage, now: number): Promise<readonly Evide
 
 export interface DriftOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
   readonly limit?: string;
 }
 
@@ -246,7 +250,7 @@ export async function runDrift(
   options: DriftOptions,
   environment: Environment,
 ): Promise<DriftResult> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const report = await opened.engine.drift(
@@ -413,6 +417,7 @@ export async function runParams(environment: Environment): Promise<ParamsReport>
 
 export interface SimulateOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
   readonly namespace?: string;
   readonly kind?: string;
   readonly id?: string;
@@ -429,7 +434,7 @@ export async function runSimulate(
   options: SimulateOptions,
   environment: Environment,
 ): Promise<SimulateResult> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     if (options.signal === undefined || options.signal === '') {
@@ -449,6 +454,7 @@ export async function runSimulate(
 
 export interface ExplainOptions {
   readonly dir?: string;
+  readonly home?: string | undefined;
   readonly namespace?: string;
   readonly kind?: string;
   readonly id?: string;
@@ -482,7 +488,7 @@ export async function runExplainThreshold(
   options: ExplainOptions,
   environment: Environment,
 ): Promise<ExplainReport> {
-  const opened = openHome(options.dir ?? environment.cwd);
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
     const key = keyFromFlags(options);

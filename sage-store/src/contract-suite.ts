@@ -6,15 +6,15 @@ import type {
   EpisodeInput,
   SignalSpec,
   StorePort,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import {
   APPLY,
   foldLog,
+  MedhaError,
   REJECT_CONTEXT,
   REJECT_RULE,
-  SageError,
   UnknownKindError,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import { CorruptStoreError, StoreClosedError } from './errors.ts';
 
 /**
@@ -256,7 +256,7 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       } catch (thrown) {
         failure = thrown;
       }
-      expect(SageError.is(failure)).toBe(true);
+      expect(MedhaError.is(failure)).toBe(true);
       expect(failure instanceof CorruptStoreError).toBe(true);
       const err = failure as CorruptStoreError;
       expect(err.location.atSeq).toBeGreaterThanOrEqual(0);
@@ -347,7 +347,7 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       } catch (thrown) {
         failure = thrown;
       }
-      expect(SageError.is(failure)).toBe(true);
+      expect(MedhaError.is(failure)).toBe(true);
       expect(await store.episodes()).toEqual(before);
     });
 

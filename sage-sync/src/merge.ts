@@ -16,7 +16,7 @@ import {
   type LifecycleStatus,
   round6,
   statusFor,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 /**
  * Computes a deterministic content key for an episode, ignoring local store seq.

@@ -65,13 +65,14 @@ export const initCommand = defineCommand({
   meta: {
     name: 'init',
     description:
-      'Scaffold the engine home (.sutra/sage/config.json + store) headlessly and gate on preflight.',
+      'Scaffold the engine home (.medha/config.json + store) headlessly and gate on preflight.',
   },
   args: initCommandArgs,
   async run({ args }) {
     const environment = currentEnvironment();
     const options: InitOptions = {
       dir: args.dir ?? environment.cwd,
+      ...(args.home === undefined ? {} : { home: args.home }),
       backend: (args.store ?? 'sqlite') as InitOptions['backend'],
       ...(args.path === undefined ? {} : { path: args.path }),
       ...(args.config === undefined ? {} : { config: args.config }),
@@ -96,6 +97,7 @@ export const listCommand = defineCommand({
     const report = await runList(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.status === undefined ? {} : { status: args.status }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
@@ -120,6 +122,7 @@ export const showCommand = defineCommand({
     const report = await runShow(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.id === undefined ? {} : { id: args.id }),
@@ -140,7 +143,10 @@ export const statusCommand = defineCommand({
   async run({ args }) {
     const environment = currentEnvironment();
     const report = await runStatus(
-      { ...(args.dir === undefined ? {} : { dir: args.dir }) },
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+      },
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderStatus(report));
@@ -158,6 +164,7 @@ export const driftCommand = defineCommand({
     const report = await runDrift(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.limit === undefined ? {} : { limit: args.limit }),
       },
       environment,
@@ -190,6 +197,7 @@ export const simulateCommand = defineCommand({
     const report = await runSimulate(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.id === undefined ? {} : { id: args.id }),
@@ -212,6 +220,7 @@ export const explainThresholdCommand = defineCommand({
     const report = await runExplainThreshold(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.id === undefined ? {} : { id: args.id }),
@@ -233,7 +242,10 @@ export const maintainPreflightCommand = defineCommand({
   async run({ args }) {
     const environment = currentEnvironment();
     const report = await runMaintainPreflight(
-      { ...(args.dir === undefined ? {} : { dir: args.dir }) },
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+      },
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderMaintainPreflight(report));
@@ -251,6 +263,7 @@ export const maintainCompactCommand = defineCommand({
     const report = await runMaintainCompact(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args['older-than'] === undefined ? {} : { olderThan: args['older-than'] }),
       },
       environment,
@@ -262,7 +275,7 @@ export const maintainCompactCommand = defineCommand({
 export const maintainBackupCommand = defineCommand({
   meta: {
     name: 'backup',
-    description: 'Export an atomic, portable SageSnapshot to a file.',
+    description: 'Export an atomic, portable MedhaSnapshot to a file.',
   },
   args: maintainBackupArgs,
   async run({ args }) {
@@ -270,6 +283,7 @@ export const maintainBackupCommand = defineCommand({
     const report = await runMaintainBackup(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.path === undefined ? {} : { path: args.path }),
       },
       environment,
@@ -281,7 +295,7 @@ export const maintainBackupCommand = defineCommand({
 export const maintainRestoreCommand = defineCommand({
   meta: {
     name: 'restore',
-    description: 'Replace store state headlessly with a previously exported SageSnapshot.',
+    description: 'Replace store state headlessly with a previously exported MedhaSnapshot.',
   },
   args: maintainRestoreArgs,
   async run({ args }) {
@@ -289,6 +303,7 @@ export const maintainRestoreCommand = defineCommand({
     const report = await runMaintainRestore(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.path === undefined ? {} : { path: args.path }),
       },
       environment,
@@ -321,7 +336,10 @@ export const updaterListCommand = defineCommand({
   async run({ args }) {
     const environment = currentEnvironment();
     const report = await runUpdaterList(
-      { ...(args.dir === undefined ? {} : { dir: args.dir }) },
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+      },
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderUpdaterList(report));
@@ -339,6 +357,7 @@ export const updaterShowCommand = defineCommand({
     const report = await runUpdaterShow(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.name === undefined ? {} : { name: args.name }),
       },
       environment,
@@ -358,6 +377,7 @@ export const updaterForkCommand = defineCommand({
     const report = await runUpdaterFork(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.name === undefined ? {} : { name: args.name }),
         ...(args.out === undefined ? {} : { out: args.out }),
       },
@@ -390,7 +410,7 @@ export const mcpServeCommand = defineCommand({
   async run({ args }) {
     const environment = currentEnvironment();
     const { serveMcp } = await import('./mcp.ts');
-    await serveMcp({ dir: args.dir }, environment);
+    await serveMcp({ dir: args.dir, home: args.home }, environment);
   },
 });
 
@@ -406,7 +426,7 @@ export const mcpCommand = defineCommand({
   async run({ args }) {
     const environment = currentEnvironment();
     const { serveMcp } = await import('./mcp.ts');
-    await serveMcp({ dir: args.dir }, environment);
+    await serveMcp({ dir: args.dir, home: args.home }, environment);
   },
 });
 
@@ -424,13 +444,14 @@ export const syncStatusCommand = defineCommand({
     const report = await runSyncStatus(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.ref === undefined ? {} : { ref: args.ref }),
         ...(args.remote === undefined ? {} : { remote: args.remote }),
         ...(args.file === undefined ? {} : { file: args.file }),
       },
       environment,
     );
-    environment.stdout(args.json === true ? toJson(report) : renderSyncStatus(report));
+    environment.stdout(args.json === true ? toJson(report) : `${renderSyncStatus(report)}\n`);
   },
 });
 
@@ -446,13 +467,14 @@ export const syncPullCommand = defineCommand({
     const report = await runSyncPull(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.ref === undefined ? {} : { ref: args.ref }),
         ...(args.remote === undefined ? {} : { remote: args.remote }),
         ...(args.file === undefined ? {} : { file: args.file }),
       },
       environment,
     );
-    environment.stdout(args.json === true ? toJson(report) : renderSyncPull(report));
+    environment.stdout(args.json === true ? toJson(report) : `${renderSyncPull(report)}\n`);
   },
 });
 
@@ -468,13 +490,14 @@ export const syncPushCommand = defineCommand({
     const report = await runSyncPush(
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.ref === undefined ? {} : { ref: args.ref }),
         ...(args.remote === undefined ? {} : { remote: args.remote }),
         ...(args.file === undefined ? {} : { file: args.file }),
       },
       environment,
     );
-    environment.stdout(args.json === true ? toJson(report) : renderSyncPush(report));
+    environment.stdout(args.json === true ? toJson(report) : `${renderSyncPush(report)}\n`);
   },
 });
 
@@ -492,7 +515,7 @@ export const syncCommand = defineCommand({
 
 export const commands = defineCommand({
   meta: {
-    name: 'sage',
+    name: 'medha',
     description: 'Evidential-memory engine as a command line.',
     version: VERSION,
   },

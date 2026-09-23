@@ -28,6 +28,7 @@ import {
   InvariantViolationError,
   KindRegistry,
   type LifecycleStatus,
+  type MedhaError,
   type MinerPort,
   mulberry32,
   type OpenResult,
@@ -41,7 +42,6 @@ import {
   paginate,
   resolveProposalKey,
   round6,
-  type SageError,
   SignalRegistry,
   type SignalSpec,
   type StorePort,
@@ -49,8 +49,8 @@ import {
   sanitizeContext,
   validateSignalSpec,
   wilsonWidth,
-} from '@sutras/sage-core';
-import { CorruptStoreError } from '@sutras/sage-store';
+} from '@cntxt-labs/medha-core';
+import { CorruptStoreError } from '@cntxt-labs/medha-store';
 import {
   type CompactionReport,
   compactPrefix,
@@ -58,10 +58,10 @@ import {
   DEFAULT_RETENTION_DAYS,
   DEFAULT_SWEEP_INTERVAL_MS,
   LAST_SWEEP_META_KEY,
+  type MedhaSnapshot,
   type PreflightReport,
   planSweep,
   resolveSweepOption,
-  type SageSnapshot,
   type SessionOpenResult,
   SNAPSHOT_FORMAT,
   type SweepActionKind,
@@ -536,7 +536,7 @@ export class Sage {
    * persisting it. `backup(context)` uses `context.now` only to stamp a deterministic
    * `exportedAt`; restore never reads it, so a wall-clock fallback stays fold-neutral.
    */
-  async backup(context?: Context): Promise<{ readonly snapshot: SageSnapshot }> {
+  async backup(context?: Context): Promise<{ readonly snapshot: MedhaSnapshot }> {
     if (context !== undefined) sanitizeContext(context);
     await this.ensureOpen();
     const [episodes, lastSweep] = await Promise.all([
@@ -561,7 +561,7 @@ export class Sage {
    * Accept only snapshots this build wrote — `format` is checked, mismatched registries fail loud.
    */
   async restore(
-    source: SageSnapshot,
+    source: MedhaSnapshot,
   ): Promise<{ readonly restored: { from: number; to: number } }> {
     const opened = await this.ensureOpen();
     if (opened.status === 'corrupt') {
@@ -575,9 +575,9 @@ export class Sage {
     return { restored };
   }
 
-  private validateSnapshot(source: SageSnapshot): void {
+  private validateSnapshot(source: MedhaSnapshot): void {
     if (typeof source !== 'object' || source === null) {
-      throw new InvalidArgumentError('source', 'a SageSnapshot', source);
+      throw new InvalidArgumentError('source', 'a MedhaSnapshot', source);
     }
     if (source.format !== SNAPSHOT_FORMAT) {
       throw new InvalidArgumentError('source.format', `'${SNAPSHOT_FORMAT}'`, source.format);
@@ -1061,7 +1061,7 @@ export interface UpdaterUsage {
   readonly name: string;
   /** The requested updater that fell back to EMA (reported, never silent). */
   readonly fallbackFrom?: string;
-  readonly error?: SageError;
+  readonly error?: MedhaError;
 }
 
 export interface RecordOutcome {

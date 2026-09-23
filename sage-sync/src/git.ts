@@ -20,7 +20,7 @@ import {
   type SyncStatus,
   serializeSnapshot,
   UnexpectedFailureError,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 import { mergeEpisodes } from './merge.ts';
 
 export const DEFAULT_SAGE_REF = 'refs/sutra/sage/memory';

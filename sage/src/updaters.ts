@@ -11,17 +11,17 @@
  * Execution is sandboxed: any failure falls back to EMA and is *reported*, never swallowed.
  */
 
-import type { EmaParams, EntityKey, SignalSpec } from '@sutras/sage-core';
+import type { EmaParams, EntityKey, SignalSpec } from '@cntxt-labs/medha-core';
 import {
   emaStep,
   InvalidArgumentError,
   isDrifting,
+  type MedhaError,
   round6,
-  type SageError,
-  toSageError,
+  toMedhaError,
   WILSON_Z,
   wilsonLowerBound,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 /**
  * The evidence context a weight-updater sees, over the unified state. Mirrors the legacy
@@ -53,7 +53,7 @@ export interface WeightUpdateOutcome {
   readonly metadata?: Record<string, unknown>;
 }
 
-export interface SageWeightUpdater {
+export interface MedhaWeightUpdater {
   readonly name: string;
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome | number;
   detectDrift?(ctx: WeightUpdateContext, newWeight: number): boolean;
@@ -64,7 +64,7 @@ export interface SageWeightUpdater {
 // ---------------------------------------------------------------------------------------------
 
 /** EMA — the kernel default; `emaStep` math, kernel drift semantics. */
-export const emaUpdater: SageWeightUpdater = {
+export const emaUpdater: MedhaWeightUpdater = {
   name: 'ema',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
     const params = ctx.parameters as Partial<EmaParams>;
@@ -77,7 +77,7 @@ export const emaUpdater: SageWeightUpdater = {
 };
 
 /** Wilson lower bound, with a prior-ratio blend until 5 samples stabilise the estimate. */
-export const wilsonUpdater: SageWeightUpdater = {
+export const wilsonUpdater: MedhaWeightUpdater = {
   name: 'wilson',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
     const countsAsSuccess = ctx.signal.countsAsTrial && ctx.signal.countsAsSuccess;
@@ -107,7 +107,7 @@ export const wilsonUpdater: SageWeightUpdater = {
 };
 
 /** Window-bounded step: an APPLY nudges up, a rejection pushes down a bounded per-event step. */
-export const slidingWindowUpdater: SageWeightUpdater = {
+export const slidingWindowUpdater: MedhaWeightUpdater = {
   name: 'sliding-window',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
     const step = 1 / Math.max(10, Math.min(50, ctx.sampleCount + 1));
@@ -126,7 +126,7 @@ export const slidingWindowUpdater: SageWeightUpdater = {
 };
 
 /** Asymmetric penalty: moderate gain on success (+0.04), harsh penalty on rejection (-0.25). */
-export const asymmetricUpdater: SageWeightUpdater = {
+export const asymmetricUpdater: MedhaWeightUpdater = {
   name: 'asymmetric-penalty',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
     const delta =
@@ -147,7 +147,7 @@ export const asymmetricUpdater: SageWeightUpdater = {
   },
 };
 
-export const BUILTIN_UPDATERS: Readonly<Record<string, SageWeightUpdater>> = {
+export const BUILTIN_UPDATERS: Readonly<Record<string, MedhaWeightUpdater>> = {
   ema: emaUpdater,
   wilson: wilsonUpdater,
   'sliding-window': slidingWindowUpdater,
@@ -156,7 +156,7 @@ export const BUILTIN_UPDATERS: Readonly<Record<string, SageWeightUpdater>> = {
 };
 
 /** `getBuiltinUpdater` falls back to EMA for unknown names, matching the legacy behaviour. */
-export function getBuiltinUpdater(name = 'ema'): SageWeightUpdater {
+export function getBuiltinUpdater(name = 'ema'): MedhaWeightUpdater {
   return BUILTIN_UPDATERS[name.toLowerCase()] ?? emaUpdater;
 }
 
@@ -177,9 +177,9 @@ export interface UpdaterRegistryOptions {
   /** Per-domain routing, e.g. { reviewer: 'wilson' }. Takes precedence over the default. */
   readonly storeOverrides?: Readonly<Record<string, string>>;
   /** Project-tier seed (highest precedence over user/built-in). */
-  readonly project?: Readonly<Record<string, SageWeightUpdater>>;
+  readonly project?: Readonly<Record<string, MedhaWeightUpdater>>;
   /** User-tier seed (beats built-in, loses to project). */
-  readonly user?: Readonly<Record<string, SageWeightUpdater>>;
+  readonly user?: Readonly<Record<string, MedhaWeightUpdater>>;
 }
 
 /** A compute result, including *reported* fallback: `updaterName` 'ema' + `fallbackFrom`. */
@@ -188,7 +188,7 @@ export interface SageComputeResult {
   readonly updaterName: string;
   readonly fallbackFrom?: string;
   /** Present when the registered updater threw and the EMA fallback ran. */
-  readonly error?: SageError;
+  readonly error?: MedhaError;
 }
 
 const DEFAULT_UPDATER = 'ema';
@@ -206,8 +206,8 @@ function normalizeOutcome(raw: WeightUpdateOutcome | number): WeightUpdateOutcom
 }
 
 export class UpdaterRegistry {
-  private readonly project = new Map<string, SageWeightUpdater>();
-  private readonly user = new Map<string, SageWeightUpdater>();
+  private readonly project = new Map<string, MedhaWeightUpdater>();
+  private readonly user = new Map<string, MedhaWeightUpdater>();
   private readonly storeOverrides = new Map<string, string>();
   private defaultUpdaterName: string;
 
@@ -221,7 +221,7 @@ export class UpdaterRegistry {
   }
 
   /** The updater a domain routes to, with the default as the last resort (never throws). */
-  resolveForDomain(domain?: string): SageWeightUpdater {
+  resolveForDomain(domain?: string): MedhaWeightUpdater {
     const key = domain?.toLowerCase();
     const override = key === undefined ? undefined : this.storeOverrides.get(key);
     const name = override ?? this.defaultUpdaterName;
@@ -229,7 +229,7 @@ export class UpdaterRegistry {
   }
 
   /** Resolve by name across project → user → built-in; `undefined` when it resolves to nothing. */
-  resolve(name: string): SageWeightUpdater | undefined {
+  resolve(name: string): MedhaWeightUpdater | undefined {
     const key = name.toLowerCase();
     return this.project.get(key) ?? this.user.get(key) ?? BUILTIN_UPDATERS[key];
   }
@@ -239,7 +239,7 @@ export class UpdaterRegistry {
   }
 
   /** Register an updater at a tier. A name registered at a higher tier shadows lower tiers. */
-  register(updater: SageWeightUpdater, tier: UpdaterSource): this {
+  register(updater: MedhaWeightUpdater, tier: UpdaterSource): this {
     if (typeof updater.name !== 'string' || updater.name.trim() === '') {
       throw new InvalidArgumentError('updater.name', 'a non-empty string', updater.name);
     }
@@ -287,7 +287,7 @@ export class UpdaterRegistry {
         outcome,
         updaterName: DEFAULT_UPDATER,
         fallbackFrom: name,
-        error: toSageError(thrown, `weight updater '${updater.name}'`),
+        error: toMedhaError(thrown, `weight updater '${updater.name}'`),
       };
     }
   }
@@ -305,10 +305,13 @@ export class UpdaterRegistry {
       seen.add(name);
       out.push({ name: updater.name, source: 'user' });
     }
-    for (const name of Object.keys(BUILTIN_UPDATERS)) {
-      if (seen.has(name.toLowerCase())) continue;
-      seen.add(name.toLowerCase());
-      out.push({ name: BUILTIN_UPDATERS[name]?.name ?? name, source: 'builtin' });
+    for (const [alias, updater] of Object.entries(BUILTIN_UPDATERS)) {
+      // Aliases (e.g. `asymmetric`) resolve to the same updater; list each canonical name once.
+      const canonical = updater.name.toLowerCase();
+      if (seen.has(alias.toLowerCase()) || seen.has(canonical)) continue;
+      seen.add(alias.toLowerCase());
+      seen.add(canonical);
+      out.push({ name: updater.name, source: 'builtin' });
     }
     return out;
   }

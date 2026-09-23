@@ -14,7 +14,7 @@ export { type InitOptions, type InitReport, normalizeBackend, runInit } from './
 export {
   type Backend,
   CONFIG_LAYOUT_VERSION,
-  type SageConfigV1,
+  type MedhaConfigV1,
   storeForConfig,
 } from './layout.ts';
 export {

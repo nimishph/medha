@@ -92,7 +92,7 @@ export function migrateSnapshot(raw: unknown): MemorySnapshotV1 {
   if (version !== undefined && version !== CURRENT_MEMORY_SCHEMA_VERSION) {
     if (typeof version === 'number' && version > CURRENT_MEMORY_SCHEMA_VERSION) {
       throw new SchemaVersionError(CURRENT_MEMORY_SCHEMA_VERSION, version, {
-        hint: 'This snapshot was created by a newer version of @sutras/sage. Please upgrade your package.',
+        hint: 'This snapshot was created by a newer version of @cntxt-labs/medha. Please upgrade your package.',
       });
     }
   }

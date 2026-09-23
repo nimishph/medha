@@ -1,5 +1,5 @@
-import type { EntityKey } from '@sutras/sage-core';
-import { SageError } from '@sutras/sage-core';
+import type { EntityKey } from '@cntxt-labs/medha-core';
+import { MedhaError } from '@cntxt-labs/medha-core';
 import type { InitReport } from './init.ts';
 import type {
   MaintainBackupReport,
@@ -23,7 +23,7 @@ export function toJson(value: unknown): string {
   return `${JSON.stringify(
     value,
     (_key, item: unknown) => {
-      if (item instanceof SageError) {
+      if (item instanceof MedhaError) {
         return item.toJSON();
       }
       if (item instanceof Map) {

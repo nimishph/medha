@@ -1,9 +1,9 @@
 import {
   type CorruptLocation,
-  SageError,
+  MedhaError,
   type SignalSpec,
   type StoreRegistries,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 /**
  * CLI-domain failures. Everything the engine or a store throws stays its own typed error; these
@@ -25,7 +25,7 @@ export interface RegistryDiff {
   readonly anchors: { readonly added: readonly string[]; readonly removed: readonly string[] };
 }
 
-export abstract class CliError extends SageError {
+export abstract class CliError extends MedhaError {
   override readonly subsystem = 'cli';
 }
 
@@ -47,7 +47,7 @@ export class HomeNotInitializedError extends CliError {
   constructor(home: string) {
     super(`no engine home at ${home}`, {
       context: { home },
-      hint: "run 'sage init' first (the ephemeral memory backend leaves nothing to reopen)",
+      hint: "run 'medha init' first (the ephemeral memory backend leaves nothing to reopen)",
     });
   }
 }
@@ -86,12 +86,12 @@ export class StoreCorruptError extends CliError {
   constructor(location: CorruptLocation) {
     super(`store is corrupt — the log is unrecoverable from seq ${location.atSeq}`, {
       context: { source: location.source, atSeq: location.atSeq },
-      hint: 'restore a SageSnapshot, or wipe and re-initialize with --recreate',
+      hint: 'restore a MedhaSnapshot, or wipe and re-initialize with --recreate',
     });
   }
 }
 
-/** A snapshot file given to `maintain restore` could not be read as an exported SageSnapshot. */
+/** A snapshot file given to `maintain restore` could not be read as an exported MedhaSnapshot. */
 export class SnapshotFileError extends CliError {
   readonly code = 'CLI_SNAPSHOT_INVALID';
 

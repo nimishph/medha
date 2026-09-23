@@ -3,19 +3,19 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type MedhaSnapshot, Sage } from '@cntxt-labs/medha';
+import type { EntityKey } from '@cntxt-labs/medha-core';
+import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { Sage, type SageSnapshot } from '@sutras/sage';
-import type { EntityKey } from '@sutras/sage-core';
-import { MemoryStore } from '@sutras/sage-store';
 import { runCli } from './cli.ts';
 import type { Environment } from './environment.ts';
-import { type SageConfigV1, storeForConfig } from './layout.ts';
+import { type MedhaConfigV1, storeForConfig } from './layout.ts';
 import { serveMcp } from './mcp.ts';
 import { VERSION } from './version.ts';
 
 /**
- * `sage init` acceptance (Loom-ujs3.11.2). Each test gets a throwaway project root; the harness
+ * `medha init` acceptance (Loom-ujs3.11.2). Each test gets a throwaway project root; the harness
  * injects a fixed clock so `lastSweep` timestamps and sweep-interval bookkeeping are deterministic.
  */
 
@@ -65,7 +65,7 @@ function fresh(): {
   return {
     env,
     root,
-    home: join(root, '.sutra', 'sage'),
+    home: join(root, '.medha'),
     out: () => out,
     err: () => err,
     setNow: (t: number) => {
@@ -82,7 +82,7 @@ describe('sage entrypoint', () => {
   test('--version prints the manifest version and exits 0', async () => {
     const { env, out } = fresh();
     expect(await runCli(['--version'], env)).toBe(0);
-    expect(out()).toBe(`sage ${VERSION}\n`);
+    expect(out()).toBe(`medha ${VERSION}\n`);
   });
 
   test('bare sage prints usage to stderr and exits 2', async () => {
@@ -109,7 +109,7 @@ describe('sage entrypoint', () => {
   });
 });
 
-describe('sage init — default sqlite backend', () => {
+describe('medha init — default sqlite backend', () => {
   test('scaffolds config.json + store.sqlite and reports a healthy preflight', async () => {
     const { env, home, out } = fresh();
     expect(await runCli(['init'], env)).toBe(0);
@@ -147,13 +147,13 @@ describe('sage init — default sqlite backend', () => {
       backend: string;
       preflight: { status: string };
     };
-    expect(report.home).toBe(join(root, '.sutra', 'sage'));
+    expect(report.home).toBe(join(root, '.medha'));
     expect(report.backend).toBe('sqlite');
     expect(report.preflight.status).toBe('ok');
   });
 });
 
-describe('sage init — backends and paths', () => {
+describe('medha init — backends and paths', () => {
   test('file backend writes the state.jsonl document file', async () => {
     const { env, home } = fresh();
     expect(await runCli(['init', '--store', 'file'], env)).toBe(0);
@@ -163,10 +163,34 @@ describe('sage init — backends and paths', () => {
     expect(existsSync(join(home, 'state.jsonl.bak'))).toBe(false);
   });
 
+  test('<command> --help prints usage and never runs the command', async () => {
+    const { env, root, out } = fresh();
+    expect(await runCli(['init', '--help'], env)).toBe(0);
+    expect(out()).toContain('--store');
+    expect(existsSync(join(root, '.medha'))).toBe(false);
+    expect(await runCli(['maintain', 'backup', '--help'], env)).toBe(0);
+  });
+
+  test('default init writes .medha and never touches .sutra', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init'], env)).toBe(0);
+    expect(existsSync(join(root, '.medha', 'config.json'))).toBe(true);
+    expect(existsSync(join(root, '.sutra'))).toBe(false);
+  });
+
+  test('--home opts in to another home, and reads follow it', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init', '--home', '.sutra/sage'], env)).toBe(0);
+    expect(existsSync(join(root, '.sutra', 'sage', 'config.json'))).toBe(true);
+    expect(existsSync(join(root, '.medha'))).toBe(false);
+    expect(await runCli(['status', '--home', '.sutra/sage'], env)).toBe(0);
+    expect(await runCli(['status'], env)).not.toBe(0);
+  });
+
   test('memory backend persists nothing', async () => {
     const { env, root, out } = fresh();
     expect(await runCli(['init', '--store', 'memory'], env)).toBe(0);
-    expect(existsSync(join(root, '.sutra'))).toBe(false);
+    expect(existsSync(join(root, '.medha'))).toBe(false);
     expect(out()).toContain('ephemeral (memory)');
     expect(out()).toContain('preflight:  ok');
   });
@@ -186,7 +210,7 @@ describe('sage init — backends and paths', () => {
   });
 });
 
-describe('sage init — idempotency', () => {
+describe('medha init — idempotency', () => {
   test('a second init refuses as already-initialized', async () => {
     const { env, err } = fresh();
     await runCli(['init'], env);
@@ -232,7 +256,7 @@ describe('sage init — idempotency', () => {
   });
 });
 
-describe('sage init — registry validation', () => {
+describe('medha init — registry validation', () => {
   test('an invalid signal spec (value 0 counting as trial) is rejected before any store exists', async () => {
     const { env, root, home, err } = fresh();
     const cfg = join(root, 'bad.json');
@@ -287,16 +311,16 @@ describe('sage init — registry validation', () => {
   });
 });
 
-describe('sage init — beyond the happy path', () => {
-  test('--backup writes a SageSnapshot that restores in-process', async () => {
+describe('medha init — beyond the happy path', () => {
+  test('--backup writes a MedhaSnapshot that restores in-process', async () => {
     const { env, root } = fresh();
     const backup = join(root, 'backup.json');
     expect(await runCli(['init', '--backup', backup], env)).toBe(0);
 
     const parsed = JSON.parse(readFileSync(backup, 'utf8')) as unknown as {
-      snapshot: SageSnapshot;
+      snapshot: MedhaSnapshot;
     };
-    expect(parsed.snapshot.format).toBe('sutras.sage/v1');
+    expect(parsed.snapshot.format).toBe('sutras.medha/v1');
     expect(parsed.snapshot.episodes).toEqual([]);
 
     const store = new MemoryStore({ registries: parsed.snapshot.registries });
@@ -327,7 +351,7 @@ const SEED_NOW = NOW + 1000;
 
 /** Seed a configured home with known entities and return the store file path. */
 async function seedHome(env: Environment): Promise<void> {
-  const config = readConfig(join(env.cwd, '.sutra', 'sage')) as unknown as SageConfigV1;
+  const config = readConfig(join(env.cwd, '.medha')) as unknown as MedhaConfigV1;
   const store = storeForConfig(config);
   const engine = new Sage({ store });
   try {
@@ -596,7 +620,7 @@ describe('sage read plane — home guards', () => {
   });
 });
 
-describe('sage maintain plane', () => {
+describe('medha maintain plane', () => {
   test('maintain preflight on healthy store reports ok (exit 0)', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);
@@ -728,7 +752,7 @@ describe('sage maintain plane', () => {
   });
 });
 
-describe('sage updater plane', () => {
+describe('medha updater plane', () => {
   test('updater list lists all built-in updaters', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);
@@ -799,7 +823,7 @@ describe('sage updater plane', () => {
     expect(text).toContain('scaffolded custom updater from');
     expect(text).toContain('ema');
 
-    const defaultForkPath = join(root, '.sutra', 'sage', 'updaters', 'ema-fork.ts');
+    const defaultForkPath = join(root, '.medha', 'updaters', 'ema-fork.ts');
     expect(existsSync(defaultForkPath)).toBe(true);
     const scaffoldContent = readFileSync(defaultForkPath, 'utf8');
     expect(scaffoldContent).toContain('export const emaCustomUpdater');
@@ -824,7 +848,7 @@ describe('sage updater plane', () => {
   });
 });
 
-describe('sage mcp server', () => {
+describe('medha mcp server', () => {
   async function connect(root: string) {
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     let err = '';
@@ -957,7 +981,7 @@ describe('sage mcp server', () => {
     } finally {
       await session.close();
     }
-    expect(session.stderr()).toContain('sage mcp: serving');
+    expect(session.stderr()).toContain('medha mcp: serving');
   });
 
   test('subprocess stdio handshake: initialize -> tools/list -> clean exit on stdin close', async () => {
@@ -1020,7 +1044,7 @@ describe('sage mcp server', () => {
   });
 });
 
-describe('sage sync commands', () => {
+describe('medha sync commands', () => {
   test('sync status reports uninitialized when sync target does not exist', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);

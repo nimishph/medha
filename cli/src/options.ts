@@ -1,13 +1,17 @@
 import type { ArgsDef } from 'citty';
 
 /**
- * The `sage init` argument surface (Loom-ujs3.11.2 command shape, citty). `--dir`, `--store`,
+ * The `medha init` argument surface (Loom-ujs3.11.2 command shape, citty). `--dir`, `--store`,
  * `--path`, `--config`, `--backup`, `--recreate`, and `--json` map 1:1 onto InitOptions.
  */
 export const initCommandArgs: ArgsDef = {
   dir: {
     type: 'string',
-    description: 'Project directory under which .sutra/sage/ is created. Default: cwd.',
+    description: 'Project directory under which the .medha/ home is created. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
   },
   store: {
     type: 'enum',
@@ -24,7 +28,7 @@ export const initCommandArgs: ArgsDef = {
     description:
       'registries.json defining kinds / signalSpecs / anchorKinds (additive over built-ins).',
   },
-  backup: { type: 'string', description: 'Also write the bootstrap SageSnapshot to this path.' },
+  backup: { type: 'string', description: 'Also write the bootstrap MedhaSnapshot to this path.' },
   recreate: {
     type: 'boolean',
     description: 'Wipe the engine store and re-initialize.',
@@ -37,7 +41,11 @@ export const initCommandArgs: ArgsDef = {
 export const readCommonArgs: ArgsDef = {
   dir: {
     type: 'string',
-    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -94,7 +102,11 @@ export const explainThresholdCommandArgs: ArgsDef = {
 export const maintainCommonArgs: ArgsDef = {
   dir: {
     type: 'string',
-    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -131,7 +143,11 @@ export const maintainRestoreArgs: ArgsDef = {
 export const updaterCommonArgs: ArgsDef = {
   dir: {
     type: 'string',
-    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -163,7 +179,11 @@ export const updaterForkArgs: ArgsDef = {
 export const mcpCommandArgs: ArgsDef = {
   dir: {
     type: 'string',
-    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
   },
 };
 

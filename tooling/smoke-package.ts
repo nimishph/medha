@@ -17,7 +17,7 @@ const { values } = parseArgs({ options: { dist: { type: 'string' } } });
 const dist = resolve(baseRoot, values.dist ?? 'dist');
 
 // Find packaged binary
-const programName = process.platform === 'win32' ? 'sage.exe' : 'sage';
+const programName = process.platform === 'win32' ? 'medha.exe' : 'sage';
 let program: string | undefined;
 
 const canonical = join(dist, 'sage', programName);

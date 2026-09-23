@@ -1,5 +1,5 @@
 /**
- * CLI runner for sage sync commands (§9.1).
+ * CLI runner for medha sync commands (§9.1).
  */
 
 import {
@@ -9,12 +9,13 @@ import {
   type PushResult,
   type SyncPort,
   type SyncStatus,
-} from '@sutras/sage';
+} from '@cntxt-labs/medha';
 import type { Environment } from './environment.ts';
 import { openHome } from './open.ts';
 
 export interface SyncCliOptions {
   readonly dir?: string | undefined;
+  readonly home?: string | undefined;
   readonly ref?: string | undefined;
   readonly remote?: string | undefined;
   readonly file?: string | undefined;
@@ -25,7 +26,7 @@ export async function resolveSyncAdapter(
   environment: Environment,
 ): Promise<{ readonly adapter: SyncPort; readonly close: () => Promise<void> }> {
   const rootDir = options.dir ?? environment.cwd;
-  const opened = openHome(rootDir);
+  const opened = openHome(rootDir, options.home);
   await opened.store.open();
 
   if (options.file) {

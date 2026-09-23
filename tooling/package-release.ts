@@ -4,7 +4,7 @@
  *
  *   bun run tooling/package-release.ts [--out dist]
  *
- * Result: `<out>/sage-<version>-<platform>-<arch>/sage[.exe]` and `<out>/sage/sage[.exe]`.
+ * Result: `<out>/medha-<version>-<platform>-<arch>/sage[.exe]` and `<out>/sage/sage[.exe]`.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -17,18 +17,18 @@ const version = (
   JSON.parse(readFileSync(join(baseRoot, 'cli', 'package.json'), 'utf8')) as { version: string }
 ).version;
 const target = `${process.platform}-${process.arch}`;
-const folder = join(out, `sage-${version}-${target}`);
-const canonicalFolder = join(out, 'sage');
+const folder = join(out, `medha-${version}-${target}`);
+const canonicalFolder = join(out, 'medha');
 
 rmSync(folder, { recursive: true, force: true });
 mkdirSync(folder, { recursive: true });
 mkdirSync(canonicalFolder, { recursive: true });
 
-const program = process.platform === 'win32' ? 'sage.exe' : 'sage';
+const program = process.platform === 'win32' ? 'medha.exe' : 'sage';
 const targetPath = join(folder, program);
 const canonicalPath = join(canonicalFolder, program);
 
-process.stdout.write(`Compiling sage CLI/MCP binary for ${target}...\n`);
+process.stdout.write(`Compiling medha CLI/MCP binary for ${target}...\n`);
 
 const child = Bun.spawn({
   cmd: ['bun', 'build', '--compile', './src/bin.ts', '--outfile', targetPath],
@@ -43,6 +43,6 @@ if (code !== 0) {
   process.exit(code ?? 1);
 }
 
-// Copy to canonical dist/sage/ folder for local launcher
+// Copy to canonical dist/medha/ folder for local launcher
 cpSync(targetPath, canonicalPath, { force: true });
 process.stdout.write(`Successfully built:\n  ${targetPath}\n  ${canonicalPath}\n`);

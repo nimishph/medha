@@ -33,7 +33,7 @@ import {
   recencyDecay,
   round6,
   type StoreRegistries,
-} from '@sutras/sage-core';
+} from '@cntxt-labs/medha-core';
 
 /** Meta key holding the last sweep's epoch (ms), read/written through `StorePort.getMeta`. */
 export const LAST_SWEEP_META_KEY = 'sweep:lastRun';
@@ -46,7 +46,7 @@ export const DEFAULT_FOLD_DAYS = 90;
 export const DEFAULT_RETENTION_DAYS = 90;
 
 /** Snapshot format marker written by `backup()` and required by `restore()`. */
-export const SNAPSHOT_FORMAT = 'sutras.sage/v1';
+export const SNAPSHOT_FORMAT = 'sutras.medha/v1';
 
 // ---------------------------------------------------------------------------------------------
 // report contracts (§6.4)
@@ -145,7 +145,7 @@ export interface PreflightReport {
 }
 
 /** A portable, JSON-serialisable capture of the store's source of truth (§6.4 backup/restore). */
-export interface SageSnapshot {
+export interface MedhaSnapshot {
   readonly format: typeof SNAPSHOT_FORMAT;
   /** When the snapshot was taken. Purely informational — restore never consults it. */
   readonly exportedAt: number;

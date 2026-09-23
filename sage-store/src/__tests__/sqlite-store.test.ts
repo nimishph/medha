@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REJECT_CONTEXT, REJECT_RULE } from '@sutras/sage-core';
+import { REJECT_CONTEXT, REJECT_RULE } from '@cntxt-labs/medha-core';
 import { runStoreContractSuite, type StoreContractSetup } from '../contract-suite.ts';
 import { SQLiteStore } from '../sqlite-store.ts';
 

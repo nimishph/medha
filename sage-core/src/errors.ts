@@ -1,7 +1,7 @@
 /**
  * Typed errors for every sage subsystem.
  *
- * Nothing in the packages throws a bare `Error`. A failure is a `SageError` subclass that says
+ * Nothing in the packages throws a bare `Error`. A failure is a `MedhaError` subclass that says
  * what went wrong (`code`), where (`subsystem`), with what inputs (`context`) and because of what
  * (`cause`). Callers branch on `code`, never on message text, and the whole chain serialises to
  * JSON so CLI and MCP layers can report it without losing the reason.
@@ -45,7 +45,7 @@ export type JsonValue =
 /** Format every error code must follow. Enforced by tests over each package's error classes. */
 export const ERROR_CODE_FORMAT = /^[A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)+$/;
 
-export abstract class SageError extends Error {
+export abstract class MedhaError extends Error {
   abstract readonly code: string;
   abstract readonly subsystem: Subsystem;
   readonly context: ErrorContext;
@@ -58,8 +58,8 @@ export abstract class SageError extends Error {
     this.hint = init.hint;
   }
 
-  static is(value: unknown): value is SageError {
-    return value instanceof SageError;
+  static is(value: unknown): value is MedhaError {
+    return value instanceof MedhaError;
   }
 
   /** This error followed by each nested cause, outermost first. */
@@ -83,7 +83,7 @@ export abstract class SageError extends Error {
 function serializeError(error: Error, seen: WeakSet<object>): SerializedCause {
   seen.add(error);
   const cause = serializeCause(error.cause, seen);
-  if (!(error instanceof SageError)) {
+  if (!(error instanceof MedhaError)) {
     return { name: error.name, message: error.message, ...(cause ? { cause } : {}) };
   }
   return {
@@ -159,7 +159,7 @@ export function describeThrowable(thrown: unknown): string {
 // ---------------------------------------------------------------------------------------------
 
 /** A caller passed a value that violates a function's documented contract. */
-export class InvalidArgumentError extends SageError {
+export class InvalidArgumentError extends MedhaError {
   readonly code = 'CORE_INVALID_ARGUMENT';
   readonly subsystem = 'core';
 
@@ -177,7 +177,7 @@ export class InvalidArgumentError extends SageError {
 }
 
 /** A deadline passed before the operation finished. */
-export class DeadlineExceededError extends SageError {
+export class DeadlineExceededError extends MedhaError {
   readonly code = 'CORE_DEADLINE_EXCEEDED';
   readonly subsystem = 'core';
 
@@ -190,7 +190,7 @@ export class DeadlineExceededError extends SageError {
 }
 
 /** The caller cancelled the operation through its AbortSignal. */
-export class OperationAbortedError extends SageError {
+export class OperationAbortedError extends MedhaError {
   readonly code = 'CORE_OPERATION_ABORTED';
   readonly subsystem = 'core';
 
@@ -203,7 +203,7 @@ export class OperationAbortedError extends SageError {
 }
 
 /** Code reached a state its author proved impossible. Always a bug in sage, not the input. */
-export class InvariantViolationError extends SageError {
+export class InvariantViolationError extends MedhaError {
   readonly code = 'CORE_INVARIANT_VIOLATED';
   readonly subsystem = 'core';
 
@@ -216,12 +216,12 @@ export class InvariantViolationError extends SageError {
 }
 
 /** A fan-out finished with one or more failures. Every failure is kept, none is dropped. */
-export class AggregateFailureError extends SageError {
+export class AggregateFailureError extends MedhaError {
   readonly code = 'CORE_AGGREGATE_FAILURE';
   readonly subsystem = 'core';
-  readonly failures: readonly SageError[];
+  readonly failures: readonly MedhaError[];
 
-  constructor(operation: string, failures: readonly SageError[], init: ErrorInit = {}) {
+  constructor(operation: string, failures: readonly MedhaError[], init: ErrorInit = {}) {
     super(`${failures.length} failure(s) during ${operation}`, {
       ...init,
       cause: failures[0],
@@ -235,8 +235,8 @@ export class AggregateFailureError extends SageError {
   }
 }
 
-/** Something that is not a `SageError` reached a boundary that requires one. */
-export class UnexpectedFailureError extends SageError {
+/** Something that is not a `MedhaError` reached a boundary that requires one. */
+export class UnexpectedFailureError extends MedhaError {
   readonly code = 'CORE_UNEXPECTED_FAILURE';
   readonly subsystem = 'core';
 
@@ -250,17 +250,21 @@ export class UnexpectedFailureError extends SageError {
 }
 
 /**
- * Turn whatever a `catch` received into a `SageError` without losing it. Typed errors pass
+ * Turn whatever a `catch` received into a `MedhaError` without losing it. Typed errors pass
  * through untouched; everything else is wrapped with the operation that was running, keeping the
  * original on the cause chain.
  */
-export function toSageError(thrown: unknown, operation: string, context?: ErrorContext): SageError {
-  if (thrown instanceof SageError) return thrown;
+export function toMedhaError(
+  thrown: unknown,
+  operation: string,
+  context?: ErrorContext,
+): MedhaError {
+  if (thrown instanceof MedhaError) return thrown;
   return new UnexpectedFailureError(operation, thrown, context ? { context } : {});
 }
 
 /** An explicit name was not found in a registry. Loud by design — a typo is a bug. */
-export class UnknownRegistryEntryError extends SageError {
+export class UnknownRegistryEntryError extends MedhaError {
   readonly code = 'CORE_UNKNOWN_REGISTRY_ENTRY';
   readonly subsystem = 'core';
   readonly entries: readonly string[];
@@ -289,7 +293,7 @@ export class UnknownKindError extends UnknownRegistryEntryError {
 }
 
 /** One of the guarded registries (signals, kinds, anchors) rejected a definition. */
-export class RegistryEntryViolationError extends SageError {
+export class RegistryEntryViolationError extends MedhaError {
   readonly code = 'CORE_REGISTRY_VIOLATION';
   readonly subsystem = 'core';
 
@@ -302,7 +306,7 @@ export class RegistryEntryViolationError extends SageError {
 }
 
 /** A store, snapshot or document presented a schema version the engine cannot read. */
-export class SchemaVersionError extends SageError {
+export class SchemaVersionError extends MedhaError {
   readonly code = 'CORE_SCHEMA_VERSION';
   readonly subsystem = 'core';
 
@@ -325,3 +329,6 @@ export class SchemaVersionError extends SageError {
 export function assertNever(value: never, where: string): never {
   throw new InvariantViolationError(`Unhandled variant in ${where}`, { context: { value } });
 }
+
+// Aliases for transition
+export { MedhaError as SageError, toMedhaError as toSageError };
