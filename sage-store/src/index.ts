@@ -12,4 +12,5 @@ export * from './contract-suite.ts';
 export * from './errors.ts';
 export * from './file-store.ts';
 export * from './memory-store.ts';
+export { resolveRegistries } from './registries.ts';
 export * from './sqlite-store.ts';

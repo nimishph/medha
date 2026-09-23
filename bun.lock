@@ -11,6 +11,19 @@
         "typescript": "^5.9.0",
       },
     },
+    "cli": {
+      "name": "@sutras/sage-cli",
+      "version": "0.0.0",
+      "bin": {
+        "sage": "src/bin.ts",
+      },
+      "dependencies": {
+        "@sutras/sage": "workspace:*",
+        "@sutras/sage-core": "workspace:*",
+        "@sutras/sage-store": "workspace:*",
+        "citty": "^0.2.2",
+      },
+    },
     "sage": {
       "name": "@sutras/sage",
       "version": "0.0.0",
@@ -60,6 +73,8 @@
 
     "@sutras/sage": ["@sutras/sage@workspace:sage"],
 
+    "@sutras/sage-cli": ["@sutras/sage-cli@workspace:cli"],
+
     "@sutras/sage-core": ["@sutras/sage-core@workspace:sage-core"],
 
     "@sutras/sage-store": ["@sutras/sage-store@workspace:sage-store"],
@@ -85,6 +100,8 @@
     "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
 
     "chalk": ["chalk@4.1.2", "", { "dependencies": { "ansi-styles": "^4.1.0", "supports-color": "^7.1.0" } }, "sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA=="],
+
+    "citty": ["citty@0.2.2", "", {}, "sha512-+6vJA3L98yv+IdfKGZHBNiGW5KHn22e/JwID0Strsz8h4S/csAu/OuICwxrg44k5MRiZHWIo8XXuJgQTriRP4w=="],
 
     "color-convert": ["color-convert@2.0.1", "", { "dependencies": { "color-name": "~1.1.4" } }, "sha512-RRECPsj7iu/xb5oKYcsFHSppFNnsj/52OVTRKb4zP5onXwVF3zVmmToNcOfGC+CRDpfK/U584fMg38ZHCaElKQ=="],
 

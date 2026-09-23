@@ -9,7 +9,7 @@
  * Code convention: `<SUBSYSTEM>_<REASON>` in upper snake case, e.g. `CORE_INVALID_ARGUMENT`.
  */
 
-export type Subsystem = 'core' | 'store' | 'sync' | 'sage';
+export type Subsystem = 'core' | 'store' | 'sync' | 'sage' | 'cli';
 
 /** Structured facts about the failure. Values are serialised defensively by `toJSON`. */
 export type ErrorContext = Readonly<Record<string, unknown>>;

@@ -7,7 +7,8 @@
     "sage-core",
     "sage-store",
     "sage-sync",
-    "sage"
+    "sage",
+    "cli"
   ],
   "engines": {
     "bun": ">=1.3.0"
@@ -16,7 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "boundaries": "depcruise --config .dependency-cruiser.cjs sage-core/src sage-store/src sage-sync/src sage/src",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs sage-core/src sage-store/src sage-sync/src sage/src cli/src",
     "test": "bun test",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test"
   },

@@ -10,6 +10,8 @@ const ALLOWED = {
   'sage-sync': ['sage-core'],
   // Engine facade (planes, sweep, exploration helper), CLI and MCP composition root.
   sage: ['sage-core', 'sage-store', 'sage-sync'],
+  // The `sage` command line: init today, the read/write/maintenance planes as they land.
+  cli: ['sage', 'sage-core', 'sage-store'],
 };
 
 const names = Object.keys(ALLOWED);
