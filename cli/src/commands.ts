@@ -2,14 +2,27 @@ import { defineCommand } from 'citty';
 import { currentEnvironment } from './environment.ts';
 import { type InitOptions, runInit } from './init.ts';
 import {
+  runMaintainBackup,
+  runMaintainCompact,
+  runMaintainPreflight,
+  runMaintainRestore,
+} from './maintain.ts';
+import {
   driftCommandArgs,
   explainThresholdCommandArgs,
   initCommandArgs,
   listCommandArgs,
+  maintainBackupArgs,
+  maintainCompactArgs,
+  maintainPreflightArgs,
+  maintainRestoreArgs,
   paramsCommandArgs,
   showCommandArgs,
   simulateCommandArgs,
   statusCommandArgs,
+  updaterForkArgs,
+  updaterListArgs,
+  updaterShowArgs,
 } from './options.ts';
 import {
   runDrift,
@@ -25,12 +38,20 @@ import {
   renderExplainThreshold,
   renderInit,
   renderList,
+  renderMaintainBackup,
+  renderMaintainCompact,
+  renderMaintainPreflight,
+  renderMaintainRestore,
   renderParams,
   renderShow,
   renderSimulate,
   renderStatus,
+  renderUpdaterFork,
+  renderUpdaterList,
+  renderUpdaterShow,
   toJson,
 } from './render.ts';
+import { runUpdaterFork, runUpdaterList, runUpdaterShow } from './updater.ts';
 import { VERSION } from './version.ts';
 
 export const initCommand = defineCommand({
@@ -176,7 +197,7 @@ export const simulateCommand = defineCommand({
 export const explainThresholdCommand = defineCommand({
   meta: {
     name: 'explain-threshold',
-    description: 'Which thresholds an entity clears and why (the rename of `gate`).',
+    description: 'Which thresholds an entity clears and why (the rename of gate).',
   },
   args: explainThresholdCommandArgs,
   async run({ args }) {
@@ -191,6 +212,163 @@ export const explainThresholdCommand = defineCommand({
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderExplainThreshold(report));
+  },
+});
+
+/** Maintenance commands (preflight, compact, backup, restore). */
+
+export const maintainPreflightCommand = defineCommand({
+  meta: {
+    name: 'preflight',
+    description: 'Check store integrity, episode count, and registry match. Exits 1 on corrupt.',
+  },
+  args: maintainPreflightArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runMaintainPreflight(
+      { ...(args.dir === undefined ? {} : { dir: args.dir }) },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderMaintainPreflight(report));
+  },
+});
+
+export const maintainCompactCommand = defineCommand({
+  meta: {
+    name: 'compact',
+    description: 'Fold aged episode history into baseline snapshots and report the folded range.',
+  },
+  args: maintainCompactArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runMaintainCompact(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args['older-than'] === undefined ? {} : { olderThan: args['older-than'] }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderMaintainCompact(report));
+  },
+});
+
+export const maintainBackupCommand = defineCommand({
+  meta: {
+    name: 'backup',
+    description: 'Export an atomic, portable SageSnapshot to a file.',
+  },
+  args: maintainBackupArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runMaintainBackup(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.path === undefined ? {} : { path: args.path }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderMaintainBackup(report));
+  },
+});
+
+export const maintainRestoreCommand = defineCommand({
+  meta: {
+    name: 'restore',
+    description: 'Replace store state headlessly with a previously exported SageSnapshot.',
+  },
+  args: maintainRestoreArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runMaintainRestore(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.path === undefined ? {} : { path: args.path }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderMaintainRestore(report));
+  },
+});
+
+export const maintainCommand = defineCommand({
+  meta: {
+    name: 'maintain',
+    description: 'Engine maintenance: preflight, compact, backup, and restore.',
+  },
+  subCommands: {
+    preflight: maintainPreflightCommand,
+    compact: maintainCompactCommand,
+    backup: maintainBackupCommand,
+    restore: maintainRestoreCommand,
+  },
+});
+
+/** Weight updater commands (list, show, fork). */
+
+export const updaterListCommand = defineCommand({
+  meta: {
+    name: 'list',
+    description: 'List all registered weight updaters (project -> user -> built-in).',
+  },
+  args: updaterListArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runUpdaterList(
+      { ...(args.dir === undefined ? {} : { dir: args.dir }) },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderUpdaterList(report));
+  },
+});
+
+export const updaterShowCommand = defineCommand({
+  meta: {
+    name: 'show',
+    description: 'Inspect a registered weight updater by name.',
+  },
+  args: updaterShowArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runUpdaterShow(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.name === undefined ? {} : { name: args.name }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderUpdaterShow(report));
+  },
+});
+
+export const updaterForkCommand = defineCommand({
+  meta: {
+    name: 'fork',
+    description: 'Scaffold a custom TypeScript weight updater template from a base updater.',
+  },
+  args: updaterForkArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runUpdaterFork(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.name === undefined ? {} : { name: args.name }),
+        ...(args.out === undefined ? {} : { out: args.out }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderUpdaterFork(report));
+  },
+});
+
+export const updaterCommand = defineCommand({
+  meta: {
+    name: 'updater',
+    description: 'Weight updater inspection, listing, and custom updater scaffolding.',
+  },
+  subCommands: {
+    list: updaterListCommand,
+    show: updaterShowCommand,
+    fork: updaterForkCommand,
   },
 });
 
@@ -209,5 +387,7 @@ export const commands = defineCommand({
     params: paramsCommand,
     simulate: simulateCommand,
     'explain-threshold': explainThresholdCommand,
+    maintain: maintainCommand,
+    updater: updaterCommand,
   },
 });

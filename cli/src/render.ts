@@ -2,6 +2,12 @@ import type { EntityKey } from '@sutras/sage-core';
 import { SageError } from '@sutras/sage-core';
 import type { InitReport } from './init.ts';
 import type {
+  MaintainBackupReport,
+  MaintainCompactReport,
+  MaintainPreflightReport,
+  MaintainRestoreReport,
+} from './maintain.ts';
+import type {
   DriftResult,
   ExplainReport,
   ListReport,
@@ -10,6 +16,7 @@ import type {
   SimulateResult,
   StatusReport,
 } from './read.ts';
+import type { UpdaterForkReport, UpdaterListReport, UpdaterShowReport } from './updater.ts';
 
 /** Machine output: JSON with a replacer that makes every engine value round-trippable. */
 export function toJson(value: unknown): string {
@@ -190,5 +197,88 @@ export function renderExplainThreshold(report: ExplainReport): string {
     }
   }
   lines.push(`  note: ${report.note}`);
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderMaintainPreflight(report: MaintainPreflightReport): string {
+  const p = report.preflight;
+  if (p.status === 'corrupt') {
+    const src = p.location?.source ?? 'unknown';
+    return (
+      `sage: store at ${src} is corrupt — preflight exits 1\n` +
+      `  hint: restore the last snapshot, or wipe and re-init with --recreate\n`
+    );
+  }
+  const lastSweep = p.lastSweep === null ? 'not yet' : new Date(p.lastSweep).toISOString();
+  const lines = [
+    `sage: preflight for ${report.home}`,
+    `  status:     ${p.status}`,
+    `  episodes:   ${p.episodeCount}`,
+    `  entities:   ${p.entityCount}`,
+    `  integrity:  ${p.integrity}`,
+    `  registries: ${p.registries.kinds} kinds, ${p.registries.signals} signals, ${p.registries.anchors} anchors`,
+    `  last sweep: ${lastSweep}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderMaintainCompact(report: MaintainCompactReport): string {
+  const c = report.report;
+  const range = c.compacted === null ? 'none' : `${c.compacted.from}..${c.compacted.to}`;
+  const lines = [
+    `sage: compaction for ${report.home}`,
+    `  folded range:        ${range}`,
+    `  baselines written:   ${c.baselinesWritten}`,
+    `  remaining episodes:  ${c.remainingEpisodes}`,
+    `  entities affected:   ${c.entities}`,
+    `  older than (days):   ${c.olderThanDays}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderMaintainBackup(report: MaintainBackupReport): string {
+  const snap = report.snapshot;
+  const lines = [
+    `sage: backup for ${report.home}`,
+    `  written to:   ${report.path}`,
+    `  format:       ${snap.format}`,
+    `  episodes:     ${snap.episodes.length}`,
+    `  as of:        ${new Date(report.asOf).toISOString()}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderMaintainRestore(report: MaintainRestoreReport): string {
+  const lines = [
+    `sage: restore for ${report.home}`,
+    `  source:     ${report.path}`,
+    `  episodes:   ${report.restored.from} -> ${report.restored.to}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderUpdaterList(report: UpdaterListReport): string {
+  const lines = [`updaters (${report.updaters.length}):`];
+  for (const u of report.updaters) {
+    lines.push(`  ${u.name.padEnd(22)} [${u.source}]`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderUpdaterShow(report: UpdaterShowReport): string {
+  const lines = [
+    `updater:     ${report.name}`,
+    `source:      ${report.source}`,
+    `description: ${report.description}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderUpdaterFork(report: UpdaterForkReport): string {
+  const lines = [
+    `scaffolded custom updater from '${report.name}'`,
+    `  path: ${report.path}`,
+    `  load: import and pass via SageOptions { updaters: new UpdaterRegistry({ project: { ... } }) }`,
+  ];
   return `${lines.join('\n')}\n`;
 }

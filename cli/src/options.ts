@@ -89,3 +89,73 @@ export const explainThresholdCommandArgs: ArgsDef = {
   ...readCommonArgs,
   ...readKeyArgs,
 };
+
+/** Arg surface shared by maintenance commands: --dir and --json. */
+export const maintainCommonArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+  },
+  json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
+};
+
+export const maintainPreflightArgs: ArgsDef = { ...maintainCommonArgs };
+
+export const maintainCompactArgs: ArgsDef = {
+  ...maintainCommonArgs,
+  'older-than': {
+    type: 'string',
+    description: 'Cutoff in days (e.g. --older-than 30). Default: engine retention config.',
+  },
+};
+
+export const maintainBackupArgs: ArgsDef = {
+  ...maintainCommonArgs,
+  path: {
+    type: 'positional',
+    description: 'Destination file path for the snapshot JSON.',
+    required: true,
+  },
+};
+
+export const maintainRestoreArgs: ArgsDef = {
+  ...maintainCommonArgs,
+  path: {
+    type: 'positional',
+    description: 'Source snapshot JSON file to restore.',
+    required: true,
+  },
+};
+
+/** Arg surface shared by updater commands: --dir and --json. */
+export const updaterCommonArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+  },
+  json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
+};
+
+export const updaterListArgs: ArgsDef = { ...updaterCommonArgs };
+
+export const updaterShowArgs: ArgsDef = {
+  ...updaterCommonArgs,
+  name: {
+    type: 'positional',
+    description: 'Name of the weight updater to inspect.',
+    required: true,
+  },
+};
+
+export const updaterForkArgs: ArgsDef = {
+  ...updaterCommonArgs,
+  name: {
+    type: 'positional',
+    description: 'Name of the weight updater to fork.',
+    required: true,
+  },
+  out: {
+    type: 'string',
+    description: 'Destination file path for the scaffolded updater template.',
+  },
+};

@@ -37,16 +37,18 @@ function fresh(): {
   home: string;
   out: () => string;
   err: () => string;
+  setNow: (now: number) => void;
 } {
   const root = join(tmpdir(), `sage-cli-${process.pid}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(root, { recursive: true });
   cleanups = [...cleanups, root];
   let out = '';
   let err = '';
+  let clock = NOW;
   const env: Environment = {
     cwd: root,
     env: {},
-    now: () => NOW,
+    now: () => clock,
     isTTY: false,
     exitCode: 0,
     stdout: (text) => {
@@ -56,7 +58,16 @@ function fresh(): {
       err += text;
     },
   };
-  return { env, root, home: join(root, '.sutra', 'sage'), out: () => out, err: () => err };
+  return {
+    env,
+    root,
+    home: join(root, '.sutra', 'sage'),
+    out: () => out,
+    err: () => err,
+    setNow: (t: number) => {
+      clock = t;
+    },
+  };
 }
 
 function readConfig(home: string): Record<string, unknown> {
@@ -578,5 +589,233 @@ describe('sage read plane — home guards', () => {
     expect(await runCli(['list'], env)).toBe(1);
     expect(err()).toContain('CLI_NOT_INITIALIZED');
     expect(err()).toContain('memory');
+  });
+});
+
+describe('sage maintain plane', () => {
+  test('maintain preflight on healthy store reports ok (exit 0)', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['maintain', 'preflight'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('preflight for');
+    expect(text).toContain('status:     ok');
+    expect(text).toContain('integrity:  ok');
+  });
+
+  test('maintain preflight --json outputs structured report (exit 0)', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const before = out();
+    expect(await runCli(['maintain', 'preflight', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as {
+      preflight: { status: string; episodeCount: number };
+    };
+    expect(report.preflight.status).toBe('ok');
+    expect(report.preflight.episodeCount).toBeGreaterThan(0);
+  });
+
+  test('maintain preflight on a corrupt store exits 1 and reports without throwing', async () => {
+    const { env, out, home } = fresh();
+    // Use file backend so we can hand-corrupt the JSONL state
+    expect(await runCli(['init', '--store', 'file'], env)).toBe(0);
+    await seedHome(env);
+
+    // Corrupt the state.jsonl file
+    const stateFile = join(home, 'state.jsonl');
+    writeFileSync(stateFile, '{corrupted-json-line\n');
+
+    const before = out();
+    expect(await runCli(['maintain', 'preflight'], env)).toBe(1);
+    const text = out().slice(before.length);
+    expect(text).toContain('corrupt');
+    expect(text).toContain('preflight exits 1');
+
+    // --json also exits 1 and reports without throwing
+    const beforeJson = out();
+    expect(await runCli(['maintain', 'preflight', '--json'], env)).toBe(1);
+    const report = JSON.parse(out().slice(beforeJson.length)) as {
+      preflight: { status: string };
+    };
+    expect(report.preflight.status).toBe('corrupt');
+  });
+
+  test('maintain compact folds history and names the folded range', async () => {
+    const { env, out, setNow } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    // Advance clock by 100 days so existing episodes fall outside the 30-day window
+    const futureTime = NOW + 100 * 24 * 60 * 60 * 1000;
+    setNow(futureTime);
+
+    expect(await runCli(['maintain', 'compact', '--older-than', '30'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('compaction for');
+    expect(text).toContain('folded range:');
+    expect(text).toContain('0..');
+    expect(text).toContain('baselines written:');
+
+    // Also test --json output
+    const beforeJson = out();
+    expect(await runCli(['maintain', 'compact', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(beforeJson.length)) as {
+      report: { remainingEpisodes: number; compacted: { from: number; to: number } | null };
+    };
+    expect(report.report).toBeDefined();
+    expect(report.report.compacted).toBeDefined();
+
+    // Invalid --older-than (0 or non-integer) is usage (exit 2)
+    expect(await runCli(['maintain', 'compact', '--older-than', '0'], env)).toBe(2);
+  });
+
+  test('maintain backup and restore round-trips a store', async () => {
+    const { env, root, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    // Verify initial entity count
+    const beforeList = out();
+    await runCli(['list', '--json'], env);
+    const initialList = JSON.parse(out().slice(beforeList.length)) as {
+      page: { items: unknown[] };
+    };
+    expect(initialList.page.items.length).toBeGreaterThan(0);
+
+    // Backup to snapshot file
+    const backupPath = join(root, 'backup.json');
+    expect(await runCli(['maintain', 'backup', backupPath], env)).toBe(0);
+    expect(existsSync(backupPath)).toBe(true);
+
+    // Wipe store with recreate
+    expect(await runCli(['init', '--recreate'], env)).toBe(0);
+    const afterWipeList = out();
+    await runCli(['list', '--json'], env);
+    const wipedList = JSON.parse(out().slice(afterWipeList.length)) as {
+      page: { items: unknown[] };
+    };
+    expect(wipedList.page.items.length).toBe(0);
+
+    // Restore from backup
+    expect(await runCli(['maintain', 'restore', backupPath], env)).toBe(0);
+
+    // Verify entities are restored
+    const afterRestoreList = out();
+    await runCli(['list', '--json'], env);
+    const restoredList = JSON.parse(out().slice(afterRestoreList.length)) as {
+      page: { items: unknown[] };
+    };
+    expect(restoredList.page.items.length).toBe(initialList.page.items.length);
+  });
+
+  test('maintain restore on invalid snapshot file fails with CLI_SNAPSHOT_INVALID (exit 1)', async () => {
+    const { env, root, err } = fresh();
+    await runCli(['init'], env);
+
+    const bogusPath = join(root, 'bogus.json');
+    writeFileSync(bogusPath, JSON.stringify({ not: 'a snapshot' }), 'utf8');
+
+    expect(await runCli(['maintain', 'restore', bogusPath], env)).toBe(1);
+    expect(err()).toContain('CLI_SNAPSHOT_INVALID');
+  });
+});
+
+describe('sage updater plane', () => {
+  test('updater list lists all built-in updaters', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    expect(await runCli(['updater', 'list'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('updaters');
+    expect(text).toContain('ema');
+    expect(text).toContain('[builtin]');
+    expect(text).toContain('wilson');
+    expect(text).toContain('asymmetric-penalty');
+  });
+
+  test('updater list --json outputs JSON list of updaters', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    const before = out();
+    expect(await runCli(['updater', 'list', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as {
+      updaters: { name: string; source: string }[];
+    };
+    expect(Array.isArray(report.updaters)).toBe(true);
+    const ema = report.updaters.find((u) => u.name === 'ema');
+    expect(ema).toBeDefined();
+    expect(ema?.source).toBe('builtin');
+  });
+
+  test('updater show displays updater details', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    expect(await runCli(['updater', 'show', 'ema'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('updater:     ema');
+    expect(text).toContain('source:      builtin');
+    expect(text).toContain('description: Exponential Moving Average');
+
+    // Also test --json
+    const beforeJson = out();
+    expect(await runCli(['updater', 'show', 'wilson', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(beforeJson.length)) as {
+      name: string;
+      source: string;
+      description: string;
+    };
+    expect(report.name).toBe('wilson');
+    expect(report.source).toBe('builtin');
+  });
+
+  test('updater show on unknown updater fails with CLI_UPDATER_UNKNOWN (exit 1)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+
+    expect(await runCli(['updater', 'show', 'nonexistent'], env)).toBe(1);
+    expect(err()).toContain('CLI_UPDATER_UNKNOWN');
+    expect(err()).toContain('known updaters');
+    expect(err()).toContain('ema');
+  });
+
+  test('updater fork scaffolds custom template and guards against overwriting', async () => {
+    const { env, root, out, err } = fresh();
+    await runCli(['init'], env);
+
+    // Fork default path
+    expect(await runCli(['updater', 'fork', 'ema'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('scaffolded custom updater from');
+    expect(text).toContain('ema');
+
+    const defaultForkPath = join(root, '.sutra', 'sage', 'updaters', 'ema-fork.ts');
+    expect(existsSync(defaultForkPath)).toBe(true);
+    const scaffoldContent = readFileSync(defaultForkPath, 'utf8');
+    expect(scaffoldContent).toContain('export const emaCustomUpdater');
+    expect(scaffoldContent).toContain('UpdaterRegistry');
+
+    // Fork to explicit path
+    const customOut = join(root, 'custom-updater.ts');
+    expect(await runCli(['updater', 'fork', 'wilson', '--out', customOut], env)).toBe(0);
+    expect(existsSync(customOut)).toBe(true);
+
+    // Overwriting without moving/removing fails with CLI_FORK_EXISTS
+    expect(await runCli(['updater', 'fork', 'wilson', '--out', customOut], env)).toBe(1);
+    expect(err()).toContain('CLI_FORK_EXISTS');
+  });
+
+  test('updater fork on unknown updater fails with CLI_UPDATER_UNKNOWN (exit 1)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+
+    expect(await runCli(['updater', 'fork', 'nonexistent'], env)).toBe(1);
+    expect(err()).toContain('CLI_UPDATER_UNKNOWN');
   });
 });

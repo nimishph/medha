@@ -91,6 +91,42 @@ export class StoreCorruptError extends CliError {
   }
 }
 
+/** A snapshot file given to `maintain restore` could not be read as an exported SageSnapshot. */
+export class SnapshotFileError extends CliError {
+  readonly code = 'CLI_SNAPSHOT_INVALID';
+
+  constructor(path: string, problem: string) {
+    super(`cannot read snapshot ${path}: ${problem}`, {
+      context: { path, problem },
+      hint: 'maintain backup wrote the file; pass that path back to maintain restore',
+    });
+  }
+}
+
+/** `updater show`/`fork` was given a name no tier resolves. */
+export class UpdaterNotFoundError extends CliError {
+  readonly code = 'CLI_UPDATER_UNKNOWN';
+
+  constructor(name: string, known: readonly string[]) {
+    super(`no updater named '${name}'`, {
+      context: { name, known },
+      hint: `known updaters: ${known.join(', ')}`,
+    });
+  }
+}
+
+/** `updater fork` refused to overwrite an existing path. */
+export class UpdaterForkError extends CliError {
+  readonly code = 'CLI_FORK_EXISTS';
+
+  constructor(path: string) {
+    super(`${path} already exists`, {
+      context: { path },
+      hint: 'remove it first, or pass --out to a fresh path',
+    });
+  }
+}
+
 function summarizeDiff(diff: RegistryDiff): string {
   const part = (
     label: string,
