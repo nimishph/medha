@@ -324,9 +324,11 @@ export async function serveMcp(
     server.server.onclose = () => resolve();
   });
   if (transport instanceof StdioServerTransport) {
-    process.stdin.once('close', () => {
+    const handleClose = () => {
       void server.close();
-    });
+    };
+    process.stdin.once('close', handleClose);
+    process.stdin.once('end', handleClose);
   }
   await server.connect(transport);
   environment.stderr(`sage mcp: serving ${opened.home}\n`);

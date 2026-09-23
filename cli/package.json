@@ -5,7 +5,7 @@
   "type": "module",
   "description": "The sage command line: engine bootstrap (init) today, the read/write/maintenance planes as they land.",
   "bin": {
-    "sage": "src/bin.ts"
+    "sage": "bin/sage.cjs"
   },
   "exports": {
     ".": "./src/index.ts"
@@ -18,5 +18,8 @@
     "citty": "^0.2.2",
     "zod": "^4.6.5"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "build": "bun run ../tooling/package-release.ts"
+  }
 }
