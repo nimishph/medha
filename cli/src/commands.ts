@@ -21,6 +21,9 @@ import {
   showCommandArgs,
   simulateCommandArgs,
   statusCommandArgs,
+  syncPullArgs,
+  syncPushArgs,
+  syncStatusArgs,
   updaterForkArgs,
   updaterListArgs,
   updaterShowArgs,
@@ -47,6 +50,9 @@ import {
   renderShow,
   renderSimulate,
   renderStatus,
+  renderSyncPull,
+  renderSyncPush,
+  renderSyncStatus,
   renderUpdaterFork,
   renderUpdaterList,
   renderUpdaterShow,
@@ -404,6 +410,86 @@ export const mcpCommand = defineCommand({
   },
 });
 
+/** Sync subcommands (§9.1). */
+
+export const syncStatusCommand = defineCommand({
+  meta: {
+    name: 'status',
+    description: 'Check synchronization status against git ref or file.',
+  },
+  args: syncStatusArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runSyncStatus } = await import('./sync.ts');
+    const report = await runSyncStatus(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.ref === undefined ? {} : { ref: args.ref }),
+        ...(args.remote === undefined ? {} : { remote: args.remote }),
+        ...(args.file === undefined ? {} : { file: args.file }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderSyncStatus(report));
+  },
+});
+
+export const syncPullCommand = defineCommand({
+  meta: {
+    name: 'pull',
+    description: 'Pull evidential memory snapshot from git ref or file.',
+  },
+  args: syncPullArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runSyncPull } = await import('./sync.ts');
+    const report = await runSyncPull(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.ref === undefined ? {} : { ref: args.ref }),
+        ...(args.remote === undefined ? {} : { remote: args.remote }),
+        ...(args.file === undefined ? {} : { file: args.file }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderSyncPull(report));
+  },
+});
+
+export const syncPushCommand = defineCommand({
+  meta: {
+    name: 'push',
+    description: 'Push evidential memory snapshot to git ref or file.',
+  },
+  args: syncPushArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runSyncPush } = await import('./sync.ts');
+    const report = await runSyncPush(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.ref === undefined ? {} : { ref: args.ref }),
+        ...(args.remote === undefined ? {} : { remote: args.remote }),
+        ...(args.file === undefined ? {} : { file: args.file }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderSyncPush(report));
+  },
+});
+
+export const syncCommand = defineCommand({
+  meta: {
+    name: 'sync',
+    description: 'Distributed evidential-memory synchronization (git-ref and file adapters).',
+  },
+  subCommands: {
+    status: syncStatusCommand,
+    pull: syncPullCommand,
+    push: syncPushCommand,
+  },
+});
+
 export const commands = defineCommand({
   meta: {
     name: 'sage',
@@ -422,5 +508,6 @@ export const commands = defineCommand({
     maintain: maintainCommand,
     updater: updaterCommand,
     mcp: mcpCommand,
+    sync: syncCommand,
   },
 });

@@ -1019,3 +1019,34 @@ describe('sage mcp server', () => {
     expect(exitCode).toBe(0);
   });
 });
+
+describe('sage sync commands', () => {
+  test('sync status reports uninitialized when sync target does not exist', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    const syncFile = join(env.cwd, 'sync.json');
+    expect(await runCli(['sync', 'status', '--file', syncFile], env)).toBe(0);
+    expect(out()).toContain('Sync Status: UNINITIALIZED');
+  });
+
+  test('sync push and pull round-trip through a file', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const syncFile = join(env.cwd, 'sync.json');
+    // Push
+    expect(await runCli(['sync', 'push', '--file', syncFile], env)).toBe(0);
+    expect(out()).toContain('Sync push completed successfully');
+    expect(out()).toContain('Pushed entities: 5');
+
+    // Status is synced
+    expect(await runCli(['sync', 'status', '--file', syncFile], env)).toBe(0);
+    expect(out()).toContain('Sync Status: SYNCED');
+
+    // Pull with --json
+    expect(await runCli(['sync', 'pull', '--file', syncFile, '--json'], env)).toBe(0);
+    expect(out()).toContain('"ok": true');
+  });
+});

@@ -1,7 +1,8 @@
 /**
- * sage-sync: the optional `SyncPort` — status, pull, push, reconcile over episode logs.
- *
- * Scaffold slice (Loom-ujs3.2). The port and its git-ref / file adapters land in later slices
- * (Loom-ujs3.10). No store code may reach here except through core.
+ * sage-sync: SyncPort implementations, snapshot schema migration, and Git-ref / File adapters.
  */
-export {};
+
+export * from './file.ts';
+export * from './git.ts';
+export * from './merge.ts';
+export * from './noop.ts';

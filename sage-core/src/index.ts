@@ -15,6 +15,7 @@ export * from './rng.ts';
 export * from './rounding.ts';
 export * from './signals.ts';
 export * from './store-port.ts';
+export * from './sync-port.ts';
 export * from './thresholds.ts';
 export * from './trust.ts';
 export * from './wilson.ts';

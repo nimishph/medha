@@ -166,3 +166,24 @@ export const mcpCommandArgs: ArgsDef = {
     description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
   },
 };
+
+export const syncStatusArgs: ArgsDef = {
+  ...readCommonArgs,
+  ref: { type: 'string', description: 'Git ref to synchronize (default: refs/sutra/sage/memory).' },
+  remote: { type: 'string', description: 'Git remote to synchronize with (default: origin).' },
+  file: { type: 'string', description: 'File path for file-based synchronization.' },
+};
+
+export const syncPullArgs: ArgsDef = {
+  ...readCommonArgs,
+  ref: { type: 'string', description: 'Git ref to pull from (default: refs/sutra/sage/memory).' },
+  remote: { type: 'string', description: 'Git remote to pull from (default: origin).' },
+  file: { type: 'string', description: 'File path for file-based synchronization.' },
+};
+
+export const syncPushArgs: ArgsDef = {
+  ...readCommonArgs,
+  ref: { type: 'string', description: 'Git ref to push to (default: refs/sutra/sage/memory).' },
+  remote: { type: 'string', description: 'Git remote to push to (default: origin).' },
+  file: { type: 'string', description: 'File path for file-based synchronization.' },
+};

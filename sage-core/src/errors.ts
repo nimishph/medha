@@ -301,6 +301,26 @@ export class RegistryEntryViolationError extends SageError {
   }
 }
 
+/** A store, snapshot or document presented a schema version the engine cannot read. */
+export class SchemaVersionError extends SageError {
+  readonly code = 'CORE_SCHEMA_VERSION';
+  readonly subsystem = 'core';
+
+  constructor(
+    expectedVersion: number,
+    receivedVersion: unknown,
+    init: Omit<ErrorInit, 'context'> & { readonly context?: ErrorContext } = {},
+  ) {
+    super(
+      `Unsupported schema version: expected ${expectedVersion}, received ${describeThrowable(receivedVersion)}`,
+      {
+        ...init,
+        context: { expectedVersion, receivedVersion, ...init.context },
+      },
+    );
+  }
+}
+
 /** Exhaustiveness guard for `switch` over closed unions. */
 export function assertNever(value: never, where: string): never {
   throw new InvariantViolationError(`Unhandled variant in ${where}`, { context: { value } });

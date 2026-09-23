@@ -45,6 +45,7 @@ import {
   SignalRegistry,
   type SignalSpec,
   type StorePort,
+  type SyncPort,
   sanitizeContext,
   validateSignalSpec,
   wilsonWidth,
@@ -75,6 +76,7 @@ export interface SageOptions {
   readonly store: StorePort;
   readonly updaters?: UpdaterRegistry | undefined;
   readonly promotionPolicy?: PromotionPolicy | undefined;
+  readonly sync?: SyncPort | undefined;
 }
 
 /** Build every number the updaters see from the entity state + the incoming signal. */
@@ -103,6 +105,7 @@ export class Sage {
   readonly store: StorePort;
   readonly updaters: UpdaterRegistry;
   readonly promotionPolicy: PromotionPolicy;
+  readonly sync: SyncPort | undefined;
   /** The last `store.open()` result, retained so maintenance can report a corrupt location. */
   private openResult: OpenResult | undefined;
 
@@ -110,6 +113,7 @@ export class Sage {
     this.store = options.store;
     this.updaters = options.updaters ?? new UpdaterRegistry();
     this.promotionPolicy = options.promotionPolicy ?? convergingSourcesPolicy({ minSources: 2 });
+    this.sync = options.sync;
   }
 
   // -------------------------------------------------------------------------------------------

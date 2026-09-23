@@ -282,3 +282,60 @@ export function renderUpdaterFork(report: UpdaterForkReport): string {
   ];
   return `${lines.join('\n')}\n`;
 }
+
+export function renderSyncStatus(status: {
+  readonly state: string;
+  readonly localCount: number;
+  readonly remoteCount?: number | undefined;
+  readonly ref?: string | undefined;
+  readonly message?: string | undefined;
+}): string {
+  const lines: string[] = [
+    `Sync Status: ${status.state.toUpperCase()}`,
+    `  Local entities:  ${status.localCount}`,
+  ];
+  if (status.remoteCount !== undefined) {
+    lines.push(`  Remote entities: ${status.remoteCount}`);
+  }
+  if (status.ref) {
+    lines.push(`  Target ref/file: ${status.ref}`);
+  }
+  if (status.message) {
+    lines.push(`  Note:            ${status.message}`);
+  }
+  return lines.join('\n');
+}
+
+export function renderSyncPull(result: {
+  readonly ok: boolean;
+  readonly updated: boolean;
+  readonly pulledCount: number;
+  readonly localTotal: number;
+  readonly error?: string | undefined;
+}): string {
+  if (!result.ok) {
+    return `Sync pull failed: ${result.error || 'unknown error'}`;
+  }
+  return [
+    'Sync pull completed successfully.',
+    `  Pulled:       ${result.pulledCount}`,
+    `  Total local:  ${result.localTotal}`,
+    `  Updated:      ${result.updated ? 'yes' : 'no'}`,
+  ].join('\n');
+}
+
+export function renderSyncPush(result: {
+  readonly ok: boolean;
+  readonly pushedCount: number;
+  readonly commit?: string | undefined;
+  readonly error?: string | undefined;
+}): string {
+  if (!result.ok) {
+    return `Sync push failed: ${result.error || 'unknown error'}`;
+  }
+  const lines = ['Sync push completed successfully.', `  Pushed entities: ${result.pushedCount}`];
+  if (result.commit) {
+    lines.push(`  Commit SHA:      ${result.commit}`);
+  }
+  return lines.join('\n');
+}
