@@ -32,3 +32,60 @@ export const initCommandArgs: ArgsDef = {
   },
   json: { type: 'boolean', description: 'Emit the init report as JSON.', default: false },
 };
+
+/** Arg surface shared by every read command: --dir and --json. */
+export const readCommonArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+  },
+  json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
+};
+
+/** The three flags that address one entity; --kind/--namespace default for legacy `rules` parity. */
+export const readKeyArgs: ArgsDef = {
+  namespace: { type: 'string', description: 'Entity namespace. Default: empty.' },
+  kind: { type: 'string', description: 'Entity kind. Default: rule.' },
+  id: { type: 'string', description: 'Entity id (opaque to Sage, unique per namespace+kind).' },
+};
+
+export const listCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  kind: { type: 'string', description: 'Filter: entity kind.' },
+  status: {
+    type: 'string',
+    description: 'Filter: lifecycle status (probation|active|trusted|quarantined|retired).',
+  },
+  namespace: { type: 'string', description: 'Filter: entity namespace.' },
+  drifting: { type: 'boolean', description: 'Filter: only entities currently drifting.' },
+  limit: { type: 'string', description: 'Page size (default 1000).' },
+  cursor: { type: 'string', description: 'Opaque next-page token from a previous --json list.' },
+};
+
+export const showCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  recent: { type: 'string', description: 'How many recent episodes to include. Default: 10.' },
+};
+
+export const statusCommandArgs: ArgsDef = { ...readCommonArgs };
+
+export const driftCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  limit: { type: 'string', description: 'Cap the number of drifting entities reported.' },
+};
+
+export const paramsCommandArgs: ArgsDef = {
+  json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
+};
+
+export const simulateCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  signal: { type: 'string', description: 'Signal name to simulate (e.g. APPLY, REJECT_RULE).' },
+};
+
+export const explainThresholdCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+};

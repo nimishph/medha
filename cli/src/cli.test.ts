@@ -3,9 +3,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Sage, type SageSnapshot } from '@sutras/sage';
+import type { EntityKey } from '@sutras/sage-core';
 import { MemoryStore } from '@sutras/sage-store';
 import { runCli } from './cli.ts';
 import type { Environment } from './environment.ts';
+import { type SageConfigV1, storeForConfig } from './layout.ts';
 import { VERSION } from './version.ts';
 
 /**
@@ -298,5 +300,283 @@ describe('sage init — beyond the happy path', () => {
     expect(await runCli(['init', '--store', 'file'], env)).toBe(1);
     expect(err()).toContain('CLI_STORE_CORRUPT');
     expect(err()).toContain('hint:');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Read plane (Loom-ujs3.11.3): seed a real store through storeForConfig + Sage, then drive every
+// read command through the CLI. NOW is fixed, so all rendered timestamps and deltas are golden.
+// ---------------------------------------------------------------------------------------------
+
+const SEED_NOW = NOW + 1000;
+
+/** Seed a configured home with known entities and return the store file path. */
+async function seedHome(env: Environment): Promise<void> {
+  const config = readConfig(join(env.cwd, '.sutra', 'sage')) as unknown as SageConfigV1;
+  const store = storeForConfig(config);
+  const engine = new Sage({ store });
+  try {
+    const key = (id: string): EntityKey => ({ namespace: '', kind: 'rule', id });
+    // t1: trusted (9 applies + passing guard), a1: active (5 applies), p1: probation (2 applies),
+    // fresh: zero-evidence materialized via SKIP, rest: rejected enough to retire below threshold.
+    const apply = (k: EntityKey, at: number) =>
+      engine.record(k, 'APPLY', { now: at }, { ensure: true });
+    await apply(key('t1'), SEED_NOW + 1);
+    await apply(key('t1'), SEED_NOW + 2);
+    await apply(key('t1'), SEED_NOW + 3);
+    await apply(key('t1'), SEED_NOW + 4);
+    await apply(key('t1'), SEED_NOW + 5);
+    await apply(key('t1'), SEED_NOW + 6);
+    await apply(key('t1'), SEED_NOW + 7);
+    await apply(key('t1'), SEED_NOW + 8);
+    await apply(key('t1'), SEED_NOW + 9);
+    await engine.reportGuard(key('t1'), { ok: true, kind: 'harness' }, { now: SEED_NOW + 10 });
+    for (const i of [1, 2, 3, 4, 5]) await apply(key('a1'), SEED_NOW + 100 + i);
+    await apply(key('p1'), SEED_NOW + 200);
+    await apply(key('p1'), SEED_NOW + 201);
+    await engine.record(key('fresh'), 'SKIP', { now: SEED_NOW + 300 }, { ensure: true });
+    await engine.record(key('r1'), 'REJECT_RULE', { now: SEED_NOW + 400 }, { ensure: true });
+    await engine.record(key('r1'), 'REJECT_RULE', { now: SEED_NOW + 401 }, { ensure: true });
+    await engine.record(key('r1'), 'REJECT_RULE', { now: SEED_NOW + 402 }, { ensure: true });
+  } finally {
+    await engine.close();
+  }
+}
+
+describe('sage read plane — list', () => {
+  test('lists all entities with trust, status, drift, and key labels', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['list'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('5 entities');
+    expect(text).toContain('rule/t1');
+    expect(text).toContain('trusted');
+    expect(text).toContain('rule/a1');
+    expect(text).toContain('active');
+  });
+
+  test('filters by status and kind', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['list', '--status', 'trusted'], env)).toBe(0);
+    expect(out()).toContain('1 entities');
+    expect(out()).toContain('rule/t1');
+    expect(out()).not.toContain('rule/a1');
+
+    expect(await runCli(['list', '--kind', 'recipe'], env)).toBe(0);
+    expect(out()).toContain('0 entities');
+  });
+
+  test('invalid --status is usage (exit 2)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['list', '--status', 'bogus'], env)).toBe(2);
+    expect(err()).toContain('CORE_INVALID_ARGUMENT');
+  });
+
+  test('reads from a --dir home', async () => {
+    const { env, root, out } = fresh();
+    await runCli(['init', '--dir', root], env);
+    await seedHome(env);
+
+    expect(await runCli(['list', '--dir', root], env)).toBe(0);
+    expect(out()).toContain('5 entities');
+  });
+
+  test('json output round-trips the page shape', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const before = out();
+    expect(await runCli(['list', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as {
+      home: string;
+      filter: Record<string, unknown>;
+      page: { total: number; items: unknown[]; limit: { applied: number; reached: boolean } };
+    };
+    expect(report.page.total).toBe(5);
+    expect(report.page.limit).toMatchObject({ applied: 1000, reached: false });
+    expect(report.page.items).toHaveLength(5);
+  });
+});
+
+describe('sage read plane — show', () => {
+  test('shows trust components and clears thresholds for a known entity', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['show', '--id', 't1'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('rule/t1 (known)');
+    expect(text).toContain('status:   trusted');
+    expect(text).toContain('trust:   ');
+    expect(text).toContain('clears:   trusted yes, active yes');
+    expect(text).toContain('recent episodes:');
+  });
+
+  test('missing --id is usage (exit 2)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['show'], env)).toBe(2);
+    expect(err()).toContain('CORE_INVALID_ARGUMENT');
+  });
+
+  test('--json round-trips the detail', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const before = out();
+    expect(await runCli(['show', '--id', 'a1', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as {
+      key: { id: string };
+      detail: { known: boolean };
+    };
+    expect(report.key.id).toBe('a1');
+    expect(report.detail.known).toBe(true);
+  });
+});
+
+describe('sage read plane — status and drift', () => {
+  test('status reports preflight, by-status distribution, and drift count', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['status'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('preflight:  ok');
+    expect(text).toContain('by status:  probation');
+    expect(text).toContain('trusted 1');
+    expect(text).toContain('drifting:   ');
+
+    const before = out();
+    expect(await runCli(['status', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as { preflight: { status: string } };
+    expect(report.preflight.status).toBe('ok');
+  });
+
+  test('drift lists drifting entities and honors --limit', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['drift'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('entities drifting');
+    expect(text).toContain('rule/r1');
+
+    expect(await runCli(['drift', '--limit', '1'], env)).toBe(0);
+    const limited = out();
+    expect(limited).toContain('limit applied 1');
+  });
+
+  test('invalid --limit is usage (exit 2)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['drift', '--limit', '0'], env)).toBe(2);
+    expect(err()).toContain('CORE_INVALID_ARGUMENT');
+  });
+});
+
+describe('sage read plane — params, simulate, explain-threshold', () => {
+  test('params lists the canonical catalog read-only', async () => {
+    const { env, out } = fresh();
+
+    expect(await runCli(['params'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('canonical model parameters (read-only)');
+    expect(text).toContain('TRUSTED_THRESHOLD');
+    expect(text).toContain('DEFAULT_SWEEP_INTERVAL_MS');
+    expect(text).toContain('read-only');
+
+    const before = out();
+    expect(await runCli(['params', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(before.length)) as { params: { name: string }[] };
+    expect(report.params.length).toBeGreaterThan(10);
+  });
+
+  test('simulate reports the what-if delta and changes nothing', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['simulate', '--id', 't1', '--signal', 'APPLY'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('trust:    ');
+    expect(text).toContain('->');
+
+    const before = out();
+    expect(await runCli(['show', '--id', 't1', '--json'], env)).toBe(0);
+    const after = JSON.parse(out().slice(before.length)) as {
+      detail: { hint: { evidence: { totalTrials: number } } };
+    };
+    expect(after.detail.hint.evidence.totalTrials).toBe(9);
+  });
+
+  test('an unknown --signal is an operational error (exit 1)', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['simulate', '--id', 't1', '--signal', 'NOPE'], env)).toBe(1);
+    expect(err()).toContain('CORE_UNKNOWN_REGISTRY_ENTRY');
+  });
+
+  test('simulate on a fresh id folds the probation prior', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['simulate', '--id', 'ghost', '--signal', 'APPLY'], env)).toBe(0);
+    expect(out()).toContain('probation');
+  });
+
+  test('explain-threshold reports which gates clear and why, never a decision', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    expect(await runCli(['explain-threshold', '--id', 't1'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('thresholds for rule/t1');
+    expect(text).toContain('trusted: MET');
+    expect(text).toContain('active: MET');
+    expect(text).toContain('never decides');
+
+    expect(await runCli(['explain-threshold', '--id', 'fresh'], env)).toBe(0);
+    expect(out()).toContain('trusted: not met');
+  });
+});
+
+describe('sage read plane — home guards', () => {
+  test('reads on an uninitialized home fail with CLI_NOT_INITIALIZED (exit 1)', async () => {
+    const { env, err } = fresh();
+    expect(await runCli(['list'], env)).toBe(1);
+    expect(err()).toContain('CLI_NOT_INITIALIZED');
+    expect(err()).toContain('init');
+  });
+
+  test('a memory home writes no config, so reads fail with CLI_NOT_INITIALIZED (exit 1)', async () => {
+    const { env, err } = fresh();
+    expect(await runCli(['init', '--store', 'memory'], env)).toBe(0);
+    // The memory backend deliberately persists nothing — there is no config.json to reopen,
+    // so a subsequent read command sees an uninitialized home.
+    expect(await runCli(['list'], env)).toBe(1);
+    expect(err()).toContain('CLI_NOT_INITIALIZED');
+    expect(err()).toContain('memory');
   });
 });

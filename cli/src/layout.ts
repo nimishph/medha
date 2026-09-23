@@ -1,12 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   InvalidArgumentError,
   type SignalSpec,
+  type StorePort,
   type StoreRegistries,
   validateSignalSpec,
 } from '@sutras/sage-core';
-import { resolveRegistries } from '@sutras/sage-store';
+import { FilePolicyStore, MemoryStore, resolveRegistries, SQLiteStore } from '@sutras/sage-store';
 import { ConfigFileError, type RegistryDiff } from './errors.ts';
 
 /**
@@ -74,6 +75,27 @@ export function resolveStorePath(backend: Backend, home: string, explicit?: stri
     return null;
   }
   return resolve(explicit ?? defaultStorePath(backend, home));
+}
+
+/**
+ * Rebuild the exact store a config.json commits to — the mirror of `init`'s construction. Any
+ * read-plane command (list/show/…) reopens the home through this, so a configured home is always
+ * read with the same backend, files, and registries it was written with.
+ */
+export function storeForConfig(config: SageConfigV1): StorePort {
+  switch (config.backend) {
+    case 'sqlite':
+      return new SQLiteStore({ path: config.path as string, registries: config.registries });
+    case 'file':
+      return new FilePolicyStore({
+        dir: dirname(config.path as string),
+        document: basename(config.path as string),
+        backup: `${basename(config.path as string)}.bak`,
+        registries: config.registries,
+      });
+    case 'memory':
+      return new MemoryStore({ registries: config.registries });
+  }
 }
 
 /** The opinions a user may override or add to, written to an optional --config registries.json. */

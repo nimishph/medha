@@ -40,6 +40,18 @@ export class HomeExistsError extends CliError {
   }
 }
 
+/** A read/maintenance command ran in a directory with no engine home to open. */
+export class HomeNotInitializedError extends CliError {
+  readonly code = 'CLI_NOT_INITIALIZED';
+
+  constructor(home: string) {
+    super(`no engine home at ${home}`, {
+      context: { home },
+      hint: "run 'sage init' first (the ephemeral memory backend leaves nothing to reopen)",
+    });
+  }
+}
+
 /** `--config` would change the registries a configured home already commits to. */
 export class RegistryDriftError extends CliError {
   readonly code = 'CLI_REGISTRY_DRIFT';
