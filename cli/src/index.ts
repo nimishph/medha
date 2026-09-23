@@ -32,6 +32,7 @@ export {
   runMaintainPreflight,
   runMaintainRestore,
 } from './maintain.ts';
+export { createMcpServer, type ServeMcpOptions, serveMcp } from './mcp.ts';
 export { type OpenedHome, openHome } from './open.ts';
 export {
   LIFECYCLE_STATUSES,

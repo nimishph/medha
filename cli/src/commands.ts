@@ -16,6 +16,7 @@ import {
   maintainCompactArgs,
   maintainPreflightArgs,
   maintainRestoreArgs,
+  mcpCommandArgs,
   paramsCommandArgs,
   showCommandArgs,
   simulateCommandArgs,
@@ -372,6 +373,37 @@ export const updaterCommand = defineCommand({
   },
 });
 
+/** Model Context Protocol (MCP) command. */
+
+export const mcpServeCommand = defineCommand({
+  meta: {
+    name: 'serve',
+    description: 'Start the stdio Model Context Protocol (MCP) server.',
+  },
+  args: mcpCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { serveMcp } = await import('./mcp.ts');
+    await serveMcp({ dir: args.dir }, environment);
+  },
+});
+
+export const mcpCommand = defineCommand({
+  meta: {
+    name: 'mcp',
+    description: 'Model Context Protocol (MCP) server on stdio.',
+  },
+  args: mcpCommandArgs,
+  subCommands: {
+    serve: mcpServeCommand,
+  },
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { serveMcp } = await import('./mcp.ts');
+    await serveMcp({ dir: args.dir }, environment);
+  },
+});
+
 export const commands = defineCommand({
   meta: {
     name: 'sage',
@@ -389,5 +421,6 @@ export const commands = defineCommand({
     'explain-threshold': explainThresholdCommand,
     maintain: maintainCommand,
     updater: updaterCommand,
+    mcp: mcpCommand,
   },
 });

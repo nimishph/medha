@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Sage, type SageSnapshot } from '@sutras/sage';
 import type { EntityKey } from '@sutras/sage-core';
 import { MemoryStore } from '@sutras/sage-store';
 import { runCli } from './cli.ts';
 import type { Environment } from './environment.ts';
 import { type SageConfigV1, storeForConfig } from './layout.ts';
+import { serveMcp } from './mcp.ts';
 import { VERSION } from './version.ts';
 
 /**
@@ -817,5 +821,201 @@ describe('sage updater plane', () => {
 
     expect(await runCli(['updater', 'fork', 'nonexistent'], env)).toBe(1);
     expect(err()).toContain('CLI_UPDATER_UNKNOWN');
+  });
+});
+
+describe('sage mcp server', () => {
+  async function connect(root: string) {
+    const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
+    let err = '';
+    const env: Environment = {
+      cwd: root,
+      env: {},
+      now: () => NOW,
+      isTTY: false,
+      exitCode: 0,
+      stdout: () => undefined,
+      stderr: (text) => {
+        err += text;
+      },
+    };
+    const served = serveMcp({ dir: root }, env, serverSide);
+    const client = new Client({ name: 'test-mcp-client', version: '1.0.0' });
+    await client.connect(clientSide);
+    return {
+      client,
+      stderr: () => err,
+      close: async () => {
+        await client.close();
+        await served;
+      },
+    };
+  }
+
+  const call = async (client: Client, name: string, args: Record<string, unknown> = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    const text = (result.content as { text: string }[])[0]?.text ?? '';
+    return { isError: result.isError === true, body: JSON.parse(text) };
+  };
+
+  test('lists all nine tools and calls every tool with asserted results', async () => {
+    const { env, root } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const session = await connect(root);
+    try {
+      const { client } = session;
+      const tools = (await client.listTools()).tools.map((t) => t.name);
+      expect(tools).toHaveLength(9);
+      expect(tools).toEqual(
+        expect.arrayContaining([
+          'hints',
+          'list_entities',
+          'show_entity',
+          'record_signal',
+          'report_guard',
+          'propose',
+          'drift',
+          'simulate',
+          'status',
+        ]),
+      );
+
+      // 1. hints (batch)
+      const hintsRes = await call(client, 'hints', {
+        keys: [{ id: 't1' }, { id: 'a1' }],
+      });
+      expect(hintsRes.isError).toBe(false);
+      const hintsMap = hintsRes.body as Record<string, { key: { id: string }; status: string }>;
+      const values = Object.values(hintsMap);
+      expect(values).toHaveLength(2);
+      expect(values.some((h) => h.key.id === 't1')).toBe(true);
+      expect(values.some((h) => h.key.id === 'a1')).toBe(true);
+
+      // 2. list_entities
+      const listRes = await call(client, 'list_entities', { limit: 10 });
+      expect(listRes.isError).toBe(false);
+      expect(listRes.body.items.length).toBeGreaterThan(0);
+
+      // 3. show_entity
+      const showRes = await call(client, 'show_entity', { id: 't1' });
+      expect(showRes.isError).toBe(false);
+      expect(showRes.body.hint.key.id).toBe('t1');
+      expect(showRes.body.known).toBe(true);
+
+      // 4. record_signal
+      const recRes = await call(client, 'record_signal', {
+        id: 'mcp_test_e',
+        signal: 'APPLY',
+        ensure: true,
+      });
+      expect(recRes.isError).toBe(false);
+      expect(recRes.body.hint.key.id).toBe('mcp_test_e');
+
+      // 5. report_guard
+      const guardRes = await call(client, 'report_guard', {
+        id: 'mcp_test_e',
+        ok: true,
+        guardKind: 'harness',
+      });
+      expect(guardRes.isError).toBe(false);
+      expect(guardRes.body.key.id).toBe('mcp_test_e');
+
+      // 6. propose
+      const propRes = await call(client, 'propose', {
+        id: 'mcp_prop_e',
+        source: 'test-miner',
+        text: 'test proposal text',
+      });
+      expect(propRes.isError).toBe(false);
+      expect(propRes.body.promoted).toBeDefined();
+      expect(propRes.body.episode).toBeDefined();
+
+      // 7. drift
+      const driftRes = await call(client, 'drift', { limit: 5 });
+      expect(driftRes.isError).toBe(false);
+      expect(Array.isArray(driftRes.body.drifting)).toBe(true);
+      expect(typeof driftRes.body.count).toBe('number');
+
+      // 8. simulate
+      const simRes = await call(client, 'simulate', { id: 't1', signal: 'APPLY' });
+      expect(simRes.isError).toBe(false);
+      expect(simRes.body.before).toBeDefined();
+      expect(simRes.body.after).toBeDefined();
+
+      // Error handling: simulate invalid signal
+      const badSim = await call(client, 'simulate', { id: 't1', signal: 'NON_EXISTENT' });
+      expect(badSim.isError).toBe(true);
+      expect(badSim.body.error.code).toBe('CORE_UNKNOWN_REGISTRY_ENTRY');
+
+      // 9. status
+      const statusRes = await call(client, 'status', {});
+      expect(statusRes.isError).toBe(false);
+      expect(statusRes.body.preflight.status).toBe('ok');
+      expect(statusRes.body.byStatus).toBeDefined();
+    } finally {
+      await session.close();
+    }
+    expect(session.stderr()).toContain('sage mcp: serving');
+  });
+
+  test('subprocess stdio handshake: initialize -> tools/list -> clean exit on stdin close', async () => {
+    const { env, root } = fresh();
+    await runCli(['init'], env);
+
+    const bin = join(import.meta.dir, 'bin.ts');
+    const proc = spawn(process.execPath, [bin, 'mcp', '--dir', root], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let buf = '';
+    let sawInit = false;
+    let sawTools = false;
+
+    const exitPromise = new Promise<number>((resolve) => {
+      proc.on('exit', (code) => resolve(code ?? 0));
+    });
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      buf += chunk.toString('utf8');
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line) as { id?: number; result?: { tools?: unknown[] } };
+        if (msg.id === 1) {
+          sawInit = true;
+          proc.stdin.write(
+            `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
+          );
+          proc.stdin.write(
+            `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })}\n`,
+          );
+        } else if (msg.id === 2) {
+          sawTools = true;
+          expect(msg.result?.tools).toHaveLength(9);
+          proc.stdin.end();
+        }
+      }
+    });
+
+    // Send initialize request
+    const initReq = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '1' },
+      },
+    };
+    proc.stdin.write(`${JSON.stringify(initReq)}\n`);
+
+    const exitCode = await exitPromise;
+    expect(sawInit).toBe(true);
+    expect(sawTools).toBe(true);
+    expect(exitCode).toBe(0);
   });
 });

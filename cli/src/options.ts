@@ -159,3 +159,10 @@ export const updaterForkArgs: ArgsDef = {
     description: 'Destination file path for the scaffolded updater template.',
   },
 };
+
+export const mcpCommandArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .sutra/sage/ home to open. Default: cwd.',
+  },
+};
