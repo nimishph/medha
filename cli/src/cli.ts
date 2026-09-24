@@ -51,7 +51,17 @@ export async function runCli(argv: readonly string[], environment: Environment):
     environment.stderr(await help());
     return 2;
   }
-  if (command === 'help' || command === '--help' || command === '-h') {
+  if (command === 'help') {
+    const subArgs = argv.slice(1);
+    if (subArgs.length === 0) {
+      environment.stdout(await help());
+      return 0;
+    }
+    const { cmd, parent } = await resolveUsageTarget(subArgs);
+    environment.stdout(await renderUsage(cmd, parent));
+    return 0;
+  }
+  if (command === '--help' || command === '-h') {
     environment.stdout(await help());
     return 0;
   }

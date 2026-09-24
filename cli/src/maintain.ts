@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { CompactionReport, MedhaSnapshot, PreflightReport } from '@cntxt-labs/medha';
 import { InvalidArgumentError } from '@cntxt-labs/medha-core';
+import { resolveRegistries } from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
 import { SnapshotFileError } from './errors.ts';
 import { writeSnapshot } from './layout.ts';
@@ -25,6 +26,7 @@ export interface MaintainPreflightReport {
   readonly home: string;
   readonly asOf: number;
   readonly preflight: PreflightReport;
+  readonly unregisteredKinds?: readonly { readonly kind: string; readonly count: number }[];
 }
 
 export async function runMaintainPreflight(
@@ -38,7 +40,24 @@ export async function runMaintainPreflight(
     if (preflight.status === 'corrupt') {
       environment.exitCode = 1;
     }
-    return { home: opened.home, asOf: now, preflight };
+    const allStates = await opened.store.list();
+    const configuredKinds = new Set(resolveRegistries(opened.config.registries).kinds);
+    const kindCounts = new Map<string, number>();
+    for (const state of allStates) {
+      if (!configuredKinds.has(state.key.kind)) {
+        kindCounts.set(state.key.kind, (kindCounts.get(state.key.kind) ?? 0) + 1);
+      }
+    }
+    const unregisteredKinds = Array.from(kindCounts.entries()).map(([kind, count]) => ({
+      kind,
+      count,
+    }));
+    return {
+      home: opened.home,
+      asOf: now,
+      preflight,
+      ...(unregisteredKinds.length > 0 ? { unregisteredKinds } : {}),
+    };
   } finally {
     await opened.engine.close();
   }

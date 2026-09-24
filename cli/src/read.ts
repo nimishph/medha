@@ -41,6 +41,7 @@ import {
   UNGUARDED_TRUST_CEILING,
   WILSON_Z,
 } from '@cntxt-labs/medha-core';
+import { resolveRegistries } from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
 import type { Backend } from './layout.ts';
 import { openHome } from './open.ts';
@@ -96,6 +97,7 @@ export interface ListReport {
   readonly asOf: number;
   readonly filter: ListFilter;
   readonly page: Page<EvidentialHint>;
+  readonly unregisteredKinds?: readonly string[];
 }
 
 export async function runList(options: ListOptions, environment: Environment): Promise<ListReport> {
@@ -116,7 +118,17 @@ export async function runList(options: ListOptions, environment: Environment): P
             ...(options.cursor === undefined ? {} : { cursor: options.cursor }),
           };
     const page = await opened.engine.list(filter, { now }, request);
-    return { home: opened.home, asOf: now, filter, page };
+    const configuredKinds = new Set(resolveRegistries(opened.config.registries).kinds);
+    const unregisteredKinds = [
+      ...new Set(page.items.map((item) => item.key.kind).filter((k) => !configuredKinds.has(k))),
+    ];
+    return {
+      home: opened.home,
+      asOf: now,
+      filter,
+      page,
+      ...(unregisteredKinds.length > 0 ? { unregisteredKinds } : {}),
+    };
   } finally {
     await opened.engine.close();
   }

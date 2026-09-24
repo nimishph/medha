@@ -16,6 +16,7 @@ import {
   type OpenResult,
   type StorePort,
   type StoreRegistries,
+  UnknownKindError,
   validateEpisodeInput,
   validateLog,
 } from '@cntxt-labs/medha-core';
@@ -41,13 +42,16 @@ export interface SQLiteStoreOptions {
   /** SQLite database file path. Created (with schema) on open(). */
   readonly path: string;
   readonly registries?: StoreRegistries;
+  /** When true, unknown historical kinds during log replay are preserved rather than halting the store. */
+  readonly resilientReplay?: boolean;
 }
 
 export class SQLiteStore implements StorePort {
   readonly name = 'sqlite';
 
   private readonly path: string;
-  private readonly effective: StoreRegistries;
+  private effective: StoreRegistries;
+  private readonly resilientReplay: boolean;
   private db: Database | null = null;
   private log: Episode[] = [];
   private projection = new Map<string, EntityState>();
@@ -59,6 +63,7 @@ export class SQLiteStore implements StorePort {
   constructor(options: SQLiteStoreOptions) {
     this.path = options.path;
     this.effective = resolveRegistries(options.registries);
+    this.resilientReplay = options.resilientReplay ?? false;
   }
 
   get registries(): StoreRegistries {
@@ -110,9 +115,19 @@ export class SQLiteStore implements StorePort {
         }
         try {
           validateEpisodeInput(episodeToInput(episode), { kinds, signals });
-        } catch (_failure) {
-          this.corruptAt = row.seq;
-          break;
+        } catch (failure) {
+          if (this.resilientReplay && failure instanceof UnknownKindError) {
+            kinds.register(episode.key.kind);
+            if (!this.effective.kinds.includes(episode.key.kind)) {
+              this.effective = {
+                ...this.effective,
+                kinds: [...this.effective.kinds, episode.key.kind],
+              };
+            }
+          } else {
+            this.corruptAt = row.seq;
+            break;
+          }
         }
         this.accept(episode);
       }

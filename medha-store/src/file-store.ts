@@ -26,6 +26,7 @@ import {
   type OpenResult,
   type StorePort,
   type StoreRegistries,
+  UnknownKindError,
   validateEpisodeInput,
   validateLog,
 } from '@cntxt-labs/medha-core';
@@ -75,6 +76,8 @@ export interface FilePolicyStoreOptions {
   /** Document file names (for tests that need to break them); default `state.json` / `.bak`. */
   readonly document?: string;
   readonly backup?: string;
+  /** When true, unknown historical kinds during log replay are preserved rather than halting the store. */
+  readonly resilientReplay?: boolean;
 }
 
 export class FilePolicyStore implements StorePort {
@@ -83,7 +86,8 @@ export class FilePolicyStore implements StorePort {
   private readonly dir: string;
   private readonly documentName: string;
   private readonly backupName: string;
-  private readonly effective: StoreRegistries;
+  private effective: StoreRegistries;
+  private readonly resilientReplay: boolean;
   private log: Episode[] = [];
   private projection = new Map<string, EntityState>();
   private nextSeq = 0;
@@ -97,6 +101,7 @@ export class FilePolicyStore implements StorePort {
     this.documentName = options.document ?? 'state.json';
     this.backupName = options.backup ?? 'state.json.bak';
     this.effective = resolveRegistries(options.registries);
+    this.resilientReplay = options.resilientReplay ?? false;
   }
 
   get registries(): StoreRegistries {
@@ -255,8 +260,18 @@ export class FilePolicyStore implements StorePort {
       }
       try {
         validateEpisodeInput(episodeToInput(episode), { kinds, signals });
-      } catch (_failure) {
-        return episode.seq;
+      } catch (failure) {
+        if (this.resilientReplay && failure instanceof UnknownKindError) {
+          kinds.register(episode.key.kind);
+          if (!this.effective.kinds.includes(episode.key.kind)) {
+            this.effective = {
+              ...this.effective,
+              kinds: [...this.effective.kinds, episode.key.kind],
+            };
+          }
+        } else {
+          return episode.seq;
+        }
       }
       this.accept(episode);
     }

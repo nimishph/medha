@@ -1327,3 +1327,83 @@ describe('medha sync commands', () => {
     expect(out()).toContain('"ok": true');
   });
 });
+
+describe('extensibility and resilient kind scoping (TASK-EXT-04 & TASK-EXT-05)', () => {
+  test('gracefully preserves entities when an in-use custom kind is removed from config.json', async () => {
+    const { env, root, out, err } = fresh();
+    const configPath = join(root, 'custom-kinds.json');
+    writeFileSync(configPath, JSON.stringify({ kinds: ['rule', 'flaky-test'] }));
+
+    expect(await runCli(['init', '--config', configPath], env)).toBe(0);
+    expect(
+      await runCli(
+        ['record', '--kind', 'flaky-test', '--id', 'test-1', '--signal', 'APPLY', '--ensure'],
+        env,
+      ),
+    ).toBe(0);
+    expect(
+      await runCli(
+        ['record', '--kind', 'rule', '--id', 'rule-1', '--signal', 'APPLY', '--ensure'],
+        env,
+      ),
+    ).toBe(0);
+
+    // Remove 'flaky-test' from config.json
+    const homeConfigPath = join(root, '.medha', 'config.json');
+    const cfg = JSON.parse(readFileSync(homeConfigPath, 'utf8'));
+    cfg.registries.kinds = ['rule', 'recipe', 'prompt', 'skill', 'agent'];
+    writeFileSync(homeConfigPath, JSON.stringify(cfg, null, 2));
+
+    // medha list must NOT wipe out entities; lists both and marks unregistered
+    const listOutBefore = out();
+    expect(await runCli(['list'], env)).toBe(0);
+    const listText = out().slice(listOutBefore.length);
+    expect(listText).toContain('rule/rule-1');
+    expect(listText).toContain('flaky-test/test-1');
+    expect(listText).toContain('[unregistered kind]');
+    expect(listText).toContain('warning: found 1 unregistered kind (flaky-test)');
+
+    // medha maintain preflight reports entity count, ok integrity, and clear diagnostic guidance
+    const preflightOutBefore = out();
+    expect(await runCli(['maintain', 'preflight'], env)).toBe(0);
+    const preflightText = out().slice(preflightOutBefore.length);
+    expect(preflightText).toContain('status:     ok');
+    expect(preflightText).toContain('entities:   2');
+    expect(preflightText).toContain('integrity:  ok');
+    expect(preflightText).toContain(
+      "warning:    Found 1 entity with unregistered kind 'flaky-test'. Data is safe. Restore 'flaky-test' to registries or run 'medha maintain prune --kind flaky-test'.",
+    );
+
+    // New writes to the unregistered kind fail loud with UnknownKindError
+    expect(
+      await runCli(
+        ['record', '--kind', 'flaky-test', '--id', 'test-2', '--signal', 'APPLY', '--ensure'],
+        env,
+      ),
+    ).toBe(1);
+    expect(err()).toContain("Unknown kind 'flaky-test'");
+  });
+
+  test('rejects conflicting redefinitions of canonical built-in signals', async () => {
+    const { env, root, err } = fresh();
+    const configPath = join(root, 'conflicting-signal.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        signalSpecs: [
+          {
+            name: 'APPLY',
+            value: 0.5,
+            countsAsTrial: true,
+            countsAsSuccess: false, // Conflicts with canonical APPLY
+            weight: 0.5,
+          },
+        ],
+      }),
+    );
+
+    expect(await runCli(['init', '--config', configPath], env)).toBe(1);
+    expect(err()).toContain('CLI_CONFIG_INVALID');
+    expect(err()).toContain("cannot redefine built-in signal 'APPLY'");
+  });
+});

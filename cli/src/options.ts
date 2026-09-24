@@ -274,7 +274,7 @@ export const removeEpisodeCommandArgs: ArgsDef = {
 
 export const packCommandArgs: ArgsDef = {
   ...readCommonArgs,
-  budget: { type: 'string', description: 'Token budget cap (e.g. --budget 2000).', required: true },
+  budget: { type: 'string', description: 'Token budget cap (e.g. --budget 2000).' },
   kind: { type: 'string', description: 'Filter: entity kind (default: rule).' },
   namespace: { type: 'string', description: 'Filter: entity namespace.' },
   exploration: {

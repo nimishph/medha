@@ -3,11 +3,22 @@ import {
   type Episode,
   type EvidentialHint,
   InvalidArgumentError,
+  type StoreRegistries,
+  UnknownKindError,
 } from '@cntxt-labs/medha-core';
+import { resolveRegistries } from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
+import { UpdaterNotFoundError } from './errors.ts';
 import { openHome } from './open.ts';
 import { keyFromFlags } from './read.ts';
 import { keyLabel } from './render.ts';
+
+function requireConfiguredKind(configRegistries: StoreRegistries | undefined, kind: string): void {
+  const allowed = resolveRegistries(configRegistries).kinds;
+  if (!allowed.includes(kind)) {
+    throw new UnknownKindError(kind, allowed);
+  }
+}
 
 /**
  * Write-plane commands: the CLI twins of the MCP `record_signal`, `report_guard` and `propose`
@@ -77,7 +88,16 @@ export async function runRecord(
     if (options.signal === undefined || options.signal === '') {
       throw new InvalidArgumentError('--signal', 'a registered signal name', options.signal);
     }
+    if (options.updater !== undefined && options.updater !== '') {
+      if (!opened.engine.updaters.has(options.updater)) {
+        throw new UpdaterNotFoundError(
+          options.updater,
+          opened.engine.updaters.listUpdaters().map((u) => u.name),
+        );
+      }
+    }
     const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
     const author = resolveAuthor(options.author);
     const outcome = await opened.engine.record(
@@ -136,6 +156,7 @@ export async function runGuard(
       );
     }
     const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
     const author = resolveAuthor(options.author);
     const hint = await opened.engine.reportGuard(
@@ -190,6 +211,7 @@ export async function runPropose(
       throw new InvalidArgumentError('--source', 'a non-empty proposal source', options.source);
     }
     const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
     const author = resolveAuthor(options.author);
     const evidenceRefs = (options.evidence ?? '')

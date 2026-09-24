@@ -83,11 +83,20 @@ export function renderList(report: ListReport): string {
   ];
   if (page.items.length > 0) {
     lines.push('  TRUST  STATUS     DRIFT  KEY');
+    const unregistered = new Set(report.unregisteredKinds ?? []);
     for (const hint of page.items) {
+      const isUnregistered = unregistered.has(hint.key.kind);
       lines.push(
         `  ${fixed(hint.trustScore)}  ${hint.status.padEnd(10)} ${
           hint.temporal.isDrifting ? 'yes   ' : 'no    '
-        } ${keyLabel(hint.key)}`,
+        } ${keyLabel(hint.key)}${isUnregistered ? '  [unregistered kind]' : ''}`,
+      );
+    }
+    if (unregistered.size > 0) {
+      lines.push(
+        `  warning: found ${unregistered.size} unregistered ${
+          unregistered.size === 1 ? 'kind' : 'kinds'
+        } (${[...unregistered].join(', ')}). Data is safe; run 'medha maintain preflight' for guidance.`,
       );
     }
   }
@@ -216,7 +225,7 @@ export function renderMaintainPreflight(report: MaintainPreflightReport): string
     const src = p.location?.source ?? 'unknown';
     return (
       `medha: store at ${src} is corrupt — preflight exits 1\n` +
-      `  hint: restore the last snapshot, or wipe and re-init with --recreate\n`
+      `  hint: restore the last snapshot or inspect the store log\n`
     );
   }
   const lastSweep = p.lastSweep === null ? 'not yet' : new Date(p.lastSweep).toISOString();
@@ -229,6 +238,13 @@ export function renderMaintainPreflight(report: MaintainPreflightReport): string
     `  registries: ${p.registries.kinds} kinds, ${p.registries.signals} signals, ${p.registries.anchors} anchors`,
     `  last sweep: ${lastSweep}`,
   ];
+  if (report.unregisteredKinds && report.unregisteredKinds.length > 0) {
+    for (const { kind, count } of report.unregisteredKinds) {
+      lines.push(
+        `  warning:    Found ${count} ${count === 1 ? 'entity' : 'entities'} with unregistered kind '${kind}'. Data is safe. Restore '${kind}' to registries or run 'medha maintain prune --kind ${kind}'.`,
+      );
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 

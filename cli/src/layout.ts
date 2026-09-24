@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
+  CANONICAL_SIGNALS,
   InvalidArgumentError,
   type SignalSpec,
   type StorePort,
@@ -91,13 +92,18 @@ export function resolveStorePath(backend: Backend, home: string, explicit?: stri
 export function storeForConfig(config: MedhaConfigV1): StorePort {
   switch (config.backend) {
     case 'sqlite':
-      return new SQLiteStore({ path: config.path as string, registries: config.registries });
+      return new SQLiteStore({
+        path: config.path as string,
+        registries: config.registries,
+        resilientReplay: true,
+      });
     case 'file':
       return new FilePolicyStore({
         dir: dirname(config.path as string),
         document: basename(config.path as string),
         backup: `${basename(config.path as string)}.bak`,
         registries: config.registries,
+        resilientReplay: true,
       });
     case 'memory':
       return new MemoryStore({ registries: config.registries });
@@ -140,6 +146,19 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
       }
       const spec = raw as SignalSpec;
       validateSignalSpec(spec);
+      const builtin = CANONICAL_SIGNALS.find((s) => s.name === spec.name);
+      if (builtin !== undefined) {
+        if (
+          builtin.value !== spec.value ||
+          builtin.countsAsTrial !== spec.countsAsTrial ||
+          builtin.countsAsSuccess !== spec.countsAsSuccess
+        ) {
+          throw new ConfigFileError(
+            configPath,
+            `cannot redefine built-in signal '${spec.name}'; built-in signals have canonical semantics (expected value=${builtin.value}, countsAsTrial=${builtin.countsAsTrial}, countsAsSuccess=${builtin.countsAsSuccess})`,
+          );
+        }
+      }
       if (seen.has(spec.name)) {
         throw new ConfigFileError(configPath, `signalSpecs defines '${spec.name}' twice`);
       }

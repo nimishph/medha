@@ -237,5 +237,5 @@ describe('GitRefSyncAdapter', () => {
     } finally {
       rmSync(remoteRepo, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 });

@@ -133,37 +133,79 @@ export async function runUpdaterFork(
 }
 
 function generateUpdaterTemplate(baseName: string, fileName: string): string {
+  const updaterName = fileName.replace(/\.[^.]+$/, '');
+  const varName = `${toCamelCase(baseName)}CustomUpdater`;
+
+  let computeLogic = '';
+  const canonical = baseName.toLowerCase();
+  if (canonical === 'ema') {
+    computeLogic = `    // Exponential moving average:
+    const alpha = ctx.parameters && typeof (ctx.parameters as any).alpha === 'number' ? (ctx.parameters as any).alpha : 0.1;
+    const signalVal = ctx.signal.countsAsSuccess ? 1 : ctx.signal.countsAsTrial ? -1 : 0;
+    const newWeight = Math.max(0, Math.min(1, ctx.currentWeight + alpha * (signalVal - ctx.currentWeight)));
+    const isDrifting = Math.abs(newWeight - ctx.initialWeight) > 0.3;
+    return { newWeight, isDrifting };`;
+  } else if (canonical === 'asymmetric-penalty' || canonical === 'asymmetric') {
+    computeLogic = `    // Asymmetric penalty: moderate gain on success (+0.04), harsh penalty on rejection (-0.25)
+    const delta =
+      ctx.signal.countsAsTrial && ctx.signal.countsAsSuccess
+        ? 0.04 * (1 - ctx.currentWeight)
+        : ctx.signal.name === 'REJECT_CONTEXT'
+          ? -0.05 * ctx.currentWeight
+          : ctx.signal.countsAsTrial
+            ? -0.25 * ctx.currentWeight
+            : 0;
+    const newWeight = Math.max(0, Math.min(1, ctx.currentWeight + delta));
+    const isDrifting = ctx.sampleCount >= 10 && Math.abs(newWeight - ctx.initialWeight) > 0.3;
+    return { newWeight, isDrifting };`;
+  } else if (canonical === 'sliding-window') {
+    computeLogic = `    // Sliding window bounded step:
+    const step = 1 / Math.max(10, Math.min(50, ctx.sampleCount + 1));
+    const delta =
+      ctx.signal.countsAsTrial && ctx.signal.countsAsSuccess
+        ? step * (1 - ctx.currentWeight)
+        : ctx.signal.name === 'REJECT_CONTEXT'
+          ? -step * 0.5 * ctx.currentWeight
+          : ctx.signal.countsAsTrial
+            ? -step * ctx.currentWeight
+            : 0;
+    const newWeight = Math.max(0, Math.min(1, ctx.currentWeight + delta));
+    const isDrifting = ctx.sampleCount >= 10 && Math.abs(newWeight - ctx.initialWeight) > 0.3;
+    return { newWeight, isDrifting };`;
+  } else {
+    computeLogic = `    // Wilson-inspired / custom confidence logic:
+    const countsAsSuccess = ctx.signal.countsAsTrial && ctx.signal.countsAsSuccess;
+    const totalPositive = ctx.acceptanceCount + (countsAsSuccess ? 1 : 0);
+    const totalSamples = ctx.sampleCount + 1;
+    const ratio = totalPositive / totalSamples;
+    const newWeight = Math.max(0, Math.min(1, 0.5 * ctx.initialWeight + 0.5 * ratio));
+    const isDrifting = totalSamples >= 10 && Math.abs(newWeight - ctx.initialWeight) > 0.3;
+    return { newWeight, isDrifting };`;
+  }
+
   return `import type { MedhaWeightUpdater, WeightUpdateContext, WeightUpdateOutcome } from '@cntxt-labs/medha';
 
 /**
  * Custom weight updater scaffolded from '${baseName}'.
  *
- * LOADING / REGISTRATION:
- * Pass this updater to the Sage engine via SageOptions.updaters at host initialization:
+ * AUTOMATIC DISCOVERY:
+ * When located in '<home>/updaters/${fileName}', the Medha CLI, MCP server,
+ * and UI automatically discover and register this updater under the name '${updaterName}'.
  *
- *   import { Sage, UpdaterRegistry } from '@cntxt-labs/medha';
- *   import { ${toCamelCase(baseName)}CustomUpdater } from './${fileName}';
+ * PROGRAMMATIC Usage:
+ *
+ *   import { Medha, UpdaterRegistry } from '@cntxt-labs/medha';
+ *   import { ${varName} } from './${fileName}';
  *
  *   const updaters = new UpdaterRegistry({
- *     project: { '${baseName}-custom': ${toCamelCase(baseName)}CustomUpdater },
+ *     project: { '${updaterName}': ${varName} },
  *   });
- *   const sage = new Sage({ store, updaters });
+ *   const medha = new Medha({ store, updaters });
  */
-export const ${toCamelCase(baseName)}CustomUpdater: MedhaWeightUpdater = {
-  name: '${baseName}-custom',
+export const ${varName}: MedhaWeightUpdater = {
+  name: '${updaterName}',
   computeWeight(ctx: WeightUpdateContext): WeightUpdateOutcome {
-    // Current state + incoming signal:
-    //   ctx.currentWeight: number (0..1)
-    //   ctx.initialWeight: number
-    //   ctx.sampleCount: number
-    //   ctx.signal: SignalSpec (name, countsAsTrial, countsAsSuccess, weight)
-    //   ctx.step?: number
-    const delta = ctx.signal.countsAsSuccess ? 0.05 : -0.1;
-    const newWeight = Math.max(0, Math.min(1, ctx.currentWeight + delta));
-    return {
-      newWeight,
-      isDrifting: Math.abs(newWeight - ctx.initialWeight) > 0.3,
-    };
+${computeLogic}
   },
 };
 `;
