@@ -1,6 +1,6 @@
 {
   "name": "@cntxt-labs/medha-store",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "StorePort contract: episode log as source of truth, entity-state fold, and memory/file/SQLite backends.",
