@@ -35,7 +35,7 @@ async function resolveUsageTarget(
 }
 
 /**
- * The `sage` entrypoint: version/help shortcuts, then a citty dispatch with the environment bound
+ * The `medha` entrypoint: version/help shortcuts, then a citty dispatch with the environment bound
  * for the (data-dropping) subcommand runners. Returns the exit code — 0 healthy, 1 operational
  * failure, 2 usage (an unknown command, an invalid option value, or a bogus argument). citty 0.2.x
  * parses unknown flags leniently, so typos in option names surface as picked-up positionals, not
@@ -70,7 +70,7 @@ export async function runCli(argv: readonly string[], environment: Environment):
     return environment.exitCode;
   } catch (failure) {
     const error =
-      failure instanceof MedhaError ? failure : toMedhaError(failure, `sage ${command}`);
+      failure instanceof MedhaError ? failure : toMedhaError(failure, `medha ${command}`);
     if (json) {
       environment.stderr(toJson(error));
     } else {

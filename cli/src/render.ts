@@ -18,8 +18,11 @@ import type {
 } from './read.ts';
 import type { UpdaterForkReport, UpdaterListReport, UpdaterShowReport } from './updater.ts';
 
-/** Machine output: JSON with a replacer that makes every engine value round-trippable. */
-export function toJson(value: unknown): string {
+/**
+ * Machine output: JSON with a replacer that makes every engine value round-trippable. `compact`
+ * drops the indentation for token-sensitive callers.
+ */
+export function toJson(value: unknown, compact = false): string {
   return `${JSON.stringify(
     value,
     (_key, item: unknown) => {
@@ -37,7 +40,7 @@ export function toJson(value: unknown): string {
       }
       return item;
     },
-    2,
+    compact ? undefined : 2,
   )}\n`;
 }
 
@@ -46,7 +49,7 @@ export function renderInit(report: InitReport): string {
   const p = report.preflight;
   const lastSweep = p.lastSweep === null ? 'not yet' : new Date(p.lastSweep).toISOString();
   const lines = [
-    `sage: initialized engine home at ${report.home}`,
+    `medha: initialized engine home at ${report.home}`,
     `  backend:    ${report.backend}`,
     report.path === null ? `  store:      ephemeral (memory)` : `  store:      ${report.path}`,
     ...(report.config === null
@@ -74,7 +77,7 @@ function fixed(value: number): string {
 export function renderList(report: ListReport): string {
   const { page } = report;
   const lines = [
-    `sage: ${page.total} entities (limit ${page.limit.applied}, source ${page.limit.source})${
+    `medha: ${page.total} entities (limit ${page.limit.applied}, source ${page.limit.source})${
       page.limit.reached ? ', truncated' : ''
     }`,
   ];
@@ -98,7 +101,7 @@ export function renderShow(report: ShowReport): string {
   const { detail } = report;
   const h = detail.hint;
   const lines = [
-    `sage: ${keyLabel(report.key)} ${detail.known ? '(known)' : '(unknown — probation prior)'}`,
+    `medha: ${keyLabel(report.key)} ${detail.known ? '(known)' : '(unknown — probation prior)'}`,
     `  status:   ${h.status}`,
     `  trust:    ${fixed(h.trustScore)}  (wilson ${fixed(h.components.wilson)}, guard ${fixed(
       h.components.guard,
@@ -137,21 +140,21 @@ export function renderStatus(report: StatusReport): string {
     .map(([status, count]) => `${status} ${count}`)
     .join(', ');
   const lines = [
-    `sage: status for ${report.home}`,
+    `medha: status for ${report.home}`,
     report.path === null ? `  store:      ephemeral (memory)` : `  store:      ${report.path}`,
     `  preflight:  ${p.status} — ${p.episodeCount} episodes, ${p.entityCount} entities, integrity ${p.integrity}`,
     `  last sweep: ${lastSweep}`,
     `  by status:  ${byStatus}`,
     `  drifting:   ${report.drifting}`,
     `  registries: ${p.registries.kinds} kinds, ${p.registries.signals} signals, ${p.registries.anchors} anchors`,
-    '  params:     read-only canonical defaults — run `sage params` to see them',
+    '  params:     read-only canonical defaults — run `medha params` to see them',
   ];
   return `${lines.join('\n')}\n`;
 }
 
 export function renderDrift(report: DriftResult): string {
   const { report: drift } = report;
-  const lines = [`sage: ${drift.count} entities drifting (limit applied ${drift.limitApplied})`];
+  const lines = [`medha: ${drift.count} entities drifting (limit applied ${drift.limitApplied})`];
   for (const entry of drift.drifting) {
     lines.push(`  ${fixed(entry.delta)}  ${entry.hint.status.padEnd(10)} ${keyLabel(entry.key)}`);
   }
@@ -160,7 +163,7 @@ export function renderDrift(report: DriftResult): string {
 
 export function renderParams(report: ParamsReport): string {
   const lines = [
-    `sage: canonical model parameters (read-only)`,
+    `medha: canonical model parameters (read-only)`,
     `  note: ${report.note}`,
     `  NAME                          VALUE      SOURCE`,
   ];
@@ -174,7 +177,7 @@ export function renderParams(report: ParamsReport): string {
 export function renderSimulate(report: SimulateResult): string {
   const { delta } = report;
   const lines = [
-    `sage: simulate ${report.signal} on ${keyLabel(delta.key)}`,
+    `medha: simulate ${report.signal} on ${keyLabel(delta.key)}`,
     `  trust:    ${fixed(delta.before.trustScore)} -> ${fixed(delta.after.trustScore)} (delta ${fixed(
       delta.deltaTrust,
     )})`,
@@ -187,7 +190,7 @@ export function renderSimulate(report: SimulateResult): string {
 
 export function renderExplainThreshold(report: ExplainReport): string {
   const lines = [
-    `sage: thresholds for ${keyLabel(report.key)} (${report.known ? 'known' : 'probation prior'})`,
+    `medha: thresholds for ${keyLabel(report.key)} (${report.known ? 'known' : 'probation prior'})`,
     `  trust:    ${fixed(report.hint.trustScore)}  status: ${report.hint.status}`,
   ];
   for (const gate of report.gates) {
@@ -205,13 +208,13 @@ export function renderMaintainPreflight(report: MaintainPreflightReport): string
   if (p.status === 'corrupt') {
     const src = p.location?.source ?? 'unknown';
     return (
-      `sage: store at ${src} is corrupt — preflight exits 1\n` +
+      `medha: store at ${src} is corrupt — preflight exits 1\n` +
       `  hint: restore the last snapshot, or wipe and re-init with --recreate\n`
     );
   }
   const lastSweep = p.lastSweep === null ? 'not yet' : new Date(p.lastSweep).toISOString();
   const lines = [
-    `sage: preflight for ${report.home}`,
+    `medha: preflight for ${report.home}`,
     `  status:     ${p.status}`,
     `  episodes:   ${p.episodeCount}`,
     `  entities:   ${p.entityCount}`,
@@ -226,7 +229,7 @@ export function renderMaintainCompact(report: MaintainCompactReport): string {
   const c = report.report;
   const range = c.compacted === null ? 'none' : `${c.compacted.from}..${c.compacted.to}`;
   const lines = [
-    `sage: compaction for ${report.home}`,
+    `medha: compaction for ${report.home}`,
     `  folded range:        ${range}`,
     `  baselines written:   ${c.baselinesWritten}`,
     `  remaining episodes:  ${c.remainingEpisodes}`,
@@ -239,7 +242,7 @@ export function renderMaintainCompact(report: MaintainCompactReport): string {
 export function renderMaintainBackup(report: MaintainBackupReport): string {
   const snap = report.snapshot;
   const lines = [
-    `sage: backup for ${report.home}`,
+    `medha: backup for ${report.home}`,
     `  written to:   ${report.path}`,
     `  format:       ${snap.format}`,
     `  episodes:     ${snap.episodes.length}`,
@@ -250,7 +253,7 @@ export function renderMaintainBackup(report: MaintainBackupReport): string {
 
 export function renderMaintainRestore(report: MaintainRestoreReport): string {
   const lines = [
-    `sage: restore for ${report.home}`,
+    `medha: restore for ${report.home}`,
     `  source:     ${report.path}`,
     `  episodes:   ${report.restored.from} -> ${report.restored.to}`,
   ];

@@ -8,21 +8,22 @@ import type { Environment } from './environment.ts';
 import { openHome } from './open.ts';
 import { pageAll } from './read.ts';
 import { toJson } from './render.ts';
+import { compactHint, shapeHints } from './shape.ts';
 import { VERSION } from './version.ts';
 
 /**
  * An MCP server over a project's evidential memory engine.
- * Exposes 9 tools matching SAGE-LIBRARY-SPEC.md §9.2:
+ * Exposes 9 tools:
  * hints (batch), list_entities, show_entity, record_signal, report_guard,
  * propose, drift, simulate, status.
  */
 export function createMcpServer(engine: Sage, environment: Environment): McpServer {
   const server = new McpServer({ name: 'medha', version: VERSION });
 
-  const respond = async (run: () => Promise<unknown>) => {
+  const respond = async (run: () => Promise<unknown>, compact = false) => {
     try {
       const value = await run();
-      return { content: [{ type: 'text' as const, text: toJson(value) }] };
+      return { content: [{ type: 'text' as const, text: toJson(value, compact) }] };
     } catch (failure) {
       const error =
         failure instanceof MedhaError ? failure : toMedhaError(failure, 'answer a tool call');
@@ -37,7 +38,8 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
   server.registerTool(
     'hints',
     {
-      description: 'Batch fetch hints for entity keys. Unknown entities receive probation priors.',
+      description:
+        'Batch fetch hints for entity keys. Returns { hints, unknown }: `unknown` lists requested keys that do not exist (treat them as probation).',
       inputSchema: {
         keys: z
           .array(
@@ -48,19 +50,22 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
             }),
           )
           .describe('Entity keys to query.'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ keys }) =>
-      respond(() =>
-        engine.hints(
-          keys.map((k) => ({
-            namespace: k.namespace ?? '',
-            kind: k.kind ?? 'rule',
-            id: k.id,
-          })),
-          { now: environment.now() },
-        ),
-      ),
+    ({ keys, compact }) =>
+      respond(async () => {
+        const requested = keys.map((k) => ({
+          namespace: k.namespace ?? '',
+          kind: k.kind ?? 'rule',
+          id: k.id,
+        }));
+        const found = await engine.hints(requested, { now: environment.now() });
+        return shapeHints(requested, found, compact === true);
+      }, compact === true),
   );
 
   // 2. list_entities
@@ -79,11 +84,15 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
         drifting: z.boolean().optional().describe('Filter to only drifting entities.'),
         limit: z.number().int().positive().optional().describe('Page limit.'),
         cursor: z.string().optional().describe('Pagination cursor.'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ kind, status, namespace, drifting, limit, cursor }) =>
-      respond(() =>
-        engine.list(
+    ({ kind, status, namespace, drifting, limit, cursor, compact }) =>
+      respond(async () => {
+        const page = await engine.list(
           {
             ...(kind === undefined ? {} : { kind }),
             ...(status === undefined ? {} : { status: status as LifecycleStatus }),
@@ -95,8 +104,9 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
             ...(limit === undefined ? {} : { limit }),
             ...(cursor === undefined ? {} : { cursor }),
           },
-        ),
-      ),
+        );
+        return compact === true ? { ...page, items: page.items.map(compactHint) } : page;
+      }, compact === true),
   );
 
   // 3. show_entity
@@ -132,7 +142,7 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
     'record_signal',
     {
       description:
-        'Record an evidential signal (APPLY, REJECT_RULE, etc.) on an entity, updating its weight.',
+        'Record an evidential signal (APPLY, REJECT_RULE, etc.) on an entity, updating its weight. Returns `recorded: false` when the entity is unknown and `ensure` is not set.',
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -143,11 +153,15 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
           .boolean()
           .optional()
           .describe('If true, materialize the entity if it does not exist.'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ namespace, kind, id, signal, updater, ensure }) =>
-      respond(() =>
-        engine.record(
+    ({ namespace, kind, id, signal, updater, ensure, compact }) =>
+      respond(async () => {
+        const outcome = await engine.record(
           { namespace: namespace ?? '', kind: kind ?? 'rule', id },
           signal,
           { now: environment.now() },
@@ -155,8 +169,19 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
             ...(updater === undefined ? {} : { updater }),
             ensure: ensure === true,
           },
-        ),
-      ),
+        );
+        const recorded = outcome.state !== undefined;
+        return {
+          recorded,
+          ...(recorded
+            ? {}
+            : {
+                note: 'entity is unknown and `ensure` was not set: nothing was recorded; the hint is a probation prior. Pass ensure: true to create it.',
+              }),
+          hint: compact === true ? compactHint(outcome.hint) : outcome.hint,
+          ...(outcome.updater === undefined ? {} : { updater: outcome.updater }),
+        };
+      }, compact === true),
   );
 
   // 5. report_guard
@@ -211,11 +236,15 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
           .describe('Optional anchor (string value or { kind, value }).'),
         text: z.string().optional().describe('Optional text content of the proposal.'),
         metadata: z.record(z.string(), z.unknown()).optional().describe('Optional metadata.'),
+        compact: z
+          .boolean()
+          .optional()
+          .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ namespace, kind, id, source, evidenceRefs, anchor, text, metadata }) =>
-      respond(() =>
-        engine.propose(
+    ({ namespace, kind, id, source, evidenceRefs, anchor, text, metadata, compact }) =>
+      respond(async () => {
+        const outcome = await engine.propose(
           {
             key: { namespace: namespace ?? '', kind: kind ?? 'rule', id },
             ...(text === undefined ? {} : { text }),
@@ -225,8 +254,17 @@ export function createMcpServer(engine: Sage, environment: Environment): McpServ
             ...(metadata === undefined ? {} : { metadata }),
           },
           { now: environment.now() },
-        ),
-      ),
+        );
+        return {
+          hint: compact === true ? compactHint(outcome.hint) : outcome.hint,
+          promoted: outcome.promoted,
+          ...(outcome.promotionReason === undefined
+            ? {}
+            : { promotionReason: outcome.promotionReason }),
+          provenances: outcome.provenances,
+          episode: outcome.episode,
+        };
+      }, compact === true),
   );
 
   // 7. drift

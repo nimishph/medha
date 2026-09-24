@@ -911,9 +911,18 @@ describe('medha mcp server', () => {
         keys: [{ id: 't1' }, { id: 'a1' }],
       });
       expect(hintsRes.isError).toBe(false);
-      const hintsMap = hintsRes.body as Record<string, { key: { id: string }; status: string }>;
-      const values = Object.values(hintsMap);
+      const values = hintsRes.body.hints as { key: { id: string }; status: string }[];
       expect(values).toHaveLength(2);
+      expect(hintsRes.body.unknown).toEqual([]);
+
+      // unknown keys are reported, not silently dropped; compact shrinks the hint
+      const mixed = await call(client, 'hints', {
+        keys: [{ id: 't1' }, { id: 'nope' }],
+        compact: true,
+      });
+      expect(mixed.body.unknown).toEqual([{ namespace: '', kind: 'rule', id: 'nope' }]);
+      expect(mixed.body.hints).toHaveLength(1);
+      expect(mixed.body.hints[0].key).toBe('rule/t1');
       expect(values.some((h) => h.key.id === 't1')).toBe(true);
       expect(values.some((h) => h.key.id === 'a1')).toBe(true);
 
@@ -936,6 +945,12 @@ describe('medha mcp server', () => {
       });
       expect(recRes.isError).toBe(false);
       expect(recRes.body.hint.key.id).toBe('mcp_test_e');
+      expect(recRes.body.recorded).toBe(true);
+
+      // an unknown entity without ensure is flagged, not silently accepted
+      const ghost = await call(client, 'record_signal', { id: 'ghost', signal: 'APPLY' });
+      expect(ghost.body.recorded).toBe(false);
+      expect(ghost.body.note).toContain('ensure');
 
       // 5. report_guard
       const guardRes = await call(client, 'report_guard', {
@@ -954,6 +969,8 @@ describe('medha mcp server', () => {
       });
       expect(propRes.isError).toBe(false);
       expect(propRes.body.promoted).toBeDefined();
+      expect(propRes.body.trustScore).toBeUndefined(); // no duplicated flat hint
+      expect(propRes.body.state).toBeUndefined();
       expect(propRes.body.episode).toBeDefined();
 
       // 7. drift

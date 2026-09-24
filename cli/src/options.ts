@@ -11,7 +11,7 @@ export const initCommandArgs: ArgsDef = {
   },
   home: {
     type: 'string',
-    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
   },
   store: {
     type: 'enum',
@@ -45,7 +45,7 @@ export const readCommonArgs: ArgsDef = {
   },
   home: {
     type: 'string',
-    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -54,7 +54,7 @@ export const readCommonArgs: ArgsDef = {
 export const readKeyArgs: ArgsDef = {
   namespace: { type: 'string', description: 'Entity namespace. Default: empty.' },
   kind: { type: 'string', description: 'Entity kind. Default: rule.' },
-  id: { type: 'string', description: 'Entity id (opaque to Sage, unique per namespace+kind).' },
+  id: { type: 'string', description: 'Entity id (opaque to Medha, unique per namespace+kind).' },
 };
 
 export const listCommandArgs: ArgsDef = {
@@ -106,7 +106,7 @@ export const maintainCommonArgs: ArgsDef = {
   },
   home: {
     type: 'string',
-    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -147,7 +147,7 @@ export const updaterCommonArgs: ArgsDef = {
   },
   home: {
     type: 'string',
-    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
   },
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
@@ -183,7 +183,7 @@ export const mcpCommandArgs: ArgsDef = {
   },
   home: {
     type: 'string',
-    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/sage).',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
   },
 };
 

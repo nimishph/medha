@@ -282,15 +282,15 @@ export interface ParamsReport {
   readonly params: readonly ParamEntry[];
 }
 
-const SOURCE_EMA = 'sage-core/src/ema.ts';
-const SOURCE_SWEEP = 'sage/src/maintenance.ts';
-const SOURCE_THRESHOLDS = 'sage-core/src/thresholds.ts';
+const SOURCE_EMA = 'medha-core: ema.ts';
+const SOURCE_SWEEP = 'medha: maintenance.ts';
+const SOURCE_THRESHOLDS = 'medha-core: thresholds.ts';
 
 /** The canonical parameter catalog, read from the constants the kernel actually uses. */
 export function paramsReport(asOf: number): ParamsReport {
   return {
     asOf,
-    note: 'read-only: model parameters are canonical constants in sage-core — the lean engine has no mutable params store',
+    note: 'read-only: model parameters are canonical constants in medha-core — the lean engine has no mutable params store',
     params: [
       {
         name: 'WILSON_Z',
@@ -480,7 +480,7 @@ export interface ExplainReport {
   readonly known: boolean;
   readonly hint: EvidentialHint;
   readonly gates: readonly ThresholdGate[];
-  /** Sage never decides — it reports which thresholds clear and why. */
+  /** Medha never decides — it reports which thresholds clear and why. */
   readonly note: string;
 }
 
@@ -548,7 +548,7 @@ export async function runExplainThreshold(
       known: detail.known,
       hint,
       gates,
-      note: 'Sage reports which thresholds clear and why; it never decides for the host.',
+      note: 'Medha reports which thresholds clear and why; it never decides for the host.',
     };
   } finally {
     await opened.engine.close();
