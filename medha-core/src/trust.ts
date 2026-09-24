@@ -4,6 +4,13 @@ import type { EntityState, Evidence, LifecycleStatus } from './entity.ts';
 import { type GuardState, guardFactor, guardFailed, isUnguarded } from './guard.ts';
 import { recencyDecay } from './recency.ts';
 import { round6 } from './rounding.ts';
+import {
+  ACTIVE_THRESHOLD,
+  MIN_USES_FOR_RETIRED,
+  MIN_USES_FOR_TRUSTED,
+  RETIRED_TRUST_THRESHOLD,
+  TRUSTED_THRESHOLD,
+} from './thresholds.ts';
 import { wilsonLowerBound } from './wilson.ts';
 
 /**
@@ -139,15 +146,24 @@ export function trustOf(state: EntityState, now: number): TrustResult {
  * computed — `statusFor` and the hint builder share this tail to avoid double work).
  */
 export function statusForTrust(state: EntityState, trust: TrustResult): LifecycleStatus {
-  // T < 0.10 retires an entity that had evidence — it has outlived its usefulness.
-  if (trust.trust < 0.1 && state.evidence.n > 0) return 'retired';
+  // Retirement requires repeated evidence of failure/rejection (n >= MIN_USES_FOR_RETIRED).
+  // Undecayed performance (Wilson bound * guard) must fall below RETIRED_TRUST_THRESHOLD.
+  // Age/recency decay alone must NEVER retire an entity — dormant or unproven entities sit on probation.
+  const undecayedTrust = trust.components.wilson * trust.components.guard;
+  if (state.evidence.n >= MIN_USES_FOR_RETIRED && undecayedTrust < RETIRED_TRUST_THRESHOLD) {
+    return 'retired';
+  }
 
   // Model §5.1: trusted requires T ≥ 0.60 AND n ≥ 5 AND G = 1.0 (the last guard passed).
-  if (trust.trust >= 0.6 && state.evidence.n >= 5 && state.guard.lastOk === true) {
+  if (
+    trust.trust >= TRUSTED_THRESHOLD &&
+    state.evidence.n >= MIN_USES_FOR_TRUSTED &&
+    state.guard.lastOk === true
+  ) {
     return 'trusted';
   }
 
-  if (trust.trust >= 0.25) return 'active';
+  if (trust.trust >= ACTIVE_THRESHOLD) return 'active';
   return 'probation';
 }
 

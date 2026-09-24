@@ -81,7 +81,7 @@ export function applySignal(
       updatedAt: context.now,
     },
     anchors: mapAnchors(state, applied, context.now),
-    lastSignalAt: context.now,
+    lastSignalAt: applied.spec.name === 'SKIP' ? state.lastSignalAt : context.now,
   };
   const status = statusFor(next, context.now);
   return { state: { ...next, status }, status };

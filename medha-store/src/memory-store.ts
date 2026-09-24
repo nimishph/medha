@@ -169,6 +169,15 @@ export class MemoryStore implements StorePort {
 
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
+    if (episode.type === 'retract') {
+      const rebuilt = foldLog(this.log);
+      this.projection.clear();
+      for (const st of rebuilt) {
+        this.projection.set(entityKeyString(st.key), st);
+      }
+      this.nextSeq = episode.seq + 1;
+      return this.projection.get(entityKeyString(episode.key));
+    }
     const key = entityKeyString(episode.key);
     const next = foldEpisode(this.projection.get(key), episode);
     if (next === undefined) this.projection.delete(key);

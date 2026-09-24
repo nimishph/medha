@@ -228,6 +228,23 @@ export class GitRefSyncAdapter implements SyncPort {
     }
   }
 
+  getTrackingRef(remote = this.remote, ref = this.ref): string {
+    const suffix = ref.startsWith('refs/') ? ref.slice('refs/'.length) : ref;
+    if (/^[a-zA-Z0-9_-]+$/.test(remote)) {
+      return `refs/remotes/${remote}/${suffix}`;
+    }
+    let hash = 0;
+    for (let i = 0; i < remote.length; i++) {
+      hash = ((hash << 5) - hash + remote.charCodeAt(i)) | 0;
+    }
+    const hexHash = Math.abs(hash).toString(16);
+    const sanitized = remote
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return `refs/remotes/path_${sanitized}_${hexHash}/${suffix}`;
+  }
+
   async fetchRemoteRef(
     remote = this.remote,
     ref = this.ref,
@@ -238,8 +255,7 @@ export class GitRefSyncAdapter implements SyncPort {
         `[medha] DEPRECATION WARNING: "${DEFAULT_SAGE_REF}" is hard-deprecated. Use DEFAULT_MEDHA_REF ("${DEFAULT_MEDHA_REF}") instead.`,
       );
     }
-    const suffix = ref.startsWith('refs/') ? ref.slice('refs/'.length) : ref;
-    const trackingRef = `refs/remotes/${remote}/${suffix}`;
+    const trackingRef = this.getTrackingRef(remote, ref);
     try {
       await this.runGit(['fetch', remote, `${ref}:${trackingRef}`]);
       const commit = await this.getRefCommit(trackingRef);
@@ -322,6 +338,15 @@ export class GitRefSyncAdapter implements SyncPort {
     };
   }
 
+  async hasRemote(remote = this.remote): Promise<boolean> {
+    try {
+      const url = await this.getRemoteUrl(remote);
+      return url !== null;
+    } catch {
+      return false;
+    }
+  }
+
   async pull(_context?: Context): Promise<PullResult> {
     const isGit = await this.isGitRepo();
     const localStates = await this.store.list();
@@ -336,14 +361,17 @@ export class GitRefSyncAdapter implements SyncPort {
       };
     }
 
-    // Attempt fetch from remote if configured (errors are captured in result)
-    await this.fetchRemoteRef();
+    const remoteExists = await this.hasRemote(this.remote);
+    if (remoteExists) {
+      // Attempt fetch from remote if configured (errors are captured in result)
+      await this.fetchRemoteRef();
+    }
 
     // Read remote ref or local ref
-    const suffix = this.ref.startsWith('refs/') ? this.ref.slice('refs/'.length) : this.ref;
-    const remoteRef = `refs/remotes/${this.remote}/${suffix}`;
+    const remoteRef = this.getTrackingRef(this.remote, this.ref);
     const snapshot =
-      (await this.readSnapshotFromRef(remoteRef)) || (await this.readSnapshotFromRef(this.ref));
+      (remoteExists ? await this.readSnapshotFromRef(remoteRef) : null) ||
+      (await this.readSnapshotFromRef(this.ref));
 
     if (!snapshot) {
       return {
@@ -392,9 +420,32 @@ export class GitRefSyncAdapter implements SyncPort {
         episodes: episodes.length > 0 ? episodes : undefined,
       };
 
-      const commit = await this.writeSnapshotToRef(snapshot, 'Sage memory push');
+      const localCommit = await this.getRefCommit(this.ref);
+      const remoteExists = await this.hasRemote(this.remote);
+      const trackingRef = this.getTrackingRef(this.remote, this.ref);
+      const remoteCommit = remoteExists ? await this.getRefCommit(trackingRef) : null;
+      const parents: string[] = [];
+      if (localCommit) parents.push(localCommit);
+      if (remoteCommit && remoteCommit !== localCommit) parents.push(remoteCommit);
+
+      const commit = await this.writeSnapshotToRef(
+        snapshot,
+        'Sage memory push',
+        this.ref,
+        parents.length > 0 ? parents : undefined,
+      );
+
       // Push to remote ref if remote exists (errors captured in result)
-      await this.pushRemoteRef();
+      if (remoteExists) {
+        const pushRes = await this.pushRemoteRef(this.remote, this.ref, false);
+        if (!pushRes.ok) {
+          return {
+            ok: false,
+            pushedCount: 0,
+            error: `Failed to push to remote ref '${this.remote}': ${pushRes.error ?? 'unknown error'}`,
+          };
+        }
+      }
 
       return {
         ok: true,
@@ -412,6 +463,15 @@ export class GitRefSyncAdapter implements SyncPort {
 
   async reconcile(context?: Context): Promise<ReconcileResult> {
     const pullRes = await this.pull(context);
+    if (!pullRes.ok) {
+      return {
+        ok: false,
+        pulledCount: 0,
+        pushedCount: 0,
+        totalCount: pullRes.localTotal,
+        error: pullRes.error,
+      };
+    }
     const pushRes = await this.push(context);
 
     return {
@@ -420,7 +480,7 @@ export class GitRefSyncAdapter implements SyncPort {
       pushedCount: pushRes.pushedCount,
       totalCount: pullRes.localTotal,
       commit: pushRes.commit,
-      error: pushRes.error || pullRes.error,
+      error: pushRes.error,
     };
   }
 }

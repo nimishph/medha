@@ -24,3 +24,39 @@ export function mulberry32(seed: number): SeededRng {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/** Seeded weighted sampling without replacement. Zero-weight pools fall back to index order. */
+export function pickWeighted<T>(
+  items: readonly T[],
+  weightOf: (item: T) => number,
+  rng: () => number,
+  count: number,
+): T[] {
+  const pool = [...items];
+  const picked: T[] = [];
+  while (picked.length < count && pool.length > 0) {
+    let total = 0;
+    for (const item of pool) total += weightOf(item);
+    if (total <= 0) {
+      const first = pool[0];
+      if (first === undefined) break;
+      pool.shift();
+      picked.push(first);
+      continue;
+    }
+    let draw = rng() * total;
+    let index = 0;
+    for (; index < pool.length; index++) {
+      const item = pool[index];
+      if (item === undefined) break;
+      draw -= weightOf(item);
+      if (draw <= 0) break;
+    }
+    const idx = Math.min(index, pool.length - 1);
+    const chosen = pool[idx];
+    if (chosen === undefined) break;
+    pool.splice(idx, 1);
+    picked.push(chosen);
+  }
+  return picked;
+}

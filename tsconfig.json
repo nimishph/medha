@@ -21,10 +21,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "paths": {
-      "@cntxt-labs/medha-core": ["./sage-core/src/index.ts"],
-      "@cntxt-labs/medha-store": ["./sage-store/src/index.ts"],
-      "@cntxt-labs/medha-sync": ["./sage-sync/src/index.ts"],
-      "@cntxt-labs/medha": ["./sage/src/index.ts"]
+      "@cntxt-labs/medha-core": ["./medha-core/src/index.ts"],
+      "@cntxt-labs/medha-store": ["./medha-store/src/index.ts"],
+      "@cntxt-labs/medha-sync": ["./medha-sync/src/index.ts"],
+      "@cntxt-labs/medha": ["./medha/src/index.ts"]
     }
   },
   "include": ["*/src", "tooling/*.ts"],

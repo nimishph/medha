@@ -9,6 +9,7 @@ export interface CompactHint {
   readonly successes: number;
   readonly trials: number;
   readonly drifting: boolean;
+  readonly lastNote?: string | undefined;
 }
 
 export function compactHint(hint: EvidentialHint): CompactHint {
@@ -19,6 +20,7 @@ export function compactHint(hint: EvidentialHint): CompactHint {
     successes: hint.evidence.successes,
     trials: hint.evidence.totalTrials,
     drifting: hint.temporal.isDrifting,
+    ...(hint.lastNote !== undefined ? { lastNote: hint.lastNote } : {}),
   };
 }
 

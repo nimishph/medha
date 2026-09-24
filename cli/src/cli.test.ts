@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type MedhaSnapshot, Sage } from '@cntxt-labs/medha';
+import { Medha, type MedhaSnapshot, Sage } from '@cntxt-labs/medha';
 import type { EntityKey } from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -106,6 +106,10 @@ describe('sage entrypoint', () => {
   test('invalid --store value is usage (exit 2)', async () => {
     const { env } = fresh();
     expect(await runCli(['init', '--store', 'mongo'], env)).toBe(2);
+  });
+
+  test('Medha and Sage are identical engine constructors', () => {
+    expect(Medha).toBe(Sage);
   });
 });
 
@@ -654,6 +658,179 @@ describe('medha write plane', () => {
     ).toBe(0);
     expect(JSON.parse(out().slice(out().indexOf('{'))).hint.status).toBe('probation');
   });
+
+  test('record with --author and --at records author provenance and backfills timestamp', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    const historicalTime = '2025-01-01T00:00:00Z';
+    expect(
+      await runCli(
+        [
+          'record',
+          '--id',
+          'hist1',
+          '--signal',
+          'APPLY',
+          '--ensure',
+          '--author',
+          'alice',
+          '--at',
+          historicalTime,
+          '--json',
+        ],
+        env,
+      ),
+    ).toBe(0);
+
+    const beforeShow = out();
+    expect(await runCli(['show', '--id', 'hist1', '--json'], env)).toBe(0);
+    const shown = JSON.parse(out().slice(beforeShow.length)) as {
+      detail: { recentEpisodes: { author?: string; at: number }[] };
+    };
+    const episode = shown.detail.recentEpisodes[0];
+    expect(episode).toBeDefined();
+    expect(episode?.author).toBe('alice');
+    expect(episode?.at).toBe(Date.parse(historicalTime));
+  });
+
+  test('record, guard, and propose with --note attach rationale and display on show', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    // 1. Record with --note
+    const beforeRecord = out();
+    expect(
+      await runCli(
+        [
+          'record',
+          '--id',
+          'noted1',
+          '--signal',
+          'APPLY',
+          '--ensure',
+          '--note',
+          'Fixed edge case with null bytes',
+        ],
+        env,
+      ),
+    ).toBe(0);
+    const recordOut = out().slice(beforeRecord.length);
+    expect(recordOut).toContain('note:     Fixed edge case with null bytes');
+
+    // 2. Show verifies lastNote and episode note
+    const beforeShow1 = out();
+    expect(await runCli(['show', '--id', 'noted1'], env)).toBe(0);
+    const show1Out = out().slice(beforeShow1.length);
+    expect(show1Out).toContain('last note: Fixed edge case with null bytes');
+    expect(show1Out).toContain('Fixed edge case with null bytes');
+
+    // 3. Guard with --note updates lastNote
+    const beforeGuard = out();
+    expect(
+      await runCli(
+        ['guard', '--id', 'noted1', '--ok', '--guard', 'review', '--note', 'Passed linter checks'],
+        env,
+      ),
+    ).toBe(0);
+    const guardOut = out().slice(beforeGuard.length);
+    expect(guardOut).toContain('note:     Passed linter checks');
+
+    const beforeShow2 = out();
+    expect(await runCli(['show', '--id', 'noted1', '--json'], env)).toBe(0);
+    const show2 = JSON.parse(out().slice(beforeShow2.length)) as {
+      detail: { hint: { lastNote?: string }; recentEpisodes: { note?: string }[] };
+    };
+    expect(show2.detail.hint.lastNote).toBe('Passed linter checks');
+    expect(show2.detail.recentEpisodes[0]?.note).toBe('Passed linter checks');
+  });
+
+  test('retract command appends a retract episode and masks the target', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env);
+    const beforeRetract = out();
+    expect(
+      await runCli(
+        ['retract', '--seq', '0', '--reason', 'mistake', '--author', 'bob', '--json'],
+        env,
+      ),
+    ).toBe(0);
+    const retractReport = JSON.parse(out().slice(beforeRetract.length)) as {
+      targetSeq: number;
+      reason: string;
+      episode: { type: string; author?: string };
+    };
+    expect(retractReport.targetSeq).toBe(0);
+    expect(retractReport.reason).toBe('mistake');
+    expect(retractReport.episode.type).toBe('retract');
+    expect(retractReport.episode.author).toBe('bob');
+  });
+
+  test('remove-episode physically removes episode from log and resequences', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env);
+    await runCli(['record', '--id', 'r2', '--signal', 'APPLY', '--ensure'], env);
+
+    const beforeRemove = out();
+    expect(await runCli(['remove-episode', '--seq', '0', '--json'], env)).toBe(0);
+    const removeReport = JSON.parse(out().slice(beforeRemove.length)) as {
+      removed: boolean;
+      remainingCount: number;
+    };
+    expect(removeReport.removed).toBe(true);
+    expect(removeReport.remainingCount).toBe(1);
+  });
+});
+
+describe('medha pack command', () => {
+  test('packs rules into token budget with markdown format', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const beforePack = out();
+    expect(await runCli(['pack', '--budget', '200'], env)).toBe(0);
+    const text = out().slice(beforePack.length);
+    expect(text).toContain('# Medha Evidential Context');
+    expect(text).toContain('selected');
+    expect(text).toContain('tokens');
+  });
+
+  test('pack with --format compact outputs tabular format', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const beforePack = out();
+    expect(await runCli(['pack', '--budget', '200', '--format', 'compact'], env)).toBe(0);
+    const text = out().slice(beforePack.length);
+    expect(text).toContain('medha: packed');
+    expect(text).toContain('TRUST  STATUS');
+  });
+
+  test('pack --json outputs structured report', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await seedHome(env);
+
+    const beforePack = out();
+    expect(await runCli(['pack', '--budget', '500', '--json'], env)).toBe(0);
+    const report = JSON.parse(out().slice(beforePack.length)) as {
+      budget: number;
+      outcome: { selected: unknown[]; totalCost: number; utilization: number };
+    };
+    expect(report.budget).toBe(500);
+    expect(report.outcome.selected.length).toBeGreaterThan(0);
+    expect(report.outcome.totalCost).toBeLessThanOrEqual(500);
+  });
+
+  test('missing --budget fails with usage error', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    expect(await runCli(['pack'], env)).toBe(2);
+    expect(err()).toContain('--budget');
+  });
 });
 
 describe('medha maintain plane', () => {
@@ -918,7 +1095,7 @@ describe('medha mcp server', () => {
     return { isError: result.isError === true, body: JSON.parse(text) };
   };
 
-  test('lists all nine tools and calls every tool with asserted results', async () => {
+  test('lists all twelve tools and calls every tool with asserted results', async () => {
     const { env, root } = fresh();
     await runCli(['init'], env);
     await seedHome(env);
@@ -927,7 +1104,7 @@ describe('medha mcp server', () => {
     try {
       const { client } = session;
       const tools = (await client.listTools()).tools.map((t) => t.name);
-      expect(tools).toHaveLength(9);
+      expect(tools).toHaveLength(12);
       expect(tools).toEqual(
         expect.arrayContaining([
           'hints',
@@ -939,6 +1116,9 @@ describe('medha mcp server', () => {
           'drift',
           'simulate',
           'status',
+          'retract_episode',
+          'remove_episode',
+          'pack_context',
         ]),
       );
 
@@ -1031,6 +1211,26 @@ describe('medha mcp server', () => {
       expect(statusRes.isError).toBe(false);
       expect(statusRes.body.preflight.status).toBe('ok');
       expect(statusRes.body.byStatus).toBeDefined();
+
+      // 10. retract_episode
+      const retractRes = await call(client, 'retract_episode', {
+        seq: 0,
+        reason: 'mcp test retraction',
+        author: 'mcp-agent',
+      });
+      expect(retractRes.isError).toBe(false);
+      expect(retractRes.body.retractedSeq).toBe(0);
+
+      // 11. remove_episode
+      const removeRes = await call(client, 'remove_episode', { seq: 0 });
+      expect(removeRes.isError).toBe(false);
+      expect(removeRes.body.removed).toBe(true);
+
+      // 12. pack_context
+      const packRes = await call(client, 'pack_context', { budget: 500 });
+      expect(packRes.isError).toBe(false);
+      expect(packRes.body.totalCost).toBeDefined();
+      expect(packRes.body.contextText).toBeDefined();
     } finally {
       await session.close();
     }
@@ -1071,7 +1271,7 @@ describe('medha mcp server', () => {
           );
         } else if (msg.id === 2) {
           sawTools = true;
-          expect(msg.result?.tools).toHaveLength(9);
+          expect(msg.result?.tools).toHaveLength(12);
           proc.stdin.end();
         }
       }

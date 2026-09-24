@@ -13,7 +13,7 @@
     },
     "cli": {
       "name": "@cntxt-labs/medha-cli",
-      "version": "0.0.0",
+      "version": "0.1.2",
       "bin": {
         "medha": "bin/medha.cjs",
       },
@@ -26,29 +26,29 @@
         "zod": "^4.6.5",
       },
     },
-    "sage": {
+    "medha": {
       "name": "@cntxt-labs/medha",
-      "version": "0.0.0",
+      "version": "0.1.2",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
         "@cntxt-labs/medha-store": "workspace:*",
         "@cntxt-labs/medha-sync": "workspace:*",
       },
     },
-    "sage-core": {
+    "medha-core": {
       "name": "@cntxt-labs/medha-core",
-      "version": "0.0.0",
+      "version": "0.1.2",
     },
-    "sage-store": {
+    "medha-store": {
       "name": "@cntxt-labs/medha-store",
-      "version": "0.0.0",
+      "version": "0.1.2",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
       },
     },
-    "sage-sync": {
+    "medha-sync": {
       "name": "@cntxt-labs/medha-sync",
-      "version": "0.0.0",
+      "version": "0.1.2",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
       },
@@ -73,15 +73,15 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oJWmBhoHsnhUKIke+0gXDX0mltJrWHA1UyHsrTlXwX0TL64ilVZAo+TYZm97baecV0esBdpzy3k96q+09JaZUQ=="],
 
-    "@cntxt-labs/medha": ["@cntxt-labs/medha@workspace:sage"],
+    "@cntxt-labs/medha": ["@cntxt-labs/medha@workspace:medha"],
 
     "@cntxt-labs/medha-cli": ["@cntxt-labs/medha-cli@workspace:cli"],
 
-    "@cntxt-labs/medha-core": ["@cntxt-labs/medha-core@workspace:sage-core"],
+    "@cntxt-labs/medha-core": ["@cntxt-labs/medha-core@workspace:medha-core"],
 
-    "@cntxt-labs/medha-store": ["@cntxt-labs/medha-store@workspace:sage-store"],
+    "@cntxt-labs/medha-store": ["@cntxt-labs/medha-store@workspace:medha-store"],
 
-    "@cntxt-labs/medha-sync": ["@cntxt-labs/medha-sync@workspace:sage-sync"],
+    "@cntxt-labs/medha-sync": ["@cntxt-labs/medha-sync@workspace:medha-sync"],
 
     "@hono/node-server": ["@hono/node-server@2.1.1", "", { "peerDependencies": { "hono": "^4" } }, "sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg=="],
 

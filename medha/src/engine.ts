@@ -11,6 +11,7 @@
 
 import {
   type Anchor,
+  assignSeq,
   buildHint,
   type Context,
   type CorruptLocation,
@@ -22,6 +23,7 @@ import {
   type EpisodeInput,
   type EvidentialHint,
   entityKeyString,
+  episodeToInput,
   foldEpisode,
   freshState,
   InvalidArgumentError,
@@ -32,13 +34,18 @@ import {
   type MinerPort,
   mulberry32,
   type OpenResult,
+  type PackCandidate,
+  type PackOutcome,
+  type PackPolicy,
   type Page,
   type PageRequest,
+  PermissionDeniedError,
   type PromotionContext,
   type PromotionDecision,
   type PromotionPolicy,
   type Proposal,
   type ProposalEpisode,
+  packEntities,
   paginate,
   resolveProposalKey,
   round6,
@@ -72,12 +79,24 @@ import {
 } from './maintenance.ts';
 import { UpdaterRegistry, type WeightUpdateContext } from './updaters.ts';
 
-export interface SageOptions {
+export interface WritePermissionsPolicy {
+  /** If true, write operations require an author identifier. */
+  readonly requireAuthor?: boolean;
+  /** If set, only authors in this list may write evidence. */
+  readonly allowedAuthors?: readonly string[];
+  /** If true, the store is read-only and all writes are rejected. */
+  readonly readOnly?: boolean;
+}
+
+export interface MedhaOptions {
   readonly store: StorePort;
   readonly updaters?: UpdaterRegistry | undefined;
   readonly promotionPolicy?: PromotionPolicy | undefined;
   readonly sync?: SyncPort | undefined;
+  readonly permissions?: WritePermissionsPolicy | undefined;
 }
+
+export type SageOptions = MedhaOptions;
 
 /** Build every number the updaters see from the entity state + the incoming signal. */
 function buildWeightContext(state: EntityState, spec: SignalSpec): WeightUpdateContext {
@@ -101,19 +120,21 @@ function compareKeyString(a: { readonly key: EntityKey }, b: { readonly key: Ent
   return s1 < s2 ? -1 : s1 > s2 ? 1 : 0;
 }
 
-export class Sage {
+export class Medha {
   readonly store: StorePort;
   readonly updaters: UpdaterRegistry;
   readonly promotionPolicy: PromotionPolicy;
   readonly sync: SyncPort | undefined;
+  readonly permissions: WritePermissionsPolicy | undefined;
   /** The last `store.open()` result, retained so maintenance can report a corrupt location. */
   private openResult: OpenResult | undefined;
 
-  constructor(options: SageOptions) {
+  constructor(options: MedhaOptions) {
     this.store = options.store;
     this.updaters = options.updaters ?? new UpdaterRegistry();
     this.promotionPolicy = options.promotionPolicy ?? convergingSourcesPolicy({ minSources: 2 });
     this.sync = options.sync;
+    this.permissions = options.permissions;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -156,6 +177,25 @@ export class Sage {
   private validateKey(key: EntityKey): void {
     if (typeof key !== 'object' || key === null) {
       throw new InvalidArgumentError('key', 'an EntityKey object', key);
+    }
+  }
+
+  private checkWritePermission(action: string, author?: string): void {
+    const perms = this.permissions;
+    if (!perms) return;
+    if (perms.readOnly) {
+      throw new PermissionDeniedError(action, 'Store is configured as read-only');
+    }
+    if (perms.requireAuthor && (!author || author.trim() === '')) {
+      throw new PermissionDeniedError(action, 'An author identifier is required for writes');
+    }
+    if (perms.allowedAuthors && perms.allowedAuthors.length > 0) {
+      if (!author || !perms.allowedAuthors.includes(author)) {
+        throw new PermissionDeniedError(
+          action,
+          `Author '${author ?? 'anonymous'}' is not in the allowed authors list`,
+        );
+      }
     }
   }
 
@@ -379,6 +419,79 @@ export class Sage {
         }),
       ),
     ];
+  }
+
+  /**
+   * Evidential Token Budget Packer:
+   * Packs candidate entities into a token/cost budget, prioritizing mandatory pinned rules,
+   * reserving an exploration slot for Wilson-width sampled probation entities, and filling
+   * remaining capacity with highest trust density (trustScore / cost) items.
+   */
+  async pack<T = unknown>(
+    options: EnginePackOptions<T>,
+    context: Context,
+  ): Promise<PackOutcome<T>> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    if (!Number.isSafeInteger(options.budget) || options.budget < 0) {
+      throw new InvalidArgumentError('options.budget', 'a non-negative integer', options.budget);
+    }
+    const seed = options.seed ?? context.seed;
+    const defaultCostEstimator = (hint: EvidentialHint) =>
+      Math.max(10, Math.ceil(entityKeyString(hint.key).length / 3) + 20);
+    const estimator = options.costEstimator ?? defaultCostEstimator;
+
+    let packCandidates: PackCandidate<T>[];
+    if (options.candidates !== undefined) {
+      const keys = options.candidates.map((c) => c.key);
+      const hints = await this.hints(keys, context);
+      packCandidates = [];
+      for (const item of options.candidates) {
+        this.validateKey(item.key);
+        const hint =
+          hints.get(entityKeyString(item.key)) ??
+          buildHint(freshState(item.key, context.now), context.now);
+        const cost = item.cost ?? estimator(hint, item.key);
+        packCandidates.push({
+          key: item.key,
+          hint,
+          cost,
+          ...(item.mandatory === undefined ? {} : { mandatory: item.mandatory }),
+          ...(item.payload === undefined ? {} : { payload: item.payload }),
+        });
+      }
+    } else {
+      const states = await this.store.list();
+      packCandidates = states
+        .filter(
+          (state) =>
+            (options.kind === undefined || state.key.kind === options.kind) &&
+            (options.namespace === undefined || state.key.namespace === options.namespace),
+        )
+        .map((state) => {
+          const hint = buildHint(state, context.now);
+          return {
+            key: state.key,
+            hint,
+            cost: estimator(hint, state.key),
+          };
+        });
+    }
+
+    const policy: PackPolicy = {
+      budget: options.budget,
+      ...(options.explorationRatio === undefined
+        ? {}
+        : { explorationRatio: options.explorationRatio }),
+      ...(seed === undefined ? {} : { seed }),
+      ...(options.minTrust === undefined ? {} : { minTrust: options.minTrust }),
+      ...(options.allowQuarantined === undefined
+        ? {}
+        : { allowQuarantined: options.allowQuarantined }),
+      ...(options.allowRetired === undefined ? {} : { allowRetired: options.allowRetired }),
+    };
+
+    return packEntities(packCandidates, policy);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -666,6 +779,7 @@ export class Sage {
     await this.ensureOpen();
     this.validateKey(key);
     this.requireKind(key);
+    this.checkWritePermission('record', options.author);
     const spec = this.resolveSignal(signal);
     const state = await this.store.get(key);
     const ensure = options.ensure ?? false;
@@ -694,6 +808,7 @@ export class Sage {
       ...(options.anchor === undefined ? {} : { anchors: [options.anchor] }),
       ...(options.runRef === undefined ? {} : { runRef: options.runRef }),
       ...(options.note === undefined ? {} : { note: options.note }),
+      ...(options.author === undefined ? {} : { author: options.author }),
       ...weightEpisode,
     };
 
@@ -719,6 +834,7 @@ export class Sage {
     await this.ensureOpen();
     this.validateKey(key);
     this.requireKind(key);
+    this.checkWritePermission('reportGuard', report.author);
     if (typeof report.ok !== 'boolean') {
       throw new InvalidArgumentError('report.ok', 'a boolean', report.ok);
     }
@@ -737,6 +853,8 @@ export class Sage {
       ok: report.ok,
       ensure: true,
       ...(kind === undefined ? {} : { kind }),
+      ...(report.author === undefined ? {} : { author: report.author }),
+      ...(report.note === undefined ? {} : { note: report.note }),
     };
     const appended = await this.store.append(input);
     return appended.state === undefined
@@ -758,6 +876,8 @@ export class Sage {
     const key = resolveProposalKey(proposal);
     this.validateKey(key);
     this.requireKind(key);
+    const author = options.author ?? proposal.author;
+    this.checkWritePermission('propose', author);
 
     const provenance = proposal.provenance ?? options.provenance ?? 'propose';
     if (typeof provenance !== 'string' || provenance.trim() === '') {
@@ -797,15 +917,18 @@ export class Sage {
     const decision: PromotionDecision =
       typeof decisionResult === 'boolean' ? { promoted: decisionResult } : decisionResult;
 
+    const at = proposal.at ?? context.now;
     const episodeInput: EpisodeInput = {
       type: 'proposal',
       key,
-      at: context.now,
+      at,
       provenance,
       ...(proposal.description === undefined ? {} : { description: proposal.description }),
       ...(proposal.theta0 === undefined ? {} : { theta0: proposal.theta0 }),
       ...(proposal.evidenceRefs === undefined ? {} : { evidenceRefs: proposal.evidenceRefs }),
       ...(proposal.anchor === undefined ? {} : { anchor: proposal.anchor }),
+      ...(proposal.note === undefined ? {} : { note: proposal.note }),
+      ...(author === undefined ? {} : { author }),
       promoted: decision.promoted,
       ...(decision.reason === undefined ? {} : { promotionReason: decision.reason }),
     };
@@ -878,11 +1001,13 @@ export class Sage {
     action: OverrideAction,
     context: Context,
     reason: string,
+    author?: string,
   ): Promise<EvidentialHint | null> {
     sanitizeContext(context);
     await this.ensureOpen();
     this.validateKey(key);
     this.requireKind(key);
+    this.checkWritePermission('override', author);
     let override: 'retired' | 'quarantined' | 'restore';
     switch (action) {
       case 'retire':
@@ -903,10 +1028,82 @@ export class Sage {
       at: context.now,
       override,
       reason,
+      ...(author === undefined ? {} : { author }),
     });
     return appended.state === undefined ? null : buildHint(appended.state, context.now);
   }
+
+  /**
+   * Retract a bad episode by its sequence number (§6.2).
+   * Appends an immutable 'retract' episode that masks the target episode during state folds.
+   */
+  async retract(
+    targetSeq: number,
+    reason: string,
+    context: Context,
+    options: { readonly author?: string } = {},
+  ): Promise<{
+    readonly episode: Episode;
+    readonly state: EntityState | undefined;
+    readonly hint: EvidentialHint;
+  }> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    if (!Number.isInteger(targetSeq) || targetSeq < 0) {
+      throw new InvalidArgumentError('targetSeq', 'a non-negative integer', targetSeq);
+    }
+    if (typeof reason !== 'string' || reason.trim() === '') {
+      throw new InvalidArgumentError('reason', 'a non-empty string', reason);
+    }
+    this.checkWritePermission('retract', options.author);
+    const episodes = await this.store.episodes();
+    const target = episodes.find((e) => e.seq === targetSeq);
+    if (!target) {
+      throw new InvalidArgumentError(
+        'targetSeq',
+        `an existing episode sequence (found ${episodes.length} episodes)`,
+        targetSeq,
+      );
+    }
+    const input: EpisodeInput = {
+      type: 'retract',
+      key: target.key,
+      at: context.now,
+      targetSeq,
+      reason,
+      ...(options.author === undefined ? {} : { author: options.author }),
+    };
+    const appended = await this.store.append(input);
+    const state = appended.state ?? freshState(target.key, context.now);
+    const hint = buildHint(state, context.now);
+    return { episode: appended.episode, state: appended.state, hint };
+  }
+
+  /**
+   * Remove a bad episode directly from the log and rebuild projection.
+   * Resequences remaining episodes contiguously from 0 to preserve log invariants.
+   */
+  async removeEpisode(
+    seq: number,
+  ): Promise<{ readonly removed: boolean; readonly remainingCount: number }> {
+    await this.ensureOpen();
+    this.checkWritePermission('removeEpisode');
+    if (!Number.isInteger(seq) || seq < 0) {
+      throw new InvalidArgumentError('seq', 'a non-negative integer', seq);
+    }
+    const episodes = await this.store.episodes();
+    const filtered = episodes.filter((e) => e.seq !== seq);
+    if (filtered.length === episodes.length) {
+      return { removed: false, remainingCount: episodes.length };
+    }
+    const resequenced = filtered.map((e, idx) => assignSeq(episodeToInput(e), idx));
+    await this.store.replaceLog(resequenced);
+    await this.store.rebuild();
+    return { removed: true, remainingCount: resequenced.length };
+  }
 }
+
+export { Medha as Sage };
 
 // ---------------------------------------------------------------------------------------------
 // read-plane contracts
@@ -958,6 +1155,36 @@ export interface ExplorePolicy {
   readonly slots: number;
   /** Seeded RNG source; falls back to `context.seed`. One of the two must be present. */
   readonly seed?: number;
+}
+
+export interface EnginePackOptions<T = unknown> {
+  /** Maximum token budget (strictly non-negative integer). */
+  readonly budget: number;
+  /** Filter to entities of a given kind (default: 'rule'). */
+  readonly kind?: string | undefined;
+  /** Filter to entities of a given namespace. */
+  readonly namespace?: string | undefined;
+  /** Explicit candidates to pack. If omitted, matching entities in store are used. */
+  readonly candidates?:
+    | readonly {
+        readonly key: EntityKey;
+        readonly cost?: number | undefined;
+        readonly mandatory?: boolean | undefined;
+        readonly payload?: T | undefined;
+      }[]
+    | undefined;
+  /** Custom estimator function calculating token cost when not explicitly provided. */
+  readonly costEstimator?: ((hint: EvidentialHint, key: EntityKey) => number) | undefined;
+  /** Proportion of non-mandatory budget reserved for exploring probation entities (default: 0.15). */
+  readonly explorationRatio?: number | undefined;
+  /** Minimum trust score required for merit candidates (default: 0). */
+  readonly minTrust?: number | undefined;
+  /** Allow quarantined entities (default: false). */
+  readonly allowQuarantined?: boolean | undefined;
+  /** Allow retired entities (default: false). */
+  readonly allowRetired?: boolean | undefined;
+  /** Seed override for deterministic exploration (defaults to context.seed). */
+  readonly seed?: number | undefined;
 }
 
 export interface Candidate {
@@ -1017,6 +1244,8 @@ export interface ProposeOptions {
   readonly promotionPolicy?: PromotionPolicy | undefined;
   /** Fallback provenance if not defined on the proposal. Defaults to 'propose'. */
   readonly provenance?: string | undefined;
+  /** Author or agent identifier recording this proposal. */
+  readonly author?: string | undefined;
 }
 
 export interface ProposeOutcome extends EvidentialHint {
@@ -1055,6 +1284,8 @@ export interface RecordOptions {
   readonly note?: string;
   /** Weight-updater name; defaults to the entity's configured `updater`. */
   readonly updater?: string;
+  /** Author or agent identifier recording this evidence. */
+  readonly author?: string;
 }
 
 export interface UpdaterUsage {
@@ -1079,6 +1310,10 @@ export interface GuardReportInput {
   readonly kind?: string;
   /** When the guard ran; defaults to `context.now`. */
   readonly at?: number;
+  /** Author or agent identifier recording this guard report. */
+  readonly author?: string;
+  /** Natural language explanation for this guard outcome. */
+  readonly note?: string;
 }
 
 export type OverrideAction = 'retire' | 'quarantine' | 'restore';

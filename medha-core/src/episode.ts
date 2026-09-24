@@ -34,6 +34,8 @@ export interface BaseEpisode {
   readonly key: EntityKey;
   /** When the event happened, in epoch ms. Serves as the fold's clock for determinism. */
   readonly at: number;
+  /** Provenance of the write: agent, user, or tool identifier that authored this episode. */
+  readonly author?: string | undefined;
 }
 
 export interface SignalEpisode extends BaseEpisode {
@@ -67,6 +69,8 @@ export interface GuardEpisode extends BaseEpisode {
   /** Name of the guard the host ran; defaults to the entity's current guard kind. */
   readonly kind?: string;
   readonly ensure: boolean;
+  /** Free-form note or rationale explaining the guard outcome. */
+  readonly note?: string | undefined;
 }
 
 export interface OverrideEpisode extends BaseEpisode {
@@ -90,6 +94,8 @@ export interface ProposalEpisode extends BaseEpisode {
   readonly promoted?: boolean | undefined;
   /** Reason associated with the promotion decision. */
   readonly promotionReason?: string | undefined;
+  /** Free-form note or rationale for the proposal. */
+  readonly note?: string | undefined;
 }
 
 export type SweepAction = 'quarantine' | 'retire' | 'restore' | 'archive' | 'purge';
@@ -111,13 +117,21 @@ export interface BaselineEpisode extends BaseEpisode {
   readonly state: EntityState;
 }
 
+export interface RetractEpisode extends BaseEpisode {
+  readonly type: 'retract';
+  /** The sequence number of the episode being retracted. */
+  readonly targetSeq: number;
+  readonly reason: string;
+}
+
 export type Episode =
   | SignalEpisode
   | GuardEpisode
   | OverrideEpisode
   | ProposalEpisode
   | SweepEpisode
-  | BaselineEpisode;
+  | BaselineEpisode
+  | RetractEpisode;
 
 /** An episode the host submits: everything but the store-assigned `seq`. */
 export type EpisodeInput =
@@ -126,7 +140,8 @@ export type EpisodeInput =
   | Omit<OverrideEpisode, 'seq'>
   | Omit<ProposalEpisode, 'seq'>
   | Omit<SweepEpisode, 'seq'>
-  | Omit<BaselineEpisode, 'seq'>;
+  | Omit<BaselineEpisode, 'seq'>
+  | Omit<RetractEpisode, 'seq'>;
 
 /** Deterministic map key for an entity. The separator is NUL (illegal in ids). */
 export function entityKeyString(key: EntityKey): string {
@@ -201,6 +216,12 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       break;
     }
     case 'guard':
+      if (
+        input.note !== undefined &&
+        (typeof input.note !== 'string' || input.note.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.note', 'a non-empty string', input.note);
+      }
       break;
     case 'override':
       if (typeof input.reason !== 'string' || input.reason.trim() === '') {
@@ -220,6 +241,12 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       }
       if (input.description !== undefined && typeof input.description !== 'string') {
         throw new InvalidArgumentError('episode.description', 'a string', input.description);
+      }
+      if (
+        input.note !== undefined &&
+        (typeof input.note !== 'string' || input.note.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.note', 'a non-empty string', input.note);
       }
       if (input.evidenceRefs !== undefined) {
         if (!Array.isArray(input.evidenceRefs)) {
@@ -274,6 +301,22 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
         );
       }
       break;
+    case 'retract':
+      if (
+        typeof input.targetSeq !== 'number' ||
+        !Number.isInteger(input.targetSeq) ||
+        input.targetSeq < 0
+      ) {
+        throw new InvalidArgumentError(
+          'episode.targetSeq',
+          'a non-negative integer',
+          input.targetSeq,
+        );
+      }
+      if (typeof input.reason !== 'string' || input.reason.trim() === '') {
+        throw new InvalidArgumentError('episode.reason', 'a non-empty string', input.reason);
+      }
+      break;
     default:
       assertNever(input, 'episode input type');
   }
@@ -315,6 +358,8 @@ export function assignSeq(input: EpisodeInput, seq: number): Episode {
       return { ...input, seq };
     case 'baseline':
       return { ...input, seq };
+    case 'retract':
+      return { ...input, seq };
     default:
       return assertNever(input, 'episode input type');
   }
@@ -346,12 +391,16 @@ export function foldEpisode(
           ? { spec: episode.spec }
           : { spec: episode.spec, anchors: episode.anchors };
       const base = applySignal(prev, applied, { now: episode.at }).state;
-      if (episode.weight === undefined) return base;
+      const noteToKeep = episode.note ?? base.lastNote;
+      if (episode.weight === undefined) {
+        return noteToKeep !== undefined ? { ...base, lastNote: noteToKeep } : base;
+      }
       // Self-describing weight-updater result: the episode carries the mu the configured strategy
       // produced, and the fold re-derives status from it — determinism, no registry in the way.
       const withWeight: EntityState = {
         ...base,
         ema: { mu: episode.weight, theta0: prev.ema.theta0, updatedAt: episode.at },
+        ...(noteToKeep !== undefined ? { lastNote: noteToKeep } : {}),
       };
       const status = statusFor(withWeight, episode.at);
       return { ...withWeight, status };
@@ -363,16 +412,19 @@ export function foldEpisode(
       }
       const report: GuardReport =
         episode.kind === undefined ? { ok: episode.ok } : { ok: episode.ok, kind: episode.kind };
-      return reportGuard(prev, report, { now: episode.at }).state;
+      const base = reportGuard(prev, report, { now: episode.at }).state;
+      const noteToKeep = episode.note ?? base.lastNote;
+      return noteToKeep !== undefined ? { ...base, lastNote: noteToKeep } : base;
     }
     case 'override': {
       if (prev === undefined) return undefined;
-      return stampLifecycle(
+      const base = stampLifecycle(
         overrideStatus(prev, episode.override).state,
         episode.override,
         episode.at,
         prev,
       );
+      return { ...base, lastNote: episode.reason };
     }
     case 'proposal': {
       if (prev !== undefined) return prev;
@@ -380,7 +432,9 @@ export function foldEpisode(
         ...(episode.theta0 === undefined ? {} : { theta0: episode.theta0 }),
         ...(episode.anchor === undefined ? {} : { anchor: episode.anchor }),
       };
-      return freshState(episode.key, episode.at, init);
+      const fresh = freshState(episode.key, episode.at, init);
+      const noteToKeep = episode.note ?? episode.description;
+      return noteToKeep !== undefined ? { ...fresh, lastNote: noteToKeep } : fresh;
     }
     case 'sweep': {
       if (prev === undefined) return undefined;
@@ -408,6 +462,8 @@ export function foldEpisode(
       // clock so recency/trust stay live — determinism is structural, not cached.
       return { ...episode.state, status: statusFor({ ...episode.state }, episode.at) };
     }
+    case 'retract':
+      return prev;
     default:
       return assertNever(episode, 'episode type');
   }
@@ -416,8 +472,15 @@ export function foldEpisode(
 /** Rebuild every entity state from a log, in seq order. Deterministic. */
 export function foldLog(episodes: readonly Episode[]): EntityState[] {
   const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
+  const retracted = new Set<number>();
+  for (const ep of ordered) {
+    if (ep.type === 'retract') {
+      retracted.add(ep.targetSeq);
+    }
+  }
   const byKey = new Map<string, EntityState>();
   for (const episode of ordered) {
+    if (retracted.has(episode.seq)) continue;
     const key = entityKeyString(episode.key);
     const next = foldEpisode(byKey.get(key), episode);
     if (next === undefined) byKey.delete(key);

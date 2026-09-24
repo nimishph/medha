@@ -72,6 +72,8 @@ export interface EntityState {
   readonly updater: UpdaterName;
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
+  /** The natural language note or rationale from the latest episode (if any). */
+  readonly lastNote?: string | undefined;
 }
 
 /** A fresh entity: probation, prior theta0, no evidence, no survival credit. */

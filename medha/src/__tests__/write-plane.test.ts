@@ -212,6 +212,99 @@ describe('write plane — override (§6.2)', () => {
   });
 });
 
+describe('write plane — authorship and permissions (§6.2)', () => {
+  test('records author provenance on signal, guard, and override episodes', async () => {
+    const { store, sage } = makeEngine();
+    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:claude-3-7' });
+    await sage.reportGuard(KEY, { ok: true, author: 'reviewer:bob' }, { now: NOW + 1 });
+    await sage.override(KEY, 'retire', { now: NOW + 2 }, 'obsolete', 'user:admin');
+
+    const log = await store.episodes();
+    expect(log[0]?.author).toBe('agent:claude-3-7');
+    expect(log[1]?.author).toBe('reviewer:bob');
+    expect(log[2]?.author).toBe('user:admin');
+  });
+
+  test('enforces write permissions: readOnly and requireAuthor', async () => {
+    const { store } = makeEngine();
+    const readOnlySage = new Sage({
+      store,
+      permissions: { readOnly: true },
+    });
+    expect(() =>
+      readOnlySage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' }),
+    ).toThrow();
+
+    const requireAuthorSage = new Sage({
+      store,
+      permissions: { requireAuthor: true },
+    });
+    expect(() => requireAuthorSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true })).toThrow();
+    // With author, it succeeds
+    await requireAuthorSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+  });
+
+  test('enforces allowedAuthors list', async () => {
+    const { store } = makeEngine();
+    const authSage = new Sage({
+      store,
+      permissions: { allowedAuthors: ['agent:trusted', 'admin'] },
+    });
+    expect(() =>
+      authSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:rogue' }),
+    ).toThrow();
+
+    const ok = await authSage.record(
+      KEY,
+      'APPLY',
+      { now: NOW },
+      { ensure: true, author: 'agent:trusted' },
+    );
+    expect(ok.state).toBeDefined();
+  });
+});
+
+describe('write plane — retract and removeEpisode (§6.2)', () => {
+  test('retract masks bad episode and updates entity projection', async () => {
+    const { store, sage } = makeEngine();
+    // Trial 1: success
+    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    // Trial 2: spurious success recorded in error
+    await sage.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
+
+    let state = await store.get(KEY);
+    expect(state?.evidence.k).toBe(2);
+
+    // Retract episode 1
+    const ret = await sage.retract(1, 'spurious accept', { now: NOW + 2000 }, { author: 'admin' });
+    expect(ret.episode.type).toBe('retract');
+
+    state = await store.get(KEY);
+    expect(state?.evidence.k).toBe(1);
+    expect(state?.evidence.n).toBe(1);
+  });
+
+  test('removeEpisode physically removes bad episode from log and rebuilds', async () => {
+    const { store, sage } = makeEngine();
+    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    await sage.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
+
+    const before = await store.episodes();
+    expect(before).toHaveLength(2);
+
+    const res = await sage.removeEpisode(1);
+    expect(res.removed).toBe(true);
+    expect(res.remainingCount).toBe(1);
+
+    const after = await store.episodes();
+    expect(after).toHaveLength(1);
+    expect(after[0]?.seq).toBe(0);
+
+    const state = await store.get(KEY);
+    expect(state?.evidence.k).toBe(1);
+  });
+});
+
 function entityKey(k: EntityKey): string {
   return `${k.namespace}\u0000${k.kind}\u0000${k.id}`;
 }

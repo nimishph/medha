@@ -5,13 +5,13 @@
 
 /** package directory -> the only workspace packages it may import. */
 const ALLOWED = {
-  'sage-core': [],
-  'sage-store': ['sage-core'],
-  'sage-sync': ['sage-core'],
+  'medha-core': [],
+  'medha-store': ['medha-core'],
+  'medha-sync': ['medha-core'],
   // Engine facade (planes, sweep, exploration helper), CLI and MCP composition root.
-  sage: ['sage-core', 'sage-store', 'sage-sync'],
-  // The `sage` command line: init today, the read/write/maintenance planes as they land.
-  cli: ['sage', 'sage-core', 'sage-store'],
+  medha: ['medha-core', 'medha-store', 'medha-sync'],
+  // The `medha` command line: init today, the read/write/maintenance planes as they land.
+  cli: ['medha', 'medha-core', 'medha-store'],
 };
 
 const names = Object.keys(ALLOWED);

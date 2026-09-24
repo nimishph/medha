@@ -2,12 +2,12 @@
   "name": "medha-workspace",
   "private": true,
   "type": "module",
-  "description": "medha: evidential-memory engine as a library. Four packages (core, store, sync, sage) with enforced boundaries. Self-contained so the whole directory can be extracted to its own repo.",
+  "description": "medha: evidential-memory engine as a library. Four packages (core, store, sync, medha) with enforced boundaries. Self-contained so the whole directory can be extracted to its own repo.",
   "workspaces": [
-    "sage-core",
-    "sage-store",
-    "sage-sync",
-    "sage",
+    "medha-core",
+    "medha-store",
+    "medha-sync",
+    "medha",
     "cli"
   ],
   "engines": {
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "boundaries": "depcruise --config .dependency-cruiser.cjs sage-core/src sage-store/src sage-sync/src sage/src cli/src",
+    "boundaries": "depcruise --config .dependency-cruiser.cjs medha-core/src medha-store/src medha-sync/src medha/src cli/src",
     "test": "bun test",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "build": "bun run tooling/package-release.ts",

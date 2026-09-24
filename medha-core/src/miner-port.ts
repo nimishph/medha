@@ -25,6 +25,9 @@ export interface Proposal {
   readonly anchor?: Anchor | undefined;
   readonly provenance?: string | undefined;
   readonly theta0?: number | undefined;
+  readonly author?: string | undefined;
+  readonly at?: number | undefined;
+  readonly note?: string | undefined;
 }
 
 export function resolveProposalKey(proposal: Proposal): EntityKey {

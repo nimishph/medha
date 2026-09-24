@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { anchorSetFor, distinctAnchorValues, durabilityFactor, weekEpoch } from '../durability.ts';
 import { emaStep } from '../ema.ts';
 import { type EntityState, freshState } from '../entity.ts';
+import { type Episode, foldLog } from '../episode.ts';
 import { InvariantViolationError, UnknownKindError, UnknownSignalError } from '../errors.ts';
 import { applySignal, reportGuard, weekAnchor } from '../fold.ts';
 import { guardFactor } from '../guard.ts';
@@ -254,7 +255,7 @@ describe('lifecycle — model §5.1', () => {
     expect(state.status).toBe('trusted');
   });
 
-  test('long-neglected unguarded use → retired', () => {
+  test('long-neglected unguarded use → probation (age alone does not retire)', () => {
     const state: EntityState = {
       ...freshKernel(),
       evidence: { k: 1, n: 1, contextRejects: 0 },
@@ -265,7 +266,46 @@ describe('lifecycle — model §5.1', () => {
     };
     // Recency floor 0.30 at 0.5 ceiling ⇒ trust ≈ 0.2065 * 0.5 * 0.3 < 0.10.
     expect(trustOf(state, START).trust).toBeLessThan(RETIRED_TRUST_THRESHOLD);
-    expect(statusFor(state, START)).toBe('retired');
+    // Age alone must not retire an entity: it stays in probation.
+    expect(statusFor(state, START)).toBe('probation');
+  });
+
+  test('one failure in two uses remains in probation (not retired)', () => {
+    let state = freshState(KEY, START, { theta0: 0.5 });
+    // First use: success
+    state = applySignal(state, { spec: APPLY }, { now: START }).state;
+    // Second use: failure (REJECT_RULE counts as trial without success)
+    state = applySignal(state, { spec: REJECT_RULE }, { now: START + 1000 }).state;
+    expect(state.evidence.n).toBe(2);
+    expect(state.evidence.k).toBe(1);
+    // Wilson lower bound is ~0.0945 (< 0.10), but sparse trials (n < 3) must not retire it
+    expect(state.status).toBe('probation');
+  });
+
+  test('repeated rejections (n >= 3 with low undecayed trust) → retired', () => {
+    let state = freshState(KEY, START, { theta0: 0.2 });
+    for (let i = 0; i < 3; i++) {
+      state = applySignal(state, { spec: REJECT_RULE }, { now: START + i * 1000 }).state;
+    }
+    expect(state.evidence.n).toBe(3);
+    expect(state.evidence.k).toBe(0);
+    expect(state.status).toBe('retired');
+  });
+
+  test('SKIP signal does not update lastSignalAt and does not revive a retired entity', () => {
+    let state = freshState(KEY, START, { theta0: 0.2 });
+    for (let i = 0; i < 3; i++) {
+      state = applySignal(state, { spec: REJECT_RULE }, { now: START + i * 1000 }).state;
+    }
+    expect(state.status).toBe('retired');
+    const retiredLastSignalAt = state.lastSignalAt;
+
+    // Apply SKIP signal
+    const { state: afterSkip } = applySignal(state, { spec: SKIP }, { now: START + 10000 });
+    // Invariant III: SKIP must not update lastSignalAt
+    expect(afterSkip.lastSignalAt).toBe(retiredLastSignalAt);
+    // SKIP must not revive a retired entity
+    expect(afterSkip.status).toBe('retired');
   });
 });
 
@@ -361,5 +401,50 @@ describe('registry integrity', () => {
     const { state: st, status } = reportGuard(state, { ok: false, kind: 'ci' }, { now: START + 1 });
     expect(status).toBe('quarantined');
     expect(st.guard.lastOk).toBe(false);
+  });
+
+  test('retraction episode masks target episode in foldLog', () => {
+    const ep0: Episode = {
+      seq: 0,
+      key: KEY,
+      at: START,
+      type: 'proposal',
+      provenance: 'test',
+    };
+    const ep1: Episode = {
+      seq: 1,
+      key: KEY,
+      at: START + 1000,
+      type: 'signal',
+      spec: APPLY,
+      ensure: true,
+      author: 'agent:alpha',
+    };
+    const ep2: Episode = {
+      seq: 2,
+      key: KEY,
+      at: START + 2000,
+      type: 'signal',
+      spec: APPLY,
+      ensure: true,
+      author: 'agent:beta',
+    };
+    // Initially: 2 successes
+    let states = foldLog([ep0, ep1, ep2]);
+    expect(states[0]?.evidence.k).toBe(2);
+
+    // Retract ep1 (bad episode by agent:alpha)
+    const ep3: Episode = {
+      seq: 3,
+      key: KEY,
+      at: START + 3000,
+      type: 'retract',
+      targetSeq: 1,
+      reason: 'spurious accept recorded in error',
+      author: 'admin',
+    };
+    states = foldLog([ep0, ep1, ep2, ep3]);
+    expect(states[0]?.evidence.k).toBe(1);
+    expect(states[0]?.evidence.n).toBe(1);
   });
 });

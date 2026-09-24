@@ -28,6 +28,8 @@ export interface EvidentialHint {
     readonly driftDelta: number;
   };
   readonly status: LifecycleStatus;
+  /** Natural language rationale or note from the latest episode (if any). */
+  readonly lastNote?: string | undefined;
   readonly clearsThreshold: {
     readonly trusted: boolean;
     readonly active: boolean;
@@ -54,6 +56,7 @@ export function buildHint(state: EntityState, now: number): EvidentialHint {
       driftDelta: driftDelta(state.ema.mu, state.ema.theta0),
     },
     status,
+    ...(state.lastNote !== undefined ? { lastNote: state.lastNote } : {}),
     clearsThreshold: {
       trusted:
         result.trust >= TRUSTED_THRESHOLD && state.guard.lastOk === true && state.evidence.n >= 5,

@@ -118,10 +118,17 @@ export function renderShow(report: ShowReport): string {
       h.clearsThreshold.active ? 'yes' : 'no'
     }`,
   ];
+  if (h.lastNote !== undefined) {
+    lines.push(`  last note: ${h.lastNote}`);
+  }
   if (detail.recentEpisodes.length > 0) {
     lines.push('  recent episodes:');
     for (const episode of detail.recentEpisodes) {
-      lines.push(`    #${episode.seq} ${episode.type} at ${new Date(episode.at).toISOString()}`);
+      const noteStr =
+        'note' in episode && typeof episode.note === 'string' ? ` — "${episode.note}"` : '';
+      lines.push(
+        `    #${episode.seq} ${episode.type} at ${new Date(episode.at).toISOString()}${noteStr}`,
+      );
     }
   }
   if (detail.provenance.length > 0) {

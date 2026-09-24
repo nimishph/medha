@@ -325,6 +325,19 @@ export class SchemaVersionError extends MedhaError {
   }
 }
 
+/** A write or admin action was attempted without required permissions or credentials. */
+export class PermissionDeniedError extends MedhaError {
+  readonly code = 'CORE_PERMISSION_DENIED';
+  readonly subsystem = 'core';
+
+  constructor(action: string, reason: string, init: ErrorInit = {}) {
+    super(`Permission denied for '${action}': ${reason}`, {
+      ...init,
+      context: { action, reason, ...init.context },
+    });
+  }
+}
+
 /** Exhaustiveness guard for `switch` over closed unions. */
 export function assertNever(value: never, where: string): never {
   throw new InvariantViolationError(`Unhandled variant in ${where}`, { context: { value } });

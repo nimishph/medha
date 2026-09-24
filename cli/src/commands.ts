@@ -18,9 +18,12 @@ import {
   maintainPreflightArgs,
   maintainRestoreArgs,
   mcpCommandArgs,
+  packCommandArgs,
   paramsCommandArgs,
   proposeCommandArgs,
   recordCommandArgs,
+  removeEpisodeCommandArgs,
+  retractCommandArgs,
   showCommandArgs,
   simulateCommandArgs,
   statusCommandArgs,
@@ -67,9 +70,13 @@ import {
   renderGuard,
   renderPropose,
   renderRecord,
+  renderRemoveEpisode,
+  renderRetract,
   runGuard,
   runPropose,
   runRecord,
+  runRemoveEpisode,
+  runRetract,
 } from './write.ts';
 
 export const initCommand = defineCommand({
@@ -242,6 +249,34 @@ export const explainThresholdCommand = defineCommand({
   },
 });
 
+export const packCommand = defineCommand({
+  meta: {
+    name: 'pack',
+    description: 'Pack active and probation entities into a token context budget.',
+  },
+  args: packCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runPack, renderPack } = await import('./pack.ts');
+    const report = await runPack(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.budget === undefined ? {} : { budget: args.budget }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.exploration === undefined ? {} : { exploration: args.exploration }),
+        ...(args.format === undefined ? {} : { format: args.format }),
+        ...(args.seed === undefined ? {} : { seed: args.seed }),
+      },
+      environment,
+    );
+    environment.stdout(
+      args.json === true || report.format === 'json' ? toJson(report) : renderPack(report),
+    );
+  },
+});
+
 /** Write-plane commands: the shell twins of the MCP write tools. */
 
 export const recordCommand = defineCommand({
@@ -262,6 +297,9 @@ export const recordCommand = defineCommand({
         ...(args.signal === undefined ? {} : { signal: args.signal }),
         ...(args.updater === undefined ? {} : { updater: args.updater }),
         ...(args.ensure === true ? { ensure: true } : {}),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+        ...(args.note === undefined ? {} : { note: args.note }),
       },
       environment,
     );
@@ -287,6 +325,9 @@ export const guardCommand = defineCommand({
         ...(args.ok === true ? { ok: true } : {}),
         ...(args.fail === true ? { fail: true } : {}),
         ...(args.guard === undefined ? {} : { guard: args.guard }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+        ...(args.note === undefined ? {} : { note: args.note }),
       },
       environment,
     );
@@ -312,10 +353,56 @@ export const proposeCommand = defineCommand({
         ...(args.source === undefined ? {} : { source: args.source }),
         ...(args.text === undefined ? {} : { text: args.text }),
         ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+        ...(args.note === undefined ? {} : { note: args.note }),
       },
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderPropose(report));
+  },
+});
+
+export const retractCommand = defineCommand({
+  meta: {
+    name: 'retract',
+    description: 'Retract a previously recorded episode by its sequence number.',
+  },
+  args: retractCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runRetract(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.seq === undefined ? {} : { seq: args.seq }),
+        ...(args.reason === undefined ? {} : { reason: args.reason }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderRetract(report));
+  },
+});
+
+export const removeEpisodeCommand = defineCommand({
+  meta: {
+    name: 'remove-episode',
+    description: 'Directly remove a bad episode from the log and rebuild projection.',
+  },
+  args: removeEpisodeCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runRemoveEpisode(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.seq === undefined ? {} : { seq: args.seq }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderRemoveEpisode(report));
   },
 });
 
@@ -410,6 +497,7 @@ export const maintainCommand = defineCommand({
     compact: maintainCompactCommand,
     backup: maintainBackupCommand,
     restore: maintainRestoreCommand,
+    'remove-episode': removeEpisodeCommand,
   },
 });
 
@@ -618,7 +706,10 @@ export const commands = defineCommand({
     record: recordCommand,
     guard: guardCommand,
     propose: proposeCommand,
+    retract: retractCommand,
+    'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
+    pack: packCommand,
     maintain: maintainCommand,
     updater: updaterCommand,
     mcp: mcpCommand,

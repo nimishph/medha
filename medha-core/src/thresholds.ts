@@ -50,6 +50,9 @@ export const DEFAULT_THETA0 = 0.5;
 /** Trust below this retires an entity (equivalently, the floor before quarantine). */
 export const RETIRED_TRUST_THRESHOLD = 0.1;
 
+/** Minimum trials before an entity can be retired by trust (requires repeated evidence of failure). */
+export const MIN_USES_FOR_RETIRED = 3;
+
 /** Milliseconds in one sidereal-ish week (7 days). Used for the anchor fallback epoch. */
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 

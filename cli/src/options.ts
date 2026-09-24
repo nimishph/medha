@@ -217,6 +217,12 @@ export const recordCommandArgs: ArgsDef = {
   signal: { type: 'string', description: 'Signal to record (e.g. APPLY, REJECT_RULE, SKIP).' },
   updater: { type: 'string', description: 'Weight updater name to use.' },
   ensure: { type: 'boolean', description: 'Create the entity if it does not exist.' },
+  author: { type: 'string', description: 'Author or agent identifier recording this evidence.' },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+  note: { type: 'string', description: 'Natural language rationale or note.' },
 };
 
 export const guardCommandArgs: ArgsDef = {
@@ -225,6 +231,15 @@ export const guardCommandArgs: ArgsDef = {
   ok: { type: 'boolean', description: 'The guard passed.' },
   fail: { type: 'boolean', description: 'The guard failed.' },
   guard: { type: 'string', description: 'Guard kind, e.g. harness, review, audit.' },
+  author: {
+    type: 'string',
+    description: 'Author or agent identifier recording this guard report.',
+  },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+  note: { type: 'string', description: 'Natural language rationale or note.' },
 };
 
 export const proposeCommandArgs: ArgsDef = {
@@ -233,4 +248,42 @@ export const proposeCommandArgs: ArgsDef = {
   source: { type: 'string', description: 'Source of the proposal (miner name or file path).' },
   text: { type: 'string', description: 'Optional text of the proposal.' },
   evidence: { type: 'string', description: 'Comma-separated evidence refs (commit SHAs, paths).' },
+  author: { type: 'string', description: 'Author or agent identifier submitting this proposal.' },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+  note: { type: 'string', description: 'Natural language rationale or note.' },
+};
+
+export const retractCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  seq: { type: 'string', description: 'Episode sequence number to retract.', required: true },
+  reason: { type: 'string', description: 'Reason for the retraction.', required: true },
+  author: { type: 'string', description: 'Author or agent identifier recording this retraction.' },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+};
+
+export const removeEpisodeCommandArgs: ArgsDef = {
+  ...maintainCommonArgs,
+  seq: { type: 'string', description: 'Episode sequence number to remove.', required: true },
+};
+
+export const packCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  budget: { type: 'string', description: 'Token budget cap (e.g. --budget 2000).', required: true },
+  kind: { type: 'string', description: 'Filter: entity kind (default: rule).' },
+  namespace: { type: 'string', description: 'Filter: entity namespace.' },
+  exploration: {
+    type: 'string',
+    description: 'Budget ratio reserved for probation exploration (default: 0.15).',
+  },
+  format: {
+    type: 'string',
+    description: 'Output format: markdown | compact | json (default: markdown).',
+  },
+  seed: { type: 'string', description: 'Random seed for reproducible exploration sampling.' },
 };
