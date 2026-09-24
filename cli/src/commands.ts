@@ -201,7 +201,7 @@ export const paramsCommand = defineCommand({
   args: paramsCommandArgs,
   async run({ args }) {
     const environment = currentEnvironment();
-    const report = await runParams(environment);
+    const report = await runParams(environment, { dir: args.dir, home: args.home });
     environment.stdout(args.json === true ? toJson(report) : renderParams(report));
   },
 });
@@ -702,6 +702,9 @@ export const syncPullCommand = defineCommand({
         ...(args.ref === undefined ? {} : { ref: args.ref }),
         ...(args.remote === undefined ? {} : { remote: args.remote }),
         ...(args.file === undefined ? {} : { file: args.file }),
+        ...(args['auto-import-registries'] === undefined
+          ? {}
+          : { autoImportRegistries: args['auto-import-registries'] as boolean }),
       },
       environment,
     );

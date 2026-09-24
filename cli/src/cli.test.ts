@@ -1406,4 +1406,172 @@ describe('extensibility and resilient kind scoping (TASK-EXT-04 & TASK-EXT-05)',
     expect(err()).toContain('CLI_CONFIG_INVALID');
     expect(err()).toContain("cannot redefine built-in signal 'APPLY'");
   });
+
+  test('TASK-EXT-02: per-kind trust configuration in config.json is reflected in params and explain-threshold', async () => {
+    const { env, out } = fresh();
+    const configPath = join(env.cwd, 'registries.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        kinds: {
+          tool: {
+            description: 'External LLM tools & MCP servers',
+            thresholds: {
+              trusted: 0.95,
+              active: 0.7,
+              minUsesForTrusted: 20,
+            },
+            recency: {
+              halfLifeDays: 7,
+            },
+            evidenceWeighting: 'signal-value',
+          },
+        },
+      }),
+    );
+
+    // Initialize with config
+    expect(await runCli(['init', '--config', configPath], env)).toBe(0);
+
+    // Check medha params reflects the configured kind overrides
+    let before = out().length;
+    expect(await runCli(['params'], env)).toBe(0);
+    const paramsText = out().slice(before);
+    expect(paramsText).toContain("kind 'tool'");
+    expect(paramsText).toContain('0.95');
+    expect(paramsText).toContain('signal-value');
+
+    // Record a use on a tool entity
+    expect(
+      await runCli(
+        ['record', '--kind', 'tool', '--id', 'calculator', '--signal', 'APPLY', '--ensure'],
+        env,
+      ),
+    ).toBe(0);
+
+    // Check explain-threshold reports the custom gates
+    before = out().length;
+    expect(await runCli(['explain-threshold', '--kind', 'tool', '--id', 'calculator'], env)).toBe(
+      0,
+    );
+    const explainText = out().slice(before);
+    expect(explainText).toContain('>= 0.95');
+    expect(explainText).toContain('uses 1 >= 20');
+  });
+
+  test('TASK-EXT-03: sync pull rejects unconfigured custom kinds without --auto-import-registries', async () => {
+    const repoA = fresh();
+    const repoB = fresh();
+    const syncFile = join(repoA.env.cwd, 'shared-sync.json');
+
+    const configA = join(repoA.env.cwd, 'registries.json');
+    writeFileSync(
+      configA,
+      JSON.stringify({
+        kinds: ['service'],
+        signalSpecs: [
+          {
+            name: 'LATENCY_SPIKE',
+            value: -0.5,
+            countsAsTrial: true,
+            countsAsSuccess: false,
+            description: 'Temporary latency degradation',
+          },
+        ],
+      }),
+    );
+
+    // Repo A initializes with custom kind/signal, records entity, and pushes
+    expect(await runCli(['init', '--config', configA], repoA.env)).toBe(0);
+    expect(
+      await runCli(
+        [
+          'record',
+          '--kind',
+          'service',
+          '--id',
+          'auth-api',
+          '--signal',
+          'LATENCY_SPIKE',
+          '--ensure',
+        ],
+        repoA.env,
+      ),
+    ).toBe(0);
+    expect(await runCli(['sync', 'push', '--file', syncFile], repoA.env)).toBe(0);
+
+    // Repo B initializes standard home without service or LATENCY_SPIKE
+    expect(await runCli(['init'], repoB.env)).toBe(0);
+
+    // Repo B pulls without --auto-import-registries -> fails with CLI_SYNC_REGISTRY_MISMATCH
+    expect(await runCli(['sync', 'pull', '--file', syncFile], repoB.env)).toBe(1);
+    expect(repoB.err()).toContain('CLI_SYNC_REGISTRY_MISMATCH');
+    expect(repoB.err()).toContain('service');
+    expect(repoB.err()).toContain('LATENCY_SPIKE');
+    expect(repoB.err()).toContain('--auto-import-registries');
+  });
+
+  test('TASK-EXT-03: sync pull auto-imports custom kinds and signals with --auto-import-registries', async () => {
+    const repoA = fresh();
+    const repoB = fresh();
+    const syncFile = join(repoA.env.cwd, 'shared-sync.json');
+
+    const configA = join(repoA.env.cwd, 'registries.json');
+    writeFileSync(
+      configA,
+      JSON.stringify({
+        kinds: ['service'],
+        signalSpecs: [
+          {
+            name: 'LATENCY_SPIKE',
+            value: -0.5,
+            countsAsTrial: true,
+            countsAsSuccess: false,
+            description: 'Temporary latency degradation',
+          },
+        ],
+      }),
+    );
+
+    // Repo A setup & push
+    expect(await runCli(['init', '--config', configA], repoA.env)).toBe(0);
+    expect(
+      await runCli(
+        [
+          'record',
+          '--kind',
+          'service',
+          '--id',
+          'auth-api',
+          '--signal',
+          'LATENCY_SPIKE',
+          '--ensure',
+        ],
+        repoA.env,
+      ),
+    ).toBe(0);
+    expect(await runCli(['sync', 'push', '--file', syncFile], repoA.env)).toBe(0);
+
+    // Repo B initializes standard home
+    expect(await runCli(['init'], repoB.env)).toBe(0);
+
+    // Repo B pulls with --auto-import-registries -> succeeds!
+    expect(
+      await runCli(['sync', 'pull', '--file', syncFile, '--auto-import-registries'], repoB.env),
+    ).toBe(0);
+
+    // Verify Repo B config.json was updated with imported kinds and signals
+    const configBPath = join(repoB.env.cwd, '.medha', 'config.json');
+    const configB = JSON.parse(readFileSync(configBPath, 'utf8'));
+    expect(configB.registries.kinds).toContain('service');
+    expect(
+      configB.registries.signalSpecs.some((s: { name: string }) => s.name === 'LATENCY_SPIKE'),
+    ).toBe(true);
+
+    // Verify Repo B can list the imported entity
+    const beforeList = repoB.out().length;
+    expect(await runCli(['list', '--kind', 'service'], repoB.env)).toBe(0);
+    const listOutput = repoB.out().slice(beforeList);
+    expect(listOutput).toContain('service/auth-api');
+  });
 });

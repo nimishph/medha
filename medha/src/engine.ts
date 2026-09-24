@@ -29,6 +29,7 @@ import {
   InvalidArgumentError,
   InvariantViolationError,
   KindRegistry,
+  type KindSpec,
   type LifecycleStatus,
   type MedhaError,
   type MinerPort,
@@ -154,7 +155,15 @@ export class Medha {
   }
 
   private kindRegistry(): KindRegistry {
-    return new KindRegistry(this.store.registries.kinds);
+    return new KindRegistry(this.store.registries.kindSpecs ?? this.store.registries.kinds);
+  }
+
+  getKindSpec(kind: string): KindSpec | undefined {
+    return this.kindRegistry().get(kind);
+  }
+
+  private kindSpecFor(kind: string): KindSpec | undefined {
+    return this.kindRegistry().get(kind);
   }
 
   private signalRegistry(): SignalRegistry {
@@ -224,7 +233,9 @@ export class Medha {
       kinds.requireKnown(key.kind);
       const keyString = entityKeyString(key);
       const state = index.get(keyString);
-      if (state !== undefined) out.set(keyString, buildHint(state, context.now));
+      if (state !== undefined) {
+        out.set(keyString, buildHint(state, context.now, this.kindSpecFor(state.key.kind)));
+      }
     }
     return out;
   }
@@ -240,7 +251,7 @@ export class Medha {
     if (filter.kind !== undefined) this.kindRegistry().requireKnown(filter.kind);
     const states = await this.store.list();
     const sorted = states
-      .map((state) => buildHint(state, context.now))
+      .map((state) => buildHint(state, context.now, this.kindSpecFor(state.key.kind)))
       .filter(
         (hint) =>
           (filter.kind === undefined || hint.key.kind === filter.kind) &&
@@ -281,7 +292,7 @@ export class Medha {
     if (state === undefined) {
       // Spec §5.2: an unknown id reads back as a probation hint with the prior.
       return {
-        hint: buildHint(freshState(key, context.now), context.now),
+        hint: buildHint(freshState(key, context.now), context.now, this.kindSpecFor(key.kind)),
         known: false,
         recentEpisodes,
         provenance,
@@ -289,7 +300,7 @@ export class Medha {
       };
     }
     return {
-      hint: buildHint(state, context.now),
+      hint: buildHint(state, context.now, this.kindSpecFor(state.key.kind)),
       known: true,
       recentEpisodes,
       provenance,
@@ -309,7 +320,7 @@ export class Medha {
     }
     const states = await this.store.list();
     const drifting = states
-      .map((state) => buildHint(state, context.now))
+      .map((state) => buildHint(state, context.now, this.kindSpecFor(state.key.kind)))
       .filter((hint) => hint.temporal.isDrifting)
       .map((hint): DriftEntry => ({ key: hint.key, delta: hint.temporal.driftDelta, hint }))
       .sort((a, b) => b.delta - a.delta || compareKeyString(a, b));
@@ -335,7 +346,7 @@ export class Medha {
     const spec = this.resolveSignal(signal);
     const state = await this.store.get(key);
     const base = state ?? freshState(key, context.now);
-    const before = buildHint(base, context.now);
+    const before = buildHint(base, context.now, this.kindSpecFor(base.key.kind));
     const hypothetical: Episode = {
       type: 'signal',
       seq: 0,
@@ -344,8 +355,8 @@ export class Medha {
       spec,
       ensure: true,
     };
-    const afterState = foldEpisode(base, hypothetical) ?? base;
-    const after = buildHint(afterState, context.now);
+    const afterState = foldEpisode(base, hypothetical, { kinds: this.kindRegistry() }) ?? base;
+    const after = buildHint(afterState, context.now, this.kindSpecFor(afterState.key.kind));
     return {
       key,
       asOf: context.now,
@@ -450,7 +461,11 @@ export class Medha {
         this.validateKey(item.key);
         const hint =
           hints.get(entityKeyString(item.key)) ??
-          buildHint(freshState(item.key, context.now), context.now);
+          buildHint(
+            freshState(item.key, context.now),
+            context.now,
+            this.kindSpecFor(item.key.kind),
+          );
         const cost = item.cost ?? estimator(hint, item.key);
         packCandidates.push({
           key: item.key,
@@ -469,7 +484,7 @@ export class Medha {
             (options.namespace === undefined || state.key.namespace === options.namespace),
         )
         .map((state) => {
-          const hint = buildHint(state, context.now);
+          const hint = buildHint(state, context.now, this.kindSpecFor(state.key.kind));
           return {
             key: state.key,
             hint,
@@ -813,7 +828,11 @@ export class Medha {
     };
 
     const appended = await this.store.append(input);
-    const hint = buildHint(appended.state ?? freshState(key, context.now), context.now);
+    const hint = buildHint(
+      appended.state ?? freshState(key, context.now),
+      context.now,
+      this.kindSpecFor(key.kind),
+    );
     return {
       hint,
       state: appended.state,
@@ -858,8 +877,8 @@ export class Medha {
     };
     const appended = await this.store.append(input);
     return appended.state === undefined
-      ? buildHint(freshState(key, at), context.now)
-      : buildHint(appended.state, context.now);
+      ? buildHint(freshState(key, at), context.now, this.kindSpecFor(key.kind))
+      : buildHint(appended.state, context.now, this.kindSpecFor(key.kind));
   }
 
   /**
@@ -940,7 +959,7 @@ export class Medha {
         ...(proposal.theta0 === undefined ? {} : { theta0: proposal.theta0 }),
         ...(proposal.anchor === undefined ? {} : { anchor: proposal.anchor }),
       });
-    const hint = buildHint(state, context.now);
+    const hint = buildHint(state, context.now, this.kindSpecFor(key.kind));
 
     return {
       ...hint,
@@ -1030,7 +1049,9 @@ export class Medha {
       reason,
       ...(author === undefined ? {} : { author }),
     });
-    return appended.state === undefined ? null : buildHint(appended.state, context.now);
+    return appended.state === undefined
+      ? null
+      : buildHint(appended.state, context.now, this.kindSpecFor(key.kind));
   }
 
   /**
@@ -1075,7 +1096,7 @@ export class Medha {
     };
     const appended = await this.store.append(input);
     const state = appended.state ?? freshState(target.key, context.now);
-    const hint = buildHint(state, context.now);
+    const hint = buildHint(state, context.now, this.kindSpecFor(target.key.kind));
     return { episode: appended.episode, state: appended.state, hint };
   }
 

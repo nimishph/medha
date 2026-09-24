@@ -10,7 +10,7 @@ import {
   type SignalApplication,
   stampLifecycle,
 } from './fold.ts';
-import type { KindRegistry } from './kinds.ts';
+import { KindRegistry, type KindSpec } from './kinds.ts';
 import type { SignalRegistry, SignalSpec } from './signals.ts';
 import { validateSignalSpec } from './signals.ts';
 import { statusFor } from './trust.ts';
@@ -371,6 +371,11 @@ export function episodeToInput(episode: Episode): EpisodeInput {
   return rest as EpisodeInput;
 }
 
+export interface FoldEpisodeOptions {
+  readonly kinds?: KindRegistry | undefined;
+  readonly kindSpec?: KindSpec | undefined;
+}
+
 /**
  * Fold one episode into prior state. `at` is the fold's clock, so the same episode applied at
  * the same timestamp always produces the same state. Returns `undefined` when the episode has
@@ -379,7 +384,14 @@ export function episodeToInput(episode: Episode): EpisodeInput {
 export function foldEpisode(
   prev: EntityState | undefined,
   episode: Episode,
+  options?: FoldEpisodeOptions | KindRegistry,
 ): EntityState | undefined {
+  const kindRegistry = options instanceof KindRegistry ? options : options?.kinds;
+  const kindSpec =
+    options instanceof KindRegistry
+      ? options.get(episode.key.kind)
+      : (options?.kindSpec ?? kindRegistry?.get(episode.key.kind));
+
   switch (episode.type) {
     case 'signal': {
       if (prev === undefined) {
@@ -390,7 +402,7 @@ export function foldEpisode(
         episode.anchors === undefined
           ? { spec: episode.spec }
           : { spec: episode.spec, anchors: episode.anchors };
-      const base = applySignal(prev, applied, { now: episode.at }).state;
+      const base = applySignal(prev, applied, { now: episode.at, kindSpec }).state;
       const noteToKeep = episode.note ?? base.lastNote;
       if (episode.weight === undefined) {
         return noteToKeep !== undefined ? { ...base, lastNote: noteToKeep } : base;
@@ -402,7 +414,7 @@ export function foldEpisode(
         ema: { mu: episode.weight, theta0: prev.ema.theta0, updatedAt: episode.at },
         ...(noteToKeep !== undefined ? { lastNote: noteToKeep } : {}),
       };
-      const status = statusFor(withWeight, episode.at);
+      const status = statusFor(withWeight, episode.at, kindSpec);
       return { ...withWeight, status };
     }
     case 'guard': {
@@ -412,7 +424,7 @@ export function foldEpisode(
       }
       const report: GuardReport =
         episode.kind === undefined ? { ok: episode.ok } : { ok: episode.ok, kind: episode.kind };
-      const base = reportGuard(prev, report, { now: episode.at }).state;
+      const base = reportGuard(prev, report, { now: episode.at, kindSpec }).state;
       const noteToKeep = episode.note ?? base.lastNote;
       return noteToKeep !== undefined ? { ...base, lastNote: noteToKeep } : base;
     }
@@ -470,7 +482,10 @@ export function foldEpisode(
 }
 
 /** Rebuild every entity state from a log, in seq order. Deterministic. */
-export function foldLog(episodes: readonly Episode[]): EntityState[] {
+export function foldLog(
+  episodes: readonly Episode[],
+  options?: FoldEpisodeOptions | KindRegistry,
+): EntityState[] {
   const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
   const retracted = new Set<number>();
   for (const ep of ordered) {
@@ -482,7 +497,7 @@ export function foldLog(episodes: readonly Episode[]): EntityState[] {
   for (const episode of ordered) {
     if (retracted.has(episode.seq)) continue;
     const key = entityKeyString(episode.key);
-    const next = foldEpisode(byKey.get(key), episode);
+    const next = foldEpisode(byKey.get(key), episode, options);
     if (next === undefined) byKey.delete(key);
     else byKey.set(key, next);
   }

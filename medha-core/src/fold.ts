@@ -4,6 +4,8 @@ import { emaStep } from './ema.ts';
 import type { EntityState, LifecycleStatus, Override } from './entity.ts';
 import { InvalidArgumentError } from './errors.ts';
 import type { GuardState } from './guard.ts';
+import type { KindSpec } from './kinds.ts';
+import { round6 } from './rounding.ts';
 import type { SignalSpec } from './signals.ts';
 import { statusFor } from './trust.ts';
 
@@ -16,6 +18,7 @@ import { statusFor } from './trust.ts';
 export interface FoldContext {
   /** Wall-clock `now` — the only time sage may observe. */
   readonly now: number;
+  readonly kindSpec?: KindSpec | undefined;
 }
 
 export interface SignalApplication {
@@ -29,7 +32,22 @@ export interface FoldResult {
   readonly status: LifecycleStatus;
 }
 
-function mapEvidence(state: EntityState, spec: SignalSpec): EntityState['evidence'] {
+function mapEvidence(
+  state: EntityState,
+  spec: SignalSpec,
+  kindSpec?: KindSpec,
+): EntityState['evidence'] {
+  if (kindSpec?.evidenceWeighting === 'signal-value') {
+    const trialWeight = spec.countsAsTrial ? Math.abs(spec.value) : 0;
+    const successWeight = spec.countsAsSuccess ? Math.max(0, spec.value) : 0;
+    const k = round6(state.evidence.k + successWeight);
+    const n = round6(state.evidence.n + trialWeight);
+    const contextRejects =
+      spec.name === 'REJECT_CONTEXT'
+        ? state.evidence.contextRejects + 1
+        : state.evidence.contextRejects;
+    return { k, n, contextRejects };
+  }
   const k = spec.countsAsSuccess ? state.evidence.k + 1 : state.evidence.k;
   const n = spec.countsAsTrial ? state.evidence.n + 1 : state.evidence.n;
   const contextRejects =
@@ -74,7 +92,7 @@ export function applySignal(
 ): FoldResult {
   const next: EntityState = {
     ...state,
-    evidence: mapEvidence(state, applied.spec),
+    evidence: mapEvidence(state, applied.spec, context.kindSpec),
     ema: {
       mu: emaStep(state.ema.mu, applied.spec.value),
       theta0: state.ema.theta0,
@@ -83,7 +101,7 @@ export function applySignal(
     anchors: mapAnchors(state, applied, context.now),
     lastSignalAt: applied.spec.name === 'SKIP' ? state.lastSignalAt : context.now,
   };
-  const status = statusFor(next, context.now);
+  const status = statusFor(next, context.now, context.kindSpec);
   return { state: { ...next, status }, status };
 }
 
@@ -110,7 +128,7 @@ export function reportGuard(
     lastOkAt: context.now,
   };
   const next: EntityState = { ...state, guard: nextGuard };
-  const status = statusFor(next, context.now);
+  const status = statusFor(next, context.now, context.kindSpec);
   return { state: { ...next, status }, status };
 }
 

@@ -29,6 +29,7 @@ import {
   type EntityKey,
   type EvidentialHint,
   InvalidArgumentError,
+  type KindSpec,
   type LifecycleStatus,
   MIN_SAMPLES_FOR_DRIFT,
   MIN_USES_FOR_TRUSTED,
@@ -43,7 +44,7 @@ import {
 } from '@cntxt-labs/medha-core';
 import { resolveRegistries } from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
-import type { Backend } from './layout.ts';
+import { type Backend, homeFor, readConfig } from './layout.ts';
 import { openHome } from './open.ts';
 
 export const LIFECYCLE_STATUSES: readonly LifecycleStatus[] = [
@@ -292,6 +293,7 @@ export interface ParamsReport {
   /** Why this is a report and not a config: the lean engine has no mutable params store. */
   readonly note: string;
   readonly params: readonly ParamEntry[];
+  readonly kinds?: readonly KindSpec[];
 }
 
 const SOURCE_EMA = 'medha-core: ema.ts';
@@ -299,7 +301,7 @@ const SOURCE_SWEEP = 'medha: maintenance.ts';
 const SOURCE_THRESHOLDS = 'medha-core: thresholds.ts';
 
 /** The canonical parameter catalog, read from the constants the kernel actually uses. */
-export function paramsReport(asOf: number): ParamsReport {
+export function paramsReport(asOf: number, kindSpecs?: readonly KindSpec[]): ParamsReport {
   return {
     asOf,
     note: 'read-only: model parameters are canonical constants in medha-core — the lean engine has no mutable params store',
@@ -416,11 +418,17 @@ export function paramsReport(asOf: number): ParamsReport {
         doc: 'Stale entities older than this are retired',
       },
     ],
+    ...(kindSpecs !== undefined && kindSpecs.length > 0 ? { kinds: kindSpecs } : {}),
   };
 }
 
-export async function runParams(environment: Environment): Promise<ParamsReport> {
-  return paramsReport(environment.now());
+export async function runParams(
+  environment: Environment,
+  options: { readonly dir?: string | undefined; readonly home?: string | undefined } = {},
+): Promise<ParamsReport> {
+  const home = homeFor(options.dir ?? environment.cwd, options.home);
+  const config = readConfig(home);
+  return paramsReport(environment.now(), config?.registries.kindSpecs);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -507,32 +515,36 @@ export async function runExplainThreshold(
     const detail = await opened.engine.show(key, { now });
     const hint = detail.hint;
     const cleared = hint.clearsThreshold;
+    const kindSpec = opened.engine.getKindSpec(key.kind);
+    const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
+    const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
+    const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
     const gates: ThresholdGate[] = [
       {
         name: 'trusted',
         met: cleared.trusted,
-        threshold: TRUSTED_THRESHOLD,
+        threshold: trustedThreshold,
         value: hint.trustScore,
         conditions: [
           {
-            label: `trust ${formatNumber(hint.trustScore)} >= ${TRUSTED_THRESHOLD}`,
-            met: hint.trustScore >= TRUSTED_THRESHOLD,
+            label: `trust ${formatNumber(hint.trustScore)} >= ${trustedThreshold}`,
+            met: hint.trustScore >= trustedThreshold,
           },
           {
-            label: `uses ${hint.evidence.totalTrials} >= ${MIN_USES_FOR_TRUSTED}`,
-            met: hint.evidence.totalTrials >= MIN_USES_FOR_TRUSTED,
+            label: `uses ${hint.evidence.totalTrials} >= ${minUsesForTrusted}`,
+            met: hint.evidence.totalTrials >= minUsesForTrusted,
           },
         ],
       },
       {
         name: 'active',
         met: cleared.active,
-        threshold: ACTIVE_THRESHOLD,
+        threshold: activeThreshold,
         value: hint.trustScore,
         conditions: [
           {
-            label: `trust ${formatNumber(hint.trustScore)} >= ${ACTIVE_THRESHOLD}`,
-            met: hint.trustScore >= ACTIVE_THRESHOLD,
+            label: `trust ${formatNumber(hint.trustScore)} >= ${activeThreshold}`,
+            met: hint.trustScore >= activeThreshold,
           },
         ],
       },

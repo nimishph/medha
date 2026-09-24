@@ -3,6 +3,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import {
   CANONICAL_SIGNALS,
   InvalidArgumentError,
+  KindRegistry,
+  type KindSpec,
   type SignalSpec,
   type StorePort,
   type StoreRegistries,
@@ -112,7 +114,11 @@ export function storeForConfig(config: MedhaConfigV1): StorePort {
 
 /** The opinions a user may override or add to, written to an optional --config registries.json. */
 export interface HostRegistries {
-  readonly kinds?: readonly string[];
+  readonly kinds?:
+    | readonly string[]
+    | Record<string, Partial<KindSpec>>
+    | readonly (string | KindSpec)[];
+  readonly kindSpecs?: readonly KindSpec[];
   readonly signalSpecs?: readonly SignalSpec[];
   readonly anchorKinds?: readonly string[];
 }
@@ -129,9 +135,96 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
     throw new ConfigFileError(configPath, 'expected a JSON object');
   }
   const host = parsed as Partial<HostRegistries>;
-  if (host.kinds !== undefined && !isNameList(host.kinds)) {
-    throw new ConfigFileError(configPath, 'kinds must be an array of non-empty strings');
+
+  const extractedKinds: string[] = [];
+  const extractedKindSpecs: KindSpec[] = [];
+
+  if (host.kinds !== undefined) {
+    if (Array.isArray(host.kinds)) {
+      for (const item of host.kinds) {
+        if (typeof item === 'string') {
+          if (item.trim() === '') {
+            throw new ConfigFileError(configPath, 'kinds must be an array of non-empty strings');
+          }
+          extractedKinds.push(item);
+          extractedKindSpecs.push({ name: item });
+        } else if (typeof item === 'object' && item !== null) {
+          const spec = item as KindSpec;
+          if (typeof spec.name !== 'string' || spec.name.trim() === '') {
+            throw new ConfigFileError(configPath, 'kind spec must have a non-empty string name');
+          }
+          extractedKinds.push(spec.name);
+          extractedKindSpecs.push(spec);
+        } else {
+          throw new ConfigFileError(
+            configPath,
+            'kinds must be an array of non-empty strings or KindSpec objects',
+          );
+        }
+      }
+    } else if (typeof host.kinds === 'object' && host.kinds !== null) {
+      for (const [name, rawSpec] of Object.entries(host.kinds)) {
+        if (typeof name !== 'string' || name.trim() === '') {
+          throw new ConfigFileError(
+            configPath,
+            'kind name in kinds object must be a non-empty string',
+          );
+        }
+        if (typeof rawSpec !== 'object' || rawSpec === null) {
+          throw new ConfigFileError(
+            configPath,
+            `kind configuration for '${name}' must be an object`,
+          );
+        }
+        extractedKinds.push(name);
+        extractedKindSpecs.push({ name, ...rawSpec });
+      }
+    } else {
+      throw new ConfigFileError(
+        configPath,
+        'kinds must be an array of non-empty strings or a configuration object',
+      );
+    }
   }
+
+  if (host.kindSpecs !== undefined) {
+    if (!Array.isArray(host.kindSpecs)) {
+      throw new ConfigFileError(configPath, 'kindSpecs must be an array');
+    }
+    for (const spec of host.kindSpecs) {
+      if (
+        typeof spec !== 'object' ||
+        spec === null ||
+        typeof spec.name !== 'string' ||
+        spec.name.trim() === ''
+      ) {
+        throw new ConfigFileError(
+          configPath,
+          'each kindSpec must be an object with a non-empty name',
+        );
+      }
+      if (!extractedKinds.includes(spec.name)) {
+        extractedKinds.push(spec.name);
+      }
+      const existingIdx = extractedKindSpecs.findIndex((s) => s.name === spec.name);
+      if (existingIdx >= 0) {
+        extractedKindSpecs[existingIdx] = { ...extractedKindSpecs[existingIdx], ...spec };
+      } else {
+        extractedKindSpecs.push(spec);
+      }
+    }
+  }
+
+  try {
+    new KindRegistry(extractedKindSpecs);
+  } catch (failure) {
+    throw new ConfigFileError(
+      configPath,
+      failure instanceof Error ? failure.message : String(failure),
+      { cause: failure },
+    );
+  }
+
   if (host.anchorKinds !== undefined && !isNameList(host.anchorKinds)) {
     throw new ConfigFileError(configPath, 'anchorKinds must be an array of non-empty strings');
   }
@@ -166,7 +259,8 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
     }
   }
   const hostRegistries: StoreRegistries = {
-    kinds: host.kinds ?? [],
+    kinds: extractedKinds,
+    kindSpecs: extractedKindSpecs,
     signalSpecs: host.signalSpecs ?? [],
     anchorKinds: host.anchorKinds ?? [],
   };

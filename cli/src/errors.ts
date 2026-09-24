@@ -127,6 +127,18 @@ export class UpdaterForkError extends CliError {
   }
 }
 
+/** `sync pull` detected custom kinds/signals in incoming snapshot not defined in local registries. */
+export class SyncRegistryMismatchError extends CliError {
+  readonly code = 'CLI_SYNC_REGISTRY_MISMATCH';
+
+  constructor(readonly diff: RegistryDiff) {
+    super(`incoming sync contains unconfigured custom kinds/signals (${summarizeDiff(diff)})`, {
+      context: { diff },
+      hint: 'pass --auto-import-registries to automatically merge incoming kinds and signals into local config.json',
+    });
+  }
+}
+
 function summarizeDiff(diff: RegistryDiff): string {
   const part = (
     label: string,

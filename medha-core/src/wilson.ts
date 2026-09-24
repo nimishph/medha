@@ -14,13 +14,13 @@ import { WILSON_Z } from './thresholds.ts';
 
 /** Validate the evidence counts shared by both bounds. Zero trials is valid (width = full). */
 function validateCounts(successes: number, trials: number): void {
-  if (!Number.isInteger(successes) || !Number.isInteger(trials) || successes < 0 || trials < 0) {
-    throw new InvalidArgumentError('evidence counts', 'non-negative integers', {
+  if (!Number.isFinite(successes) || !Number.isFinite(trials) || successes < 0 || trials < 0) {
+    throw new InvalidArgumentError('evidence counts', 'non-negative numbers', {
       successes,
       trials,
     });
   }
-  if (successes > trials) {
+  if (successes > trials + 1e-9) {
     throw new InvalidArgumentError('successes', `at most trials (${trials})`, successes);
   }
 }
@@ -29,10 +29,11 @@ export function wilsonLowerBound(successes: number, trials: number, z: number = 
   validateCounts(successes, trials);
   if (trials === 0) return 0;
 
-  const p = successes / trials;
+  const p = Math.min(1, Math.max(0, successes / trials));
   const z2 = z * z;
   const centre = p + z2 / (2 * trials);
-  const margin = z * Math.sqrt((p * (1 - p)) / trials + z2 / (4 * trials * trials));
+  const variance = Math.max(0, (p * (1 - p)) / trials);
+  const margin = z * Math.sqrt(variance + z2 / (4 * trials * trials));
   const denominator = 1 + z2 / trials;
   const lower = (centre - margin) / denominator;
   return round6(lower < 0 ? 0 : lower);
@@ -47,10 +48,11 @@ export function wilsonUpperBound(successes: number, trials: number, z: number = 
   validateCounts(successes, trials);
   if (trials === 0) return 0;
 
-  const p = successes / trials;
+  const p = Math.min(1, Math.max(0, successes / trials));
   const z2 = z * z;
   const centre = p + z2 / (2 * trials);
-  const margin = z * Math.sqrt((p * (1 - p)) / trials + z2 / (4 * trials * trials));
+  const variance = Math.max(0, (p * (1 - p)) / trials);
+  const margin = z * Math.sqrt(variance + z2 / (4 * trials * trials));
   const denominator = 1 + z2 / trials;
   const upper = (centre + margin) / denominator;
   return round6(upper > 1 ? 1 : upper);

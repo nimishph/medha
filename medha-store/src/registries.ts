@@ -2,6 +2,7 @@ import {
   BUILTIN_KINDS,
   CANONICAL_SIGNALS,
   KindRegistry,
+  type KindSpec,
   SignalRegistry,
   type SignalSpec,
   type StoreRegistries,
@@ -19,10 +20,26 @@ export function resolveRegistries(host: StoreRegistries | undefined): StoreRegis
   const canonical = new Set(CANONICAL_SIGNALS.map((s) => s.name));
   const additive = (host?.signalSpecs ?? []).filter((s) => !canonical.has(s.name));
   const anchorKinds = [...new Set(['week', ...(host?.anchorKinds ?? [])])];
-  return { kinds, signalSpecs: [...CANONICAL_SIGNALS, ...additive], anchorKinds };
+
+  const hostSpecs = host?.kindSpecs ?? [];
+  const specMap = new Map<string, KindSpec>();
+  for (const k of kinds) {
+    specMap.set(k, { name: k });
+  }
+  for (const s of hostSpecs) {
+    const existing = specMap.get(s.name);
+    specMap.set(s.name, existing ? { ...existing, ...s } : s);
+  }
+
+  return {
+    kinds,
+    signalSpecs: [...CANONICAL_SIGNALS, ...additive],
+    anchorKinds,
+    kindSpecs: [...specMap.values()],
+  };
 }
 
-export function kindRegistryFor(kinds: readonly string[]): KindRegistry {
+export function kindRegistryFor(kinds: readonly (string | KindSpec)[]): KindRegistry {
   return new KindRegistry(kinds);
 }
 

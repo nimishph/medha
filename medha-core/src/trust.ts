@@ -2,6 +2,7 @@ import { type Anchor, anchorSetFor, distinctSurvived, durabilityFactor } from '.
 import { isDrifting } from './ema.ts';
 import type { EntityState, Evidence, LifecycleStatus } from './entity.ts';
 import { type GuardState, guardFactor, guardFailed, isUnguarded } from './guard.ts';
+import type { KindSpec } from './kinds.ts';
 import { recencyDecay } from './recency.ts';
 import { round6 } from './rounding.ts';
 import {
@@ -10,6 +11,7 @@ import {
   MIN_USES_FOR_TRUSTED,
   RETIRED_TRUST_THRESHOLD,
   TRUSTED_THRESHOLD,
+  UNGUARDED_TRUST_CEILING,
 } from './thresholds.ts';
 import { wilsonLowerBound } from './wilson.ts';
 
@@ -42,8 +44,8 @@ export interface TrustResult {
 }
 
 /** Guarded entities can keep all of [0,1]; unguarded ones hit Invariant IV's ceiling. */
-export function ceilingFor(unguarded: boolean): number {
-  return unguarded ? 0.5 : 1;
+export function ceilingFor(unguarded: boolean, customCeiling?: number): number {
+  return unguarded ? (customCeiling ?? UNGUARDED_TRUST_CEILING) : 1;
 }
 
 const CEILING_GUARDED = 1;
@@ -88,20 +90,21 @@ export function computeTrust(
   anchors: readonly Anchor[],
   lastUsedAt: number | null,
   now: number,
+  kindSpec?: KindSpec,
 ): TrustResult {
   const unguarded = isUnguarded(guardState);
   const guardValue = guardFactor(guardState);
 
   // G = 0 (failed) and unguarded (G = 0.5) both resolve here; the ceiling differs.
   const wilsonValue = wilsonLowerBound(evidence.k, evidence.n);
-  const recency = recencyDecay(lastUsedAt, now);
-  const ceiling = ceilingFor(unguarded);
+  const recency = recencyDecay(lastUsedAt, now, kindSpec?.recency);
+  const ceiling = ceilingFor(unguarded, kindSpec?.thresholds?.unguardedCeiling);
 
   // Unguarded entities get neutral durability (nothing was ever checked, §4.3 invariant).
   const durability = unguarded ? 1 : durabilityFromAnchors(anchors, lastUsedAt);
 
   let trust = composeTrust(wilsonValue, guardValue, recency, durability, ceiling);
-  // Unguarded entities must never reach 0.50 — they stay strictly under the cap even when radical
+  // Unguarded entities must never reach ceiling — they stay strictly under the cap even when radical
   // rounding would push them onto it, so they can never be confused with a guarded half-cap.
   if (unguarded && trust >= ceiling) trust = round6(ceiling - 1e-6);
 
@@ -122,7 +125,7 @@ function durabilityFromAnchors(
 }
 
 /** The trust of an entity. Quarantined and retired entities score 0 — they must never surface. */
-export function trustOf(state: EntityState, now: number): TrustResult {
+export function trustOf(state: EntityState, now: number, kindSpec?: KindSpec): TrustResult {
   if (state.status === 'quarantined' || state.status === 'retired') {
     const wilson = wilsonLowerBound(state.evidence.k, state.evidence.n);
     const guard = guardFactor(state.guard);
@@ -131,39 +134,55 @@ export function trustOf(state: EntityState, now: number): TrustResult {
       components: {
         wilson,
         guard,
-        recency: recencyDecay(state.lastSignalAt, now),
+        recency: recencyDecay(state.lastSignalAt, now, kindSpec?.recency),
         durability: 1,
-        ceiling: ceilingFor(isUnguarded(state.guard)),
+        ceiling: ceilingFor(isUnguarded(state.guard), kindSpec?.thresholds?.unguardedCeiling),
       },
       unguarded: isUnguarded(state.guard),
     };
   }
-  return computeTrust(state.evidence, state.guard, state.anchors, state.lastSignalAt, now);
+  return computeTrust(
+    state.evidence,
+    state.guard,
+    state.anchors,
+    state.lastSignalAt,
+    now,
+    kindSpec,
+  );
 }
 
 /**
  * The status the trust level justifies, independent of the stored one (the trust is already
  * computed — `statusFor` and the hint builder share this tail to avoid double work).
  */
-export function statusForTrust(state: EntityState, trust: TrustResult): LifecycleStatus {
-  // Retirement requires repeated evidence of failure/rejection (n >= MIN_USES_FOR_RETIRED).
-  // Undecayed performance (Wilson bound * guard) must fall below RETIRED_TRUST_THRESHOLD.
+export function statusForTrust(
+  state: EntityState,
+  trust: TrustResult,
+  kindSpec?: KindSpec,
+): LifecycleStatus {
+  // Retirement requires repeated evidence of failure/rejection (n >= minUsesForRetired).
+  // Undecayed performance (Wilson bound * guard) must fall below retiredTrustThreshold.
   // Age/recency decay alone must NEVER retire an entity — dormant or unproven entities sit on probation.
+  const minUsesForRetired = kindSpec?.thresholds?.minUsesForRetired ?? MIN_USES_FOR_RETIRED;
+  const retiredThreshold = kindSpec?.thresholds?.retiredTrustThreshold ?? RETIRED_TRUST_THRESHOLD;
   const undecayedTrust = trust.components.wilson * trust.components.guard;
-  if (state.evidence.n >= MIN_USES_FOR_RETIRED && undecayedTrust < RETIRED_TRUST_THRESHOLD) {
+  if (state.evidence.n >= minUsesForRetired && undecayedTrust < retiredThreshold) {
     return 'retired';
   }
 
-  // Model §5.1: trusted requires T ≥ 0.60 AND n ≥ 5 AND G = 1.0 (the last guard passed).
+  // Model §5.1: trusted requires T ≥ trustedThreshold AND n ≥ minUsesForTrusted AND G = 1.0 (the last guard passed).
+  const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
+  const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
   if (
-    trust.trust >= TRUSTED_THRESHOLD &&
-    state.evidence.n >= MIN_USES_FOR_TRUSTED &&
+    trust.trust >= trustedThreshold &&
+    state.evidence.n >= minUsesForTrusted &&
     state.guard.lastOk === true
   ) {
     return 'trusted';
   }
 
-  if (trust.trust >= ACTIVE_THRESHOLD) return 'active';
+  const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
+  if (trust.trust >= activeThreshold) return 'active';
   return 'probation';
 }
 
@@ -177,7 +196,11 @@ export function statusForTrust(state: EntityState, trust: TrustResult): Lifecycl
  * same TrustResult) — this is the single-pass core shared by both, so a batch never pays for the
  * trust twice.
  */
-export function statusFrom(state: EntityState, trust: TrustResult): LifecycleStatus {
+export function statusFrom(
+  state: EntityState,
+  trust: TrustResult,
+  kindSpec?: KindSpec,
+): LifecycleStatus {
   // Explicit lifecycle overrides are terminal until restored — the host decided, numbers don't
   // overrule it (a stored retire also stays put for states built before overrides were tracked).
   if (state.override === 'retired') return 'retired';
@@ -185,10 +208,10 @@ export function statusFrom(state: EntityState, trust: TrustResult): LifecycleSta
   if (state.status === 'retired') return 'retired';
   if (guardFailed(state.guard)) return 'quarantined';
   if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) return 'quarantined';
-  return statusForTrust(state, trust);
+  return statusForTrust(state, trust, kindSpec);
 }
 
 /** The status the numbers justify, independent of the stored one. */
-export function statusFor(state: EntityState, now: number): LifecycleStatus {
-  return statusFrom(state, trustOf(state, now));
+export function statusFor(state: EntityState, now: number, kindSpec?: KindSpec): LifecycleStatus {
+  return statusFrom(state, trustOf(state, now, kindSpec), kindSpec);
 }

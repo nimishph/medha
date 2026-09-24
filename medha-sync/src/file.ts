@@ -78,6 +78,18 @@ export class FileSyncAdapter implements SyncPort {
     }
   }
 
+  async peek(_context?: Context): Promise<MemorySnapshotV1 | null> {
+    if (!existsSync(this.filePath)) {
+      return null;
+    }
+    try {
+      const raw = JSON.parse(readFileSync(this.filePath, 'utf8'));
+      return migrateSnapshot(raw);
+    } catch {
+      return null;
+    }
+  }
+
   async pull(_context?: Context): Promise<PullResult> {
     const localStates = await this.store.list();
     if (!existsSync(this.filePath)) {

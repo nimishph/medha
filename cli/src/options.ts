@@ -84,6 +84,7 @@ export const driftCommandArgs: ArgsDef = {
 };
 
 export const paramsCommandArgs: ArgsDef = {
+  ...readCommonArgs,
   json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
 };
 
@@ -202,6 +203,11 @@ export const syncPullArgs: ArgsDef = {
   ref: { type: 'string', description: 'Git ref to pull from (default: refs/sutra/medha/memory).' },
   remote: { type: 'string', description: 'Git remote to pull from (default: origin).' },
   file: { type: 'string', description: 'File path for file-based synchronization.' },
+  'auto-import-registries': {
+    type: 'boolean',
+    description:
+      'Automatically import and merge missing custom kinds/signals from incoming sync into local config.json.',
+  },
 };
 
 export const syncPushArgs: ArgsDef = {

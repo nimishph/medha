@@ -1,6 +1,7 @@
 import { driftDelta, isDrifting } from './ema.ts';
 import type { EntityKey, EntityState, LifecycleStatus } from './entity.ts';
-import { ACTIVE_THRESHOLD, TRUSTED_THRESHOLD } from './thresholds.ts';
+import type { KindSpec } from './kinds.ts';
+import { ACTIVE_THRESHOLD, MIN_USES_FOR_TRUSTED, TRUSTED_THRESHOLD } from './thresholds.ts';
 import { statusFrom, type TrustComponents, trustOf } from './trust.ts';
 
 /**
@@ -37,9 +38,12 @@ export interface EvidentialHint {
 }
 
 /** Build a hint from a state and `now`. Pure; no I/O. Single trust computation per hint. */
-export function buildHint(state: EntityState, now: number): EvidentialHint {
-  const result = trustOf(state, now);
-  const status = statusFrom(state, result);
+export function buildHint(state: EntityState, now: number, kindSpec?: KindSpec): EvidentialHint {
+  const result = trustOf(state, now, kindSpec);
+  const status = statusFrom(state, result, kindSpec);
+  const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
+  const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
+  const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
   return {
     key: state.key,
     asOf: now,
@@ -59,8 +63,10 @@ export function buildHint(state: EntityState, now: number): EvidentialHint {
     ...(state.lastNote !== undefined ? { lastNote: state.lastNote } : {}),
     clearsThreshold: {
       trusted:
-        result.trust >= TRUSTED_THRESHOLD && state.guard.lastOk === true && state.evidence.n >= 5,
-      active: result.trust >= ACTIVE_THRESHOLD,
+        result.trust >= trustedThreshold &&
+        state.guard.lastOk === true &&
+        state.evidence.n >= minUsesForTrusted,
+      active: result.trust >= activeThreshold,
     },
   };
 }

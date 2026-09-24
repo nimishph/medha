@@ -1,5 +1,6 @@
 import type { EntityKey, EntityState } from './entity.ts';
 import type { Episode, EpisodeInput } from './episode.ts';
+import type { KindSpec } from './kinds.ts';
 import type { SignalSpec } from './signals.ts';
 
 /**
@@ -25,6 +26,7 @@ export type StoreRegistries = {
   readonly kinds: readonly string[];
   readonly signalSpecs: readonly SignalSpec[];
   readonly anchorKinds: readonly string[];
+  readonly kindSpecs?: readonly KindSpec[];
 };
 
 /** Why and where a store's log is unusable past some point. */

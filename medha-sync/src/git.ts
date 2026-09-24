@@ -347,6 +347,22 @@ export class GitRefSyncAdapter implements SyncPort {
     }
   }
 
+  async peek(_context?: Context): Promise<MemorySnapshotV1 | null> {
+    const isGit = await this.isGitRepo();
+    if (!isGit) return null;
+
+    const remoteExists = await this.hasRemote(this.remote);
+    if (remoteExists) {
+      await this.fetchRemoteRef();
+    }
+
+    const remoteRef = this.getTrackingRef(this.remote, this.ref);
+    return (
+      (remoteExists ? await this.readSnapshotFromRef(remoteRef) : null) ||
+      (await this.readSnapshotFromRef(this.ref))
+    );
+  }
+
   async pull(_context?: Context): Promise<PullResult> {
     const isGit = await this.isGitRepo();
     const localStates = await this.store.list();

@@ -7,6 +7,7 @@ export {
   RegistryDriftError,
   SnapshotFileError,
   StoreCorruptError,
+  SyncRegistryMismatchError,
   UpdaterForkError,
   UpdaterNotFoundError,
 } from './errors.ts';

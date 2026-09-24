@@ -187,6 +187,22 @@ export function renderParams(report: ParamsReport): string {
     const value = typeof param.value === 'number' ? fixed(param.value) : param.value;
     lines.push(`  ${param.name.padEnd(28)} ${value.padStart(8)}   ${param.source}`);
   }
+  if (report.kinds && report.kinds.length > 0) {
+    lines.push('');
+    lines.push('  CONFIGURED KIND TRUST CONFIGURATIONS:');
+    for (const kind of report.kinds) {
+      lines.push(`    - kind '${kind.name}':`);
+      if (kind.description) lines.push(`        description: ${kind.description}`);
+      if (kind.evidenceWeighting)
+        lines.push(`        evidenceWeighting: ${kind.evidenceWeighting}`);
+      if (kind.thresholds) {
+        lines.push(`        thresholds: ${JSON.stringify(kind.thresholds)}`);
+      }
+      if (kind.recency) {
+        lines.push(`        recency: ${JSON.stringify(kind.recency)}`);
+      }
+    }
+  }
   return `${lines.join('\n')}\n`;
 }
 

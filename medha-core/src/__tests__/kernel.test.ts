@@ -448,3 +448,180 @@ describe('registry integrity', () => {
     expect(states[0]?.evidence.n).toBe(1);
   });
 });
+
+describe('TASK-EXT-02: Per-Kind Trust Configuration & Value-Weighted Evidence', () => {
+  test('signal-value evidence weighting scales trials and successes by signal value', () => {
+    const toolKindSpec = {
+      name: 'tool',
+      evidenceWeighting: 'signal-value' as const,
+      thresholds: {
+        trusted: 0.9,
+        active: 0.6,
+        minUsesForTrusted: 10,
+      },
+      recency: {
+        halfLifeDays: 7,
+      },
+    };
+
+    const toolKey = { namespace: '', kind: 'tool', id: 'mcp-search' };
+    let state = freshState(toolKey, START);
+
+    const TIMEOUT_SIGNAL = {
+      name: 'TOOL_TIMEOUT',
+      value: -0.5,
+      countsAsTrial: true,
+      countsAsSuccess: false,
+    };
+    const PARTIAL_SUCCESS_SIGNAL = {
+      name: 'TOOL_PARTIAL',
+      value: 0.8,
+      countsAsTrial: true,
+      countsAsSuccess: true,
+    };
+
+    // Apply TIMEOUT_SIGNAL: trial weight should be |-0.5| = 0.5, success weight 0
+    state = applySignal(
+      state,
+      { spec: TIMEOUT_SIGNAL },
+      { now: START, kindSpec: toolKindSpec },
+    ).state;
+    expect(state.evidence.n).toBe(0.5);
+    expect(state.evidence.k).toBe(0);
+
+    // Apply PARTIAL_SUCCESS_SIGNAL: trial weight 0.8, success weight 0.8
+    state = applySignal(
+      state,
+      { spec: PARTIAL_SUCCESS_SIGNAL },
+      { now: START + 1000, kindSpec: toolKindSpec },
+    ).state;
+    expect(state.evidence.n).toBe(1.3);
+    expect(state.evidence.k).toBe(0.8);
+
+    // Standard Wilson lower bound computes seamlessly on fractional counts
+    const hint = buildHint(state, START + 1000, toolKindSpec);
+    expect(hint.evidence.totalTrials).toBe(1.3);
+    expect(hint.evidence.successes).toBe(0.8);
+    expect(hint.components.wilson).toBeGreaterThan(0);
+    expect(hint.trustScore).toBeGreaterThan(0);
+  });
+
+  test('graded failure (-0.5) penalizes trust less severely than hard failure (-1.0)', () => {
+    const toolKindSpec = {
+      name: 'tool',
+      evidenceWeighting: 'signal-value' as const,
+    };
+
+    const keyMild = { namespace: '', kind: 'tool', id: 'mild' };
+    const keySevere = { namespace: '', kind: 'tool', id: 'severe' };
+
+    let stateMild = freshState(keyMild, START, { guard: PASSED_GUARD });
+    let stateSevere = freshState(keySevere, START, { guard: PASSED_GUARD });
+
+    // 5 full successes first
+    for (let i = 0; i < 5; i++) {
+      stateMild = applySignal(
+        stateMild,
+        { spec: APPLY },
+        { now: START + i * 1000, kindSpec: toolKindSpec },
+      ).state;
+      stateSevere = applySignal(
+        stateSevere,
+        { spec: APPLY },
+        { now: START + i * 1000, kindSpec: toolKindSpec },
+      ).state;
+    }
+
+    // Now mild receives a -0.5 timeout; severe receives a -1.0 hard crash
+    const TIMEOUT = {
+      name: 'TOOL_TIMEOUT',
+      value: -0.5,
+      countsAsTrial: true,
+      countsAsSuccess: false,
+    };
+    stateMild = applySignal(
+      stateMild,
+      { spec: TIMEOUT },
+      { now: START + 10000, kindSpec: toolKindSpec },
+    ).state;
+    stateSevere = applySignal(
+      stateSevere,
+      { spec: REJECT_RULE },
+      { now: START + 10000, kindSpec: toolKindSpec },
+    ).state;
+
+    const hintMild = buildHint(stateMild, START + 10000, toolKindSpec);
+    const hintSevere = buildHint(stateSevere, START + 10000, toolKindSpec);
+
+    expect(hintMild.trustScore).toBeGreaterThan(hintSevere.trustScore);
+    expect(hintMild.evidence.totalTrials).toBe(5.5);
+    expect(hintSevere.evidence.totalTrials).toBe(6);
+  });
+
+  test('per-kind thresholds enforce custom trusted bar while built-in rules use defaults', () => {
+    const strictKindSpec = {
+      name: 'critical-action',
+      thresholds: {
+        trusted: 0.95,
+        minUsesForTrusted: 20,
+      },
+    };
+
+    const strictKey = { namespace: '', kind: 'critical-action', id: 'c1' };
+    const ruleKey = { namespace: '', kind: 'rule', id: 'r1' };
+
+    let strictState = freshState(strictKey, START, { guard: PASSED_GUARD });
+    let ruleState = freshState(ruleKey, START, { guard: PASSED_GUARD });
+
+    // Apply 6 successful uses
+    for (let i = 0; i < 6; i++) {
+      strictState = applySignal(
+        strictState,
+        { spec: APPLY },
+        { now: START + i * 1000, kindSpec: strictKindSpec },
+      ).state;
+      ruleState = applySignal(ruleState, { spec: APPLY }, { now: START + i * 1000 }).state;
+    }
+
+    const strictHint = buildHint(strictState, START + 10000, strictKindSpec);
+    const ruleHint = buildHint(ruleState, START + 10000);
+
+    // Default rule clears trusted (n >= 5, T >= 0.6)
+    expect(ruleHint.clearsThreshold.trusted).toBe(true);
+    expect(ruleHint.status).toBe('trusted');
+
+    // Strict kind requires n >= 20, so it remains active (not trusted)
+    expect(strictHint.clearsThreshold.trusted).toBe(false);
+    expect(strictHint.status).toBe('active');
+  });
+
+  test('per-kind recency config accelerates decay and honors custom floor', () => {
+    const ephemeralKindSpec = {
+      name: 'ephemeral',
+      recency: {
+        halfLifeDays: 7,
+        floor: 0.1,
+      },
+    };
+
+    const ephemeralDecayed = recencyDecay(
+      START,
+      START + 7 * 24 * 60 * 60 * 1000,
+      ephemeralKindSpec.recency,
+    );
+    const defaultDecayed = recencyDecay(START, START + 7 * 24 * 60 * 60 * 1000);
+
+    // After 7 days, 7-day half-life reaches exactly 0.50
+    expect(ephemeralDecayed).toBeCloseTo(0.5, 2);
+    // While 45-day default half-life is still high (~0.898)
+    expect(defaultDecayed).toBeGreaterThan(0.85);
+
+    // Far in the future: custom floor 0.1 is respected
+    const deepFutureDecayed = recencyDecay(
+      START,
+      START + 365 * 24 * 60 * 60 * 1000,
+      ephemeralKindSpec.recency,
+    );
+    expect(deepFutureDecayed).toBe(0.1);
+  });
+});

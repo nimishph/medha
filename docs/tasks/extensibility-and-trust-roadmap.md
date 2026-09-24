@@ -22,14 +22,14 @@ Below are the six filed tasks to transform Medha into a genuinely extensible, en
 
 ## Task Inventory
 
-| Task ID | Priority | Area | Summary |
-|---|---|---|---|
-| [TASK-EXT-01](#task-ext-01-dynamic-loading-of-custom-updaters--strict-validation) | **P0 (Critical)** | CLI & Updaters | Load `<home>/updaters/*.ts` in binary CLI; fail loudly on unknown updaters; fix scaffold template. |
-| [TASK-EXT-02](#task-ext-02-per-kind-trust-configuration--value-weighted-evidence) | **P0 (Critical)** | Core Engine | Allow per-kind trust thresholds, recency half-life, and signal-value-weighted evidence in `registries.json`. |
-| [TASK-EXT-03](#task-ext-03-registry-synchronization--pull-auto-import) | **P1 (High)** | Sync Plane | Carry registry definitions in `medha-sync`; provide interactive or flag-driven auto-import on `pull`. |
-| [TASK-EXT-04](#task-ext-04-resilient-kind-scoping--graceful-orphan-handling) | **P1 (High)** | Store & Preflight | Scope unknown-kind errors to affected entities; never hide unaffected data; deprecate false `--recreate` advice. |
-| [TASK-EXT-05](#task-ext-05-builtin-registry-collision-guards--nested-cli-help) | **P2 (Medium)** | CLI & Registries | Reject silent dropping of built-in redefinitions (`APPLY`); fix nested sub-command `--help` routing. |
-| [TASK-EXT-06](#task-ext-06-npm-package-publishing-pipeline--docs-realignment) | **P2 (Medium)** | Packaging & Docs | Establish automated npm publishing pipeline for `@cntxt-labs/*`; update documentation. |
+| Task ID | Priority | Area | Summary | Status |
+|---|---|---|---|---|
+| [TASK-EXT-01](#task-ext-01-dynamic-loading-of-custom-updaters--strict-validation) | **P0 (Critical)** | CLI & Updaters | Load `<home>/updaters/*.ts` in binary CLI; fail loudly on unknown updaters; fix scaffold template. | **Completed** |
+| [TASK-EXT-02](#task-ext-02-per-kind-trust-configuration--value-weighted-evidence) | **P0 (Critical)** | Core Engine | Allow per-kind trust thresholds, recency half-life, and signal-value-weighted evidence in `registries.json`. | **Completed** |
+| [TASK-EXT-03](#task-ext-03-registry-synchronization--pull-auto-import) | **P1 (High)** | Sync Plane | Carry registry definitions in `medha-sync`; provide interactive or flag-driven auto-import on `pull`. | **Completed** |
+| [TASK-EXT-04](#task-ext-04-resilient-kind-scoping--graceful-orphan-handling) | **P1 (High)** | Store & Preflight | Scope unknown-kind errors to affected entities; never hide unaffected data; deprecate false `--recreate` advice. | **Completed** |
+| [TASK-EXT-05](#task-ext-05-builtin-registry-collision-guards--nested-cli-help) | **P2 (Medium)** | CLI & Registries | Reject silent dropping of built-in redefinitions (`APPLY`); fix nested sub-command `--help` routing. | **Completed** |
+| [TASK-EXT-06](#task-ext-06-npm-package-publishing-pipeline--docs-realignment) | **P2 (Medium)** | Packaging & Docs | Establish automated npm publishing pipeline for `@cntxt-labs/*`; update documentation. | **Planned** |
 
 ---
 

@@ -54,6 +54,7 @@ export interface SyncPort {
   pull(context?: Context): Promise<PullResult>;
   push(context?: Context): Promise<PushResult>;
   reconcile(context?: Context): Promise<ReconcileResult>;
+  peek?(context?: Context): Promise<MemorySnapshotV1 | null>;
 }
 
 /**

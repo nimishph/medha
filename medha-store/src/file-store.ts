@@ -280,8 +280,9 @@ export class FilePolicyStore implements StorePort {
 
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     if (episode.type === 'retract') {
-      const rebuilt = foldLog(this.log);
+      const rebuilt = foldLog(this.log, { kinds });
       this.projection.clear();
       for (const st of rebuilt) {
         this.projection.set(entityKeyString(st.key), st);
@@ -290,7 +291,7 @@ export class FilePolicyStore implements StorePort {
       return this.projection.get(entityKeyString(episode.key));
     }
     const key = entityKeyString(episode.key);
-    const next = foldEpisode(this.projection.get(key), episode);
+    const next = foldEpisode(this.projection.get(key), episode, { kinds });
     if (next === undefined) this.projection.delete(key);
     else this.projection.set(key, next);
     this.nextSeq = episode.seq + 1;
