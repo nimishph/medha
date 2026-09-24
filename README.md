@@ -1,13 +1,43 @@
 # medha
 
-The evidential-memory engine behind Sutra's guiding policy, as a library. Medha weighs what the
-host has actually observed (episodes, signals, guard reports) and produces trust-shaped hints for
-rules, recipes and tools — it never decides an action itself.
+Evidential memory for rules, recipes and tools. Medha records what has actually happened —
+uses, rejections, guard results — and returns **trust hints**. It never decides an action itself.
 
-Extracted from the Sutra repository. Loom consumes this checkout via a sibling path
-(`MEDHA_SRC` or `../sutras/medha`) until the packages are published.
+## Quick start
 
-## Packages
+Download the release binary for your platform (a single self-contained executable), then:
+
+```sh
+medha init                                        # creates .medha/ in the current directory
+medha propose --id no-console-log --source review # a new rule enters on probation
+medha record  --id no-console-log --signal APPLY --ensure
+medha guard   --id no-console-log --ok --guard review
+medha show    --id no-console-log                 # trust, status, recent episodes
+medha explain-threshold --id no-console-log       # which thresholds clear, and why
+```
+
+Every command accepts `--json`. `medha --help` and `medha <command> --help` list all options.
+
+## Use from an agent (MCP)
+
+Register the server in your project's `.mcp.json`:
+
+```json
+{ "mcpServers": { "medha": { "command": "medha", "args": ["mcp", "serve"] } } }
+```
+
+Copy [`SKILL.md`](SKILL.md) (included in each release archive) to `.claude/skills/medha/SKILL.md`
+so the agent knows when and how to use it.
+
+## How trust works
+
+Trust combines a Wilson lower bound over successes/trials, an exponential moving average for drift,
+recency decay and a durability multiplier. A passing guard is required to reach `trusted`; without
+one, trust is capped at 0.5. Run `medha params` for every constant and threshold.
+
+Lifecycle: `probation → active → trusted`, and `quarantined` / `retired` after repeated rejection.
+
+## Library packages
 
 | Package | Contains | Depends on |
 |---|---|---|
@@ -31,18 +61,7 @@ The same standards as `@cntxt-labs/anvesa`:
 These are enforced by Biome, four Grit plugin rules in `tooling/plugins/`, and the fixture suite in
 `tooling/standards.test.ts` (the same fixtures as `anvesa`, proving the rules do what they claim).
 
-## Development
-
-```sh
-bun install
-bun run check     # lint + typecheck + boundaries + test
-```
-
-Requires Bun >= 1.3.
-
-## CLI & MCP Server
-
-Medha ships with both a unified command line interface and an MCP (Model Context Protocol) server over stdio.
+## CLI & MCP reference
 
 ### CLI Subcommands
 
@@ -52,6 +71,7 @@ Medha ships with both a unified command line interface and an MCP (Model Context
 - **`medha status`**: Check overall store health, preflight status, and entity lifecycle distribution.
 - **`medha drift`**: Identify entities whose weights have drifted from their priors.
 - **`medha params`**: Print the canonical mathematical constants and thresholds used by the kernel.
+- **`medha propose`** / **`medha record`** / **`medha guard`**: Write evidence from the shell (`--source`; `--signal … --ensure`; `--ok`|`--fail`). `record` reports `recorded: false` for an unknown entity without `--ensure`.
 - **`medha simulate`**: Compute the hypothetical trust delta of a signal without persisting changes.
 - **`medha explain-threshold`**: Show which thresholds an entity clears (trusted, active) and why.
 - **`medha maintain`**: Maintenance commands:
@@ -68,10 +88,10 @@ Medha ships with both a unified command line interface and an MCP (Model Context
 ### MCP Tools
 
 The MCP server exposes 9 tools over JSON-RPC stdio:
-1. `hints`: Batch fetch hints for entity keys.
+1. `hints`: Batch fetch hints; returns `{ hints, unknown }`. Pass `compact: true` on `hints`, `list_entities`, `record_signal` and `propose` for one-line hints and unindented JSON.
 2. `list_entities`: Paginated search with filtering.
 3. `show_entity`: Detailed entity inspection.
-4. `record_signal`: Record evidential signals (`APPLY`, `REJECT_RULE`, `SKIP`, etc.).
+4. `record_signal`: Record evidential signals (`APPLY`, `REJECT_RULE`, `SKIP`, etc.). Returns `recorded: false` for an unknown entity without `ensure`.
 5. `report_guard`: Record verification/guard results.
 6. `propose`: Submit candidate entity proposals for promotion.
 7. `drift`: List drifting entities.
@@ -86,6 +106,15 @@ To package the standalone native binary for your platform:
 bun run build     # compiles cli/src/bin.ts to dist/medha/medha[.exe]
 bun run smoke     # runs init, list, status, drift, and MCP handshake on todo-list
 ```
+
+## Development (from source)
+
+```sh
+bun install
+bun run check     # lint + typecheck + boundaries + test
+```
+
+Requires Bun >= 1.3.
 
 ## Author & Attribution
 

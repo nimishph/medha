@@ -56,8 +56,8 @@ if (code !== 0) {
   process.exit(code ?? 1);
 }
 
-// Copy license and readme if present
-for (const file of ['README.md', 'LICENSE']) {
+// Copy license, readme and agent skill if present
+for (const file of ['README.md', 'LICENSE', 'SKILL.md']) {
   const src = join(baseRoot, file);
   if (existsSync(src)) cpSync(src, join(folder, file));
 }
