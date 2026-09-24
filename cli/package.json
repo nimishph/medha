@@ -1,6 +1,6 @@
 {
   "name": "@cntxt-labs/medha-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "The medha command line: engine bootstrap (init) today, the read/write/maintenance planes as they land.",
