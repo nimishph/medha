@@ -207,3 +207,27 @@ export const syncPushArgs: ArgsDef = {
   remote: { type: 'string', description: 'Git remote to push to (default: origin).' },
   file: { type: 'string', description: 'File path for file-based synchronization.' },
 };
+
+export const recordCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  signal: { type: 'string', description: 'Signal to record (e.g. APPLY, REJECT_RULE, SKIP).' },
+  updater: { type: 'string', description: 'Weight updater name to use.' },
+  ensure: { type: 'boolean', description: 'Create the entity if it does not exist.' },
+};
+
+export const guardCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  ok: { type: 'boolean', description: 'The guard passed.' },
+  fail: { type: 'boolean', description: 'The guard failed.' },
+  guard: { type: 'string', description: 'Guard kind, e.g. harness, review, audit.' },
+};
+
+export const proposeCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  source: { type: 'string', description: 'Source of the proposal (miner name or file path).' },
+  text: { type: 'string', description: 'Optional text of the proposal.' },
+  evidence: { type: 'string', description: 'Comma-separated evidence refs (commit SHAs, paths).' },
+};

@@ -620,6 +620,42 @@ describe('sage read plane — home guards', () => {
   });
 });
 
+describe('medha write plane', () => {
+  test('record --ensure creates the entity; without it nothing is written', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    expect(await runCli(['record', '--id', 'ghost', '--signal', 'APPLY', '--json'], env)).toBe(0);
+    expect(JSON.parse(out().slice(out().indexOf('{'))).recorded).toBe(false);
+
+    expect(await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env)).toBe(0);
+    expect(await runCli(['show', '--id', 'r1', '--json'], env)).toBe(0);
+    expect(out()).toContain('"known": true');
+  });
+
+  test('guard needs exactly one of --ok / --fail', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env);
+    expect(await runCli(['guard', '--id', 'r1'], env)).toBe(2);
+    expect(await runCli(['guard', '--id', 'r1', '--ok', '--guard', 'review'], env)).toBe(0);
+    expect(err()).toContain('--ok/--fail');
+  });
+
+  test('propose enters the entity on probation and requires --source', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    expect(await runCli(['propose', '--id', 'p1'], env)).toBe(2);
+    expect(
+      await runCli(
+        ['propose', '--id', 'p1', '--source', 'test', '--evidence', 'a, b', '--json'],
+        env,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(out().slice(out().indexOf('{'))).hint.status).toBe('probation');
+  });
+});
+
 describe('medha maintain plane', () => {
   test('maintain preflight on healthy store reports ok (exit 0)', async () => {
     const { env, out } = fresh();

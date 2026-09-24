@@ -10,6 +10,7 @@ import {
 import {
   driftCommandArgs,
   explainThresholdCommandArgs,
+  guardCommandArgs,
   initCommandArgs,
   listCommandArgs,
   maintainBackupArgs,
@@ -18,6 +19,8 @@ import {
   maintainRestoreArgs,
   mcpCommandArgs,
   paramsCommandArgs,
+  proposeCommandArgs,
+  recordCommandArgs,
   showCommandArgs,
   simulateCommandArgs,
   statusCommandArgs,
@@ -60,6 +63,14 @@ import {
 } from './render.ts';
 import { runUpdaterFork, runUpdaterList, runUpdaterShow } from './updater.ts';
 import { VERSION } from './version.ts';
+import {
+  renderGuard,
+  renderPropose,
+  renderRecord,
+  runGuard,
+  runPropose,
+  runRecord,
+} from './write.ts';
 
 export const initCommand = defineCommand({
   meta: {
@@ -228,6 +239,83 @@ export const explainThresholdCommand = defineCommand({
       environment,
     );
     environment.stdout(args.json === true ? toJson(report) : renderExplainThreshold(report));
+  },
+});
+
+/** Write-plane commands: the shell twins of the MCP write tools. */
+
+export const recordCommand = defineCommand({
+  meta: {
+    name: 'record',
+    description: 'Record an evidential signal on an entity (writes; use --ensure to create it).',
+  },
+  args: recordCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runRecord(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.signal === undefined ? {} : { signal: args.signal }),
+        ...(args.updater === undefined ? {} : { updater: args.updater }),
+        ...(args.ensure === true ? { ensure: true } : {}),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderRecord(report));
+  },
+});
+
+export const guardCommand = defineCommand({
+  meta: {
+    name: 'guard',
+    description: 'Record a guard result (--ok or --fail) for an entity.',
+  },
+  args: guardCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runGuard(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.ok === true ? { ok: true } : {}),
+        ...(args.fail === true ? { fail: true } : {}),
+        ...(args.guard === undefined ? {} : { guard: args.guard }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderGuard(report));
+  },
+});
+
+export const proposeCommand = defineCommand({
+  meta: {
+    name: 'propose',
+    description: 'Submit a candidate entity proposal; it enters on probation.',
+  },
+  args: proposeCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runPropose(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.source === undefined ? {} : { source: args.source }),
+        ...(args.text === undefined ? {} : { text: args.text }),
+        ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderPropose(report));
   },
 });
 
@@ -527,6 +615,9 @@ export const commands = defineCommand({
     drift: driftCommand,
     params: paramsCommand,
     simulate: simulateCommand,
+    record: recordCommand,
+    guard: guardCommand,
+    propose: proposeCommand,
     'explain-threshold': explainThresholdCommand,
     maintain: maintainCommand,
     updater: updaterCommand,
