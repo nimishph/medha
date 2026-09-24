@@ -52,7 +52,7 @@ jobs:
 
       - name: Verify Tag Matches Manifest Version
         run: |
-          version="$(bun -e "console.log(require('./cli/package.json').version)")"
+          version="$(node -p "require('./cli/package.json').version")"
           if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match cli/package.json version ${version}" >&2
             exit 1
