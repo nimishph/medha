@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_SAGE_REF, GitRefSyncAdapter } from '../index.ts';
+import { DEFAULT_MEDHA_REF, DEFAULT_SAGE_REF, GitRefSyncAdapter } from '../index.ts';
 import { createTestStore } from './test-store.ts';
 
 describe('GitRefSyncAdapter', () => {
@@ -42,7 +42,7 @@ describe('GitRefSyncAdapter', () => {
 
     const status = await adapter.status();
     expect(status.state).toBe('uninitialized');
-    expect(status.ref).toBe(DEFAULT_SAGE_REF);
+    expect(status.ref).toBe(DEFAULT_MEDHA_REF);
   });
 
   it('pushes snapshot to git ref and verifies commit object', async () => {
@@ -105,5 +105,32 @@ describe('GitRefSyncAdapter', () => {
     const listB = await storeB.list();
     expect(listB).toHaveLength(1);
     expect(listB[0]?.key.id).toBe('tool-git-a');
+  });
+  it('hard-deprecates DEFAULT_SAGE_REF and emits warning when used', async () => {
+    const store = createTestStore();
+    await store.open();
+    const warnings: string[] = [];
+    // biome-ignore lint/suspicious/noConsole: Intercept console.warn for deprecation test
+    const originalWarn = console.warn;
+    // biome-ignore lint/suspicious/noConsole: Intercept console.warn for deprecation test
+    console.warn = (msg: string) => warnings.push(msg);
+
+    try {
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, ref: DEFAULT_SAGE_REF });
+      expect(adapter.ref).toBe(DEFAULT_SAGE_REF);
+      expect(warnings.length).toBeGreaterThan(0);
+      expect(warnings[0]).toContain('hard-deprecated');
+    } finally {
+      // biome-ignore lint/suspicious/noConsole: Restore console.warn
+      console.warn = originalWarn;
+    }
+  });
+
+  it('dynamically computes tracking ref from custom and default refs', async () => {
+    const store = createTestStore();
+    await store.open();
+    const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo });
+    const res = await adapter.fetchRemoteRef('origin', DEFAULT_MEDHA_REF);
+    expect(res.trackingRef).toBe('refs/remotes/origin/sutra/medha/memory');
   });
 });

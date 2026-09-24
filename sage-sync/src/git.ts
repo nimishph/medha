@@ -1,5 +1,5 @@
 /**
- * GitRefSyncAdapter — SyncPort over Git refs (refs/sutra/sage/memory), spec §7.2.
+ * GitRefSyncAdapter — SyncPort over Git refs (refs/sutra/medha/memory), spec §7.2.
  *
  * Stores calibrated versioned snapshots (schemaVersion: 1) inside git object storage
  * on dedicated refs without polluting working trees or checking out branches.
@@ -23,6 +23,11 @@ import {
 } from '@cntxt-labs/medha-core';
 import { mergeEpisodes } from './merge.ts';
 
+export const DEFAULT_MEDHA_REF = 'refs/sutra/medha/memory';
+
+/**
+ * @deprecated Hard-deprecated. Use DEFAULT_MEDHA_REF ('refs/sutra/medha/memory') instead.
+ */
 export const DEFAULT_SAGE_REF = 'refs/sutra/sage/memory';
 export const DEFAULT_REMOTE = 'origin';
 
@@ -48,7 +53,13 @@ export class GitRefSyncAdapter implements SyncPort {
   constructor(options: GitRefSyncOptions) {
     this.store = options.store;
     this.rootDir = options.rootDir;
-    this.ref = options.ref || DEFAULT_SAGE_REF;
+    if (options.ref === DEFAULT_SAGE_REF) {
+      // biome-ignore lint/suspicious/noConsole: Hard deprecation warning
+      console.warn(
+        `[medha] DEPRECATION WARNING: "${DEFAULT_SAGE_REF}" is hard-deprecated. Use DEFAULT_MEDHA_REF ("${DEFAULT_MEDHA_REF}") instead.`,
+      );
+    }
+    this.ref = options.ref || DEFAULT_MEDHA_REF;
     this.remote = options.remote || DEFAULT_REMOTE;
   }
 
@@ -221,7 +232,14 @@ export class GitRefSyncAdapter implements SyncPort {
     remote = this.remote,
     ref = this.ref,
   ): Promise<{ ok: boolean; trackingRef: string; commit?: string; error?: string }> {
-    const trackingRef = `refs/remotes/${remote}/sutra/sage/memory`;
+    if (ref === DEFAULT_SAGE_REF) {
+      // biome-ignore lint/suspicious/noConsole: Hard deprecation warning
+      console.warn(
+        `[medha] DEPRECATION WARNING: "${DEFAULT_SAGE_REF}" is hard-deprecated. Use DEFAULT_MEDHA_REF ("${DEFAULT_MEDHA_REF}") instead.`,
+      );
+    }
+    const suffix = ref.startsWith('refs/') ? ref.slice('refs/'.length) : ref;
+    const trackingRef = `refs/remotes/${remote}/${suffix}`;
     try {
       await this.runGit(['fetch', remote, `${ref}:${trackingRef}`]);
       const commit = await this.getRefCommit(trackingRef);
@@ -322,7 +340,8 @@ export class GitRefSyncAdapter implements SyncPort {
     await this.fetchRemoteRef();
 
     // Read remote ref or local ref
-    const remoteRef = `refs/remotes/${this.remote}/sutra/sage/memory`;
+    const suffix = this.ref.startsWith('refs/') ? this.ref.slice('refs/'.length) : this.ref;
+    const remoteRef = `refs/remotes/${this.remote}/${suffix}`;
     const snapshot =
       (await this.readSnapshotFromRef(remoteRef)) || (await this.readSnapshotFromRef(this.ref));
 

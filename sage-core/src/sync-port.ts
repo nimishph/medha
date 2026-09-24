@@ -2,7 +2,7 @@
  * SyncPort and MemorySnapshot contracts, library spec §7.2.
  *
  * Distributed sync across machines and storage tiers over versioned snapshots (schemaVersion: 1).
- * Supports git-ref (refs/sutra/sage/memory), file, and no-op adapters.
+ * Supports git-ref (refs/sutra/medha/memory), file, and no-op adapters.
  */
 
 import type { Context } from './context.ts';
