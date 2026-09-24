@@ -23,6 +23,7 @@ import {
   proposeCommandArgs,
   recordCommandArgs,
   removeEpisodeCommandArgs,
+  reportCommandArgs,
   retractCommandArgs,
   showCommandArgs,
   simulateCommandArgs,
@@ -30,6 +31,7 @@ import {
   syncPullArgs,
   syncPushArgs,
   syncStatusArgs,
+  uiCommandArgs,
   updaterForkArgs,
   updaterListArgs,
   updaterShowArgs,
@@ -274,6 +276,59 @@ export const packCommand = defineCommand({
     environment.stdout(
       args.json === true || report.format === 'json' ? toJson(report) : renderPack(report),
     );
+  },
+});
+
+export const uiCommand = defineCommand({
+  meta: {
+    name: 'ui',
+    description: 'Launch the interactive evidential memory web dashboard.',
+  },
+  args: uiCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { startUiServer } = await import('./ui.ts');
+    const handle = await startUiServer(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.port === undefined ? {} : { port: args.port }),
+        ...(args.host === undefined ? {} : { host: args.host }),
+        ...(args.open === true ? { open: true } : {}),
+      },
+      environment,
+    );
+    environment.stdout(`medha ui: dashboard running at ${handle.url}\n  Press Ctrl+C to stop.\n`);
+
+    await new Promise<void>((resolve) => {
+      process.on('SIGINT', () => {
+        void handle.close().then(() => resolve());
+      });
+      process.on('SIGTERM', () => {
+        void handle.close().then(() => resolve());
+      });
+    });
+  },
+});
+
+export const reportCommand = defineCommand({
+  meta: {
+    name: 'report',
+    description: 'Generate an offline standalone HTML report of evidential memory.',
+  },
+  args: reportCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runReport, renderReport } = await import('./report.ts');
+    const outcome = await runReport(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.out === undefined ? {} : { out: args.out }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(outcome) : renderReport(outcome));
   },
 });
 
@@ -710,6 +765,8 @@ export const commands = defineCommand({
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
     pack: packCommand,
+    ui: uiCommand,
+    report: reportCommand,
     maintain: maintainCommand,
     updater: updaterCommand,
     mcp: mcpCommand,

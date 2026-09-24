@@ -287,3 +287,34 @@ export const packCommandArgs: ArgsDef = {
   },
   seed: { type: 'string', description: 'Random seed for reproducible exploration sampling.' },
 };
+
+export const uiCommandArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha (e.g. an existing .sutra/medha).',
+  },
+  port: {
+    type: 'string',
+    description: 'Port to bind the dashboard server (default: 8448).',
+  },
+  host: {
+    type: 'string',
+    description: 'Host to bind the dashboard server (default: 127.0.0.1).',
+  },
+  open: {
+    type: 'boolean',
+    description: 'Open the dashboard in the default browser on launch.',
+  },
+};
+
+export const reportCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  out: {
+    type: 'string',
+    description: 'Output HTML file path (default: medha-report.html).',
+  },
+};
