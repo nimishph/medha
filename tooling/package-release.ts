@@ -4,9 +4,9 @@
  *
  *   bun run tooling/package-release.ts [--out dist]
  *
- * Result: `<out>/medha-<version>-<platform>-<arch>/sage[.exe]` and `<out>/sage/sage[.exe]`.
+ * Result: `<out>/medha-<version>-<platform>-<arch>/medha[.exe]` and `<out>/medha/medha[.exe]`.
  */
-import { cpSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -17,14 +17,15 @@ const version = (
   JSON.parse(readFileSync(join(baseRoot, 'cli', 'package.json'), 'utf8')) as { version: string }
 ).version;
 const target = `${process.platform}-${process.arch}`;
-const folder = join(out, `medha-${version}-${target}`);
+const folderName = `medha-${version}-${target}`;
+const folder = join(out, folderName);
 const canonicalFolder = join(out, 'medha');
 
 rmSync(folder, { recursive: true, force: true });
 mkdirSync(folder, { recursive: true });
 mkdirSync(canonicalFolder, { recursive: true });
 
-const program = process.platform === 'win32' ? 'medha.exe' : 'sage';
+const program = process.platform === 'win32' ? 'medha.exe' : 'medha';
 const targetPath = join(folder, program);
 const canonicalPath = join(canonicalFolder, program);
 
@@ -43,6 +44,27 @@ if (code !== 0) {
   process.exit(code ?? 1);
 }
 
+// Copy license and readme if present
+for (const file of ['README.md', 'LICENSE']) {
+  const src = join(baseRoot, file);
+  if (existsSync(src)) cpSync(src, join(folder, file));
+}
+
 // Copy to canonical dist/medha/ folder for local launcher
 cpSync(targetPath, canonicalPath, { force: true });
 process.stdout.write(`Successfully built:\n  ${targetPath}\n  ${canonicalPath}\n`);
+
+// Create compressed archive for distribution
+const archive = process.platform === 'win32' ? `${folderName}.zip` : `${folderName}.tar.gz`;
+rmSync(join(out, archive), { force: true });
+const tarChild = Bun.spawn({
+  cmd:
+    process.platform === 'win32'
+      ? ['tar', '-a', '-c', '-f', archive, folderName]
+      : ['tar', '-czf', archive, folderName],
+  cwd: out,
+  stdout: 'inherit',
+  stderr: 'inherit',
+});
+await tarChild.exited;
+process.stdout.write(`Archived: ${join(out, archive)}\n`);

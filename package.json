@@ -21,7 +21,9 @@
     "test": "bun test",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "build": "bun run tooling/package-release.ts",
-    "smoke": "bun run tooling/smoke-package.ts"
+    "smoke": "bun run tooling/smoke-package.ts",
+    "changelog": "git-cliff -o CHANGELOG.md",
+    "changelog:preview": "git-cliff --unreleased"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
