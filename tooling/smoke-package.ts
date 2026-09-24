@@ -25,7 +25,8 @@ if (existsSync(canonical)) {
   program = canonical;
 } else {
   const unpacked = readdirSync(dist, { withFileTypes: true }).find(
-    (entry) => entry.isDirectory() && (entry.name.startsWith('medha-') || entry.name.startsWith('sage-')),
+    (entry) =>
+      entry.isDirectory() && (entry.name.startsWith('medha-') || entry.name.startsWith('sage-')),
   );
   if (unpacked) {
     const candidate = join(dist, unpacked.name, programName);
@@ -84,7 +85,11 @@ function expect(step: string, ok: boolean, ran?: Ran): void {
 try {
   // 1. Version
   const version = await run(['--version']);
-  expect('prints version', version.code === 0 && /^(?:medha|sage) \d+\.\d+\.\d+/.test(version.out), version);
+  expect(
+    'prints version',
+    version.code === 0 && /^(?:medha|sage) \d+\.\d+\.\d+/.test(version.out),
+    version,
+  );
 
   // 2. Init
   const init = await run(['init']);
