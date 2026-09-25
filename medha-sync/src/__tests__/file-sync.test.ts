@@ -13,7 +13,7 @@ describe('FileSyncAdapter', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'sage-file-sync-test-'));
+    tempDir = mkdtempSync(join(tmpdir(), 'medha-file-sync-test-'));
   });
 
   afterEach(() => {

@@ -1,5 +1,5 @@
 /**
- * sage-sync: SyncPort implementations, snapshot schema migration, and Git-ref / File adapters.
+ * medha-sync: SyncPort implementations, snapshot schema migration, and Git-ref / File adapters.
  */
 
 export * from './file.ts';

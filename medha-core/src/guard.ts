@@ -3,7 +3,7 @@ import { InvalidArgumentError } from './errors.ts';
 /**
  * Guard verification state, model §4.1.
  *
- * The host runs the guard; Sage only stores the result. `kind` is an open string for a
+ * The host runs the guard; Medha only stores the result. `kind` is an open string for a
  * host-declared oracle; `lastOk` is `null` before the first report. A guard failure with
  * `guardKind === 'none'` is impossible — `none` means "no guard".
  */

@@ -1,5 +1,5 @@
 /**
- * Canonical parameters from SAGE-MATHEMATICAL-MODEL.md §9.
+ * Canonical parameters from MEDHA-MATHEMATICAL-MODEL.md §9.
  *
  * The kernel reads model parameters only from this module; nothing else declares a number that
  * shapes trust. These are the "code identifiers" of the model's canonical table.

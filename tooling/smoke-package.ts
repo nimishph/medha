@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Smoke test for the packaged sage binary against the todo-list project.
+ * Smoke test for the packaged medha binary against the todo-list project.
  * Runs init, list, status, drift headlessly, then verifies the MCP server
  * does a full JSON-RPC handshake (initialize -> tools/list) and exits cleanly
  * when stdin closes.
@@ -42,7 +42,7 @@ const executable = program;
 
 // Copy todo-list project or scaffold a todo-list smoke workspace
 const todoListSrc = 'E:/AI projects/todo-list';
-const project = mkdtempSync(join(tmpdir(), 'sage-smoke-todo-list-'));
+const project = mkdtempSync(join(tmpdir(), 'medha-smoke-todo-list-'));
 
 if (existsSync(todoListSrc)) {
   cpSync(join(todoListSrc, 'package.json'), join(project, 'package.json'));

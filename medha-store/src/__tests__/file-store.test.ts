@@ -23,7 +23,7 @@ const registries = {
   anchorKinds: ['week'],
 };
 
-const TMP = mkdtempSync(join(tmpdir(), 'sage-file-'));
+const TMP = mkdtempSync(join(tmpdir(), 'medha-file-'));
 let counter = 0;
 const freshDir = () => join(TMP, `store-${counter++}`);
 afterAll(() => rmSync(TMP, { recursive: true, force: true }));

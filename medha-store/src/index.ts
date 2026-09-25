@@ -1,5 +1,5 @@
 /**
- * sage-store: the `StorePort` contract and its backends.
+ * medha-store: the `StorePort` contract and its backends.
  *
  * One storage contract (spec §7.1) and one shared contract suite that every backend re-runs with
  * no per-backend branch, so any passing backend is interchangeable: memory (ephemeral), the

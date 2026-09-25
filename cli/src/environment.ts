@@ -1,7 +1,7 @@
 import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 
 /**
- * What the `sage` CLI reads from and writes to, so it can be driven by a test as well as a
+ * What the `medha` CLI reads from and writes to, so it can be driven by a test as well as a
  * terminal. Time is never read ambiently — the clock arrives here, keeping a bootstrap run
  * deterministic for a fixed `now`.
  */

@@ -16,7 +16,7 @@ import { statusFor } from './trust.ts';
  */
 
 export interface FoldContext {
-  /** Wall-clock `now` — the only time sage may observe. */
+  /** Wall-clock `now` — the only time medha may observe. */
   readonly now: number;
   readonly kindSpec?: KindSpec | undefined;
 }

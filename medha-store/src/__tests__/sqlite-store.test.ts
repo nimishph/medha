@@ -24,7 +24,7 @@ const registries = {
   anchorKinds: ['week'],
 };
 
-const TMP = mkdtempSync(join(tmpdir(), 'sage-sqlite-'));
+const TMP = mkdtempSync(join(tmpdir(), 'medha-sqlite-'));
 let counter = 0;
 const tracked: SQLiteStore[] = [];
 const freshDb = () => ({ path: join(TMP, `store-${counter++}.db`), registries });

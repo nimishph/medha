@@ -15,7 +15,7 @@ import { DEFAULT_THETA0 } from './thresholds.ts';
 
 export type { Anchor } from './durability.ts';
 
-/** Identifier of a thing Sage holds belief about. Ids are opaque to Sage. */
+/** Identifier of a thing Medha holds belief about. Ids are opaque to Medha. */
 export interface EntityKey {
   /** Project / organisation identity tier. Default ''. */
   readonly namespace: string;

@@ -1,8 +1,8 @@
 import { basename, dirname } from 'node:path';
 import {
+  Medha,
   type MedhaSnapshot,
   type PreflightReport,
-  Sage,
   type SessionOpenResult,
 } from '@cntxt-labs/medha';
 import { InvalidArgumentError, type StorePort, type StoreRegistries } from '@cntxt-labs/medha-core';
@@ -85,7 +85,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
       : effectiveRegistriesFrom(options.config);
 
   const bootstrap = async (store: StorePort, backup?: string): Promise<PreflightReport> => {
-    const engine = new Sage({ store });
+    const engine = new Medha({ store });
     try {
       const session: SessionOpenResult = await engine.open({ now });
       if ('skipped' in session && session.skipped === 'store-corrupt') {

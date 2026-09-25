@@ -10,9 +10,9 @@ import { InvalidArgumentError } from './errors.ts';
  * A miner is host-supplied and inspects an evidence stream (digests, run traces, transcripts)
  * to synthesize candidate proposals.
  *
- * Invariant I & II: A miner never writes state. Sage puts every proposal on probation with
+ * Invariant I & II: A miner never writes state. Medha puts every proposal on probation with
  * provenance and owns promotion policy (including overridable policies like >=2 converging
- * sources). Sage ships no miner.
+ * sources). Medha ships no miner.
  */
 
 export interface Proposal {
@@ -52,7 +52,7 @@ export interface MinerPort<TEvidence = unknown> {
   readonly name: string;
   /**
    * Mine the evidence stream and produce candidate proposals.
-   * Miners never mutate state; Sage handles putting proposals on probation with provenance
+   * Miners never mutate state; Medha handles putting proposals on probation with provenance
    * and evaluating promotion policy.
    */
   mine(

@@ -176,7 +176,7 @@ export class GitRefSyncAdapter implements SyncPort {
 
   async writeSnapshotToRef(
     snapshot: MemorySnapshotV1,
-    message = 'Sage evidential-memory sync',
+    message = 'Medha evidential-memory sync',
     ref = this.ref,
     parents?: string[],
   ): Promise<string> {
@@ -446,7 +446,7 @@ export class GitRefSyncAdapter implements SyncPort {
 
       const commit = await this.writeSnapshotToRef(
         snapshot,
-        'Sage memory push',
+        'Medha memory push',
         this.ref,
         parents.length > 0 ? parents : undefined,
       );

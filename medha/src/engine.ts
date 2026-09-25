@@ -1,5 +1,5 @@
 /**
- * The `Sage` engine facade — read plane (§6.1), write plane (§6.2) and the reference exploration
+ * The `Medha` engine facade — read plane (§6.1), write plane (§6.2) and the reference exploration
  * helper (§6.3), over any `StorePort` backend.
  *
  * Every call takes an injected context (`{ now, seed? }`); time and randomness are never read
@@ -841,8 +841,8 @@ export class Medha {
   }
 
   /**
-   * Record a guard report: the host runs the oracle, Sage stores the result. This changes G (and
-   * hence trust/status) but executes nothing — Sage never runs the guard or the tool itself.
+   * Record a guard report: the host runs the oracle, Medha stores the result. This changes G (and
+   * hence trust/status) but executes nothing — Medha never runs the guard or the tool itself.
    */
   async reportGuard(
     key: EntityKey,
@@ -883,7 +883,7 @@ export class Medha {
 
   /**
    * Record a proposal (§6.2, §7.3). Enters on probation with provenance, evaluated
-   * under Sage's promotion policy. Miners never write state.
+   * under Medha's promotion policy. Miners never write state.
    */
   async propose(
     proposal: Proposal,
@@ -1144,7 +1144,7 @@ export interface EntityDetail {
   readonly recentEpisodes: readonly Episode[];
   /** `provenance` strings from the key's proposal episodes (MinerPort flow). */
   readonly provenance: readonly string[];
-  /** True if any proposal episode for this key was promoted by Sage's promotion policy. */
+  /** True if any proposal episode for this key was promoted by Medha's promotion policy. */
   readonly promoted: boolean;
 }
 

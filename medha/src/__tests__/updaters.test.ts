@@ -13,7 +13,7 @@ import {
 
 /**
  * Weight-updater port (Loom-ujs3.7): built-in math mirrors the legacy expectations (module
- * `sage-weight-updater.test.ts`), the 3-tier registry honours project → user → built-in, and
+ * `medha-weight-updater.test.ts`), the 3-tier registry honours project → user → built-in, and
  * computeWeightSafe falls back to EMA with the fallback always reported.
  */
 

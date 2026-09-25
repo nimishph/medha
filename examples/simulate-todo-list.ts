@@ -1,5 +1,5 @@
 /**
- * Sage on todo-list — evidence log + weight simulations.
+ * Medha on todo-list — evidence log + weight simulations.
  *
  * Re-derives the entity set from the real repo (one entity per source file, evidence from git
  * commit counts) and then shows:
@@ -18,9 +18,9 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const { MemoryStore } = await import('../sage-store/src/memory-store.ts');
-const { Sage } = await import('../sage/src/engine.ts');
-const { buildHint, entityKeyString, foldEpisode, freshState } = await import('../sage-core/src/index.ts');
+const { MemoryStore } = await import('../medha-store/src/memory-store.ts');
+const { Medha } = await import('../medha/src/engine.ts');
+const { buildHint, entityKeyString, foldEpisode, freshState } = await import('../medha-core/src/index.ts');
 
 const REPO = 'E:/AI projects/todo-list';
 const T0 = 1_700_000_000_000;
@@ -57,7 +57,7 @@ function commitsTouching(path: string): number {
 const relPath = (p: string) => p.replace(`${REPO}/`, '').replaceAll('\\', '/');
 
 const store = new MemoryStore({ registries: { kinds: ['file'], signalSpecs: [ADOPTED], anchorKinds: ['week'] } });
-const sage = new Sage({ store });
+const medha = new Medha({ store });
 
 let tick = 0;
 const at = () => T0 + tick++;
@@ -67,15 +67,15 @@ const files = sourceFiles();
 const seedLog: unknown[] = [];
 for (const file of files) {
   const k = keyOf(file);
-  const created = await sage.record(k, 'SKIP', { now: at() }, { ensure: true, note: 'materialised from repo scan' });
+  const created = await medha.record(k, 'SKIP', { now: at() }, { ensure: true, note: 'materialised from repo scan' });
   seedLog.push(created);
-  for (let i = 0; i < commitsTouching(file); i++) await sage.record(k, 'ADOPTED', { now: at() });
+  for (let i = 0; i < commitsTouching(file); i++) await medha.record(k, 'ADOPTED', { now: at() });
 }
 
 console.log('━━━ 1. what the write plane appended (episode log, source of truth) ━━━');
 const episodes = await store.episodes();
 console.log(`${episodes.length} episodes for ${files.length} entities.\n`);
-const show = (ep) => ({
+const show = (ep: any) => ({
   type: ep.type,
   key: entityKeyString(ep.key),
   at: ep.at - T0,
@@ -86,10 +86,10 @@ const show = (ep) => ({
   note: ep.note,
 });
 console.log('first 3 episodes (the SKIP materialisations):');
-for (const ep of episodes.slice(0, 3)) console.log('  ' + JSON.stringify(show(ep)));
+for (const ep of episodes.slice(0, 3)) console.log(`  ${JSON.stringify(show(ep))}`);
 console.log('\nthe last ADOPTED episodes on src/todo.ts (weight = EMA mu after the fold):');
 for (const ep of episodes.filter((e) => e.spec.name === 'ADOPTED' && e.key.id.endsWith('todo.ts')))
-  console.log('  ' + JSON.stringify(show(ep)));
+  console.log(`  ${JSON.stringify(show(ep))}`);
 
 console.log('\n━━━ 2. rebuild-from-log equals the live index (deterministic ─ log is truth) ━━━');
 const rebuilt = await store.rebuild();
@@ -123,15 +123,15 @@ while (buildHint(state, at()).status === 'probation') {
 console.log(`mu climbs from the prior (${ADOPTED.value < live.ema.mu ? 'above' : 'below'}) toward the signal value (EMA α=0.1); status flips to ${buildHint(state, at()).status} once the Wilson lower bound × guard factor clears 0.25.`);
 
 console.log('\n━━━ 4. one-shot what-ifs on the SAME live state (pure, nothing written) ━━━');
-const reveal = (label: string, hint) =>
+const reveal = (label: string, hint: any) =>
   console.log(`  ${label.padEnd(26)} trust ${hint.before.trustScore.toFixed(4)} → ${hint.after.trustScore.toFixed(4)}  mu ${hint.before.temporal.emaWeight.toFixed(4)} → ${hint.after.temporal.emaWeight.toFixed(4)}  ${hint.before.status} → ${hint.after.status}${hint.statusChanged ? '  (STATUS CHANGED)' : ''}`);
-reveal('one more ADOPTED', await sage.simulate(target, 'ADOPTED', { now: at() }));
-reveal('one REJECT_RULE', await sage.simulate(target, 'REJECT_RULE', { now: at() }));
+reveal('one more ADOPTED', await medha.simulate(target, 'ADOPTED', { now: at() }));
+reveal('one REJECT_RULE', await medha.simulate(target, 'REJECT_RULE', { now: at() }));
 const beforeGuard = buildHint((await store.get(target))!, at());
-const afterGuard = await sage.reportGuard(target, { ok: true, kind: 'harness' }, { now: at() });
+const afterGuard = await medha.reportGuard(target, { ok: true, kind: 'harness' }, { now: at() });
 console.log(
-  `  guard report OK (persisted)     trust ${beforeGuard.trustScore.toFixed(4)} → ${afterGuard.trustScore.toFixed(4)}  mu unchanged by guards  ${beforeGuard.status} → ${afterGuard.status}  (host runs guard, Sage only stores the result)`,
+  `  guard report OK (persisted)     trust ${beforeGuard.trustScore.toFixed(4)} → ${afterGuard.trustScore.toFixed(4)}  mu unchanged by guards  ${beforeGuard.status} → ${afterGuard.status}  (host runs guard, Medha only stores the result)`,
 );
-console.log('\nfinal index:', (await sage.list({}, { now: at() }, { limit: 3 })).items
+console.log('\nfinal index:', (await medha.list({}, { now: at() }, { limit: 3 })).items
   .map((h) => `${h.status}/${h.trustScore.toFixed(3)}/${h.key.id.split('/').pop()}`)
   .join('  '));

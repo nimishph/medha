@@ -1,5 +1,5 @@
 /**
- * Typed errors for every sage subsystem.
+ * Typed errors for every medha subsystem.
  *
  * Nothing in the packages throws a bare `Error`. A failure is a `MedhaError` subclass that says
  * what went wrong (`code`), where (`subsystem`), with what inputs (`context`) and because of what
@@ -9,7 +9,7 @@
  * Code convention: `<SUBSYSTEM>_<REASON>` in upper snake case, e.g. `CORE_INVALID_ARGUMENT`.
  */
 
-export type Subsystem = 'core' | 'store' | 'sync' | 'sage' | 'cli';
+export type Subsystem = 'core' | 'store' | 'sync' | 'medha' | 'cli' | 'sage';
 
 /** Structured facts about the failure. Values are serialised defensively by `toJSON`. */
 export type ErrorContext = Readonly<Record<string, unknown>>;
@@ -202,14 +202,14 @@ export class OperationAbortedError extends MedhaError {
   }
 }
 
-/** Code reached a state its author proved impossible. Always a bug in sage, not the input. */
+/** Code reached a state its author proved impossible. Always a bug in medha, not the input. */
 export class InvariantViolationError extends MedhaError {
   readonly code = 'CORE_INVARIANT_VIOLATED';
   readonly subsystem = 'core';
 
   constructor(message: string, init: ErrorInit = {}) {
     super(message, {
-      hint: 'This is a sage defect; please report it with the context below.',
+      hint: 'This is a medha defect; please report it with the context below.',
       ...init,
     });
   }

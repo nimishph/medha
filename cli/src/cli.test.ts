@@ -43,7 +43,7 @@ function fresh(): {
   err: () => string;
   setNow: (now: number) => void;
 } {
-  const root = join(tmpdir(), `sage-cli-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  const root = join(tmpdir(), `medha-cli-${process.pid}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(root, { recursive: true });
   cleanups = [...cleanups, root];
   let out = '';
@@ -78,20 +78,20 @@ function readConfig(home: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as Record<string, unknown>;
 }
 
-describe('sage entrypoint', () => {
+describe('medha entrypoint', () => {
   test('--version prints the manifest version and exits 0', async () => {
     const { env, out } = fresh();
     expect(await runCli(['--version'], env)).toBe(0);
     expect(out()).toBe(`medha ${VERSION}\n`);
   });
 
-  test('bare sage prints usage to stderr and exits 2', async () => {
+  test('bare medha prints usage to stderr and exits 2', async () => {
     const { env, err } = fresh();
     expect(await runCli([], env)).toBe(2);
     expect(err()).toContain('init');
   });
 
-  test('sage help prints usage to stdout and exits 0', async () => {
+  test('medha help prints usage to stdout and exits 0', async () => {
     const { env, out } = fresh();
     expect(await runCli(['help'], env)).toBe(0);
     expect(out()).toContain('USAGE');
@@ -328,7 +328,7 @@ describe('medha init — beyond the happy path', () => {
     expect(parsed.snapshot.episodes).toEqual([]);
 
     const store = new MemoryStore({ registries: parsed.snapshot.registries });
-    const engine = new Sage({ store });
+    const engine = new Medha({ store });
     await engine.restore(parsed.snapshot);
     const report = await engine.preflight({ now: NOW });
     expect(report.status).toBe('ok');
@@ -347,7 +347,7 @@ describe('medha init — beyond the happy path', () => {
 });
 
 // ---------------------------------------------------------------------------------------------
-// Read plane (Loom-ujs3.11.3): seed a real store through storeForConfig + Sage, then drive every
+// Read plane (Loom-ujs3.11.3): seed a real store through storeForConfig + Medha, then drive every
 // read command through the CLI. NOW is fixed, so all rendered timestamps and deltas are golden.
 // ---------------------------------------------------------------------------------------------
 
@@ -357,7 +357,7 @@ const SEED_NOW = NOW + 1000;
 async function seedHome(env: Environment): Promise<void> {
   const config = readConfig(join(env.cwd, '.medha')) as unknown as MedhaConfigV1;
   const store = storeForConfig(config);
-  const engine = new Sage({ store });
+  const engine = new Medha({ store });
   try {
     const key = (id: string): EntityKey => ({ namespace: '', kind: 'rule', id });
     // t1: trusted (9 applies + passing guard), a1: active (5 applies), p1: probation (2 applies),
@@ -386,7 +386,7 @@ async function seedHome(env: Environment): Promise<void> {
   }
 }
 
-describe('sage read plane — list', () => {
+describe('medha read plane — list', () => {
   test('lists all entities with trust, status, drift, and key labels', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);
@@ -451,7 +451,7 @@ describe('sage read plane — list', () => {
   });
 });
 
-describe('sage read plane — show', () => {
+describe('medha read plane — show', () => {
   test('shows trust components and clears thresholds for a known entity', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);
@@ -491,7 +491,7 @@ describe('sage read plane — show', () => {
   });
 });
 
-describe('sage read plane — status and drift', () => {
+describe('medha read plane — status and drift', () => {
   test('status reports preflight, by-status distribution, and drift count', async () => {
     const { env, out } = fresh();
     await runCli(['init'], env);
@@ -535,7 +535,7 @@ describe('sage read plane — status and drift', () => {
   });
 });
 
-describe('sage read plane — params, simulate, explain-threshold', () => {
+describe('medha read plane — params, simulate, explain-threshold', () => {
   test('params lists the canonical catalog read-only', async () => {
     const { env, out } = fresh();
 
@@ -605,7 +605,7 @@ describe('sage read plane — params, simulate, explain-threshold', () => {
   });
 });
 
-describe('sage read plane — home guards', () => {
+describe('medha read plane — home guards', () => {
   test('reads on an uninitialized home fail with CLI_NOT_INITIALIZED (exit 1)', async () => {
     const { env, err } = fresh();
     expect(await runCli(['list'], env)).toBe(1);

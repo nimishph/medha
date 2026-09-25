@@ -23,8 +23,8 @@ import { ConfigFileError, type RegistryDiff } from './errors.ts';
  * (`.medha/` by default, `--home` to override), with `config.json` as the single source of truth for registries and backend/path.
  * One distinct store file per backend: sqlite writes `store.sqlite` (+ `-wal`/`-shm`), the file
  * backend writes `state.jsonl` (+ `state.jsonl.bak`) as a git-trackable, human-diffable document
- * (the FilePolicyStore's `document`/`backup` names), memory persists nothing. Standalone sage
- * never touches `.sutra/`; pass `--home .sutra/sage` to opt in to a host-shared home.
+ * (the FilePolicyStore's `document`/`backup` names), memory persists nothing. Standalone medha
+ * never touches `.sutra/`; pass `--home .sutra/medha` to opt in to a host-shared home.
  */
 
 export type Backend = 'sqlite' | 'file' | 'memory';

@@ -16,8 +16,8 @@ import {
   type EntityDetail,
   type HintDelta,
   type ListFilter,
+  type Medha,
   type PreflightReport,
-  type Sage,
 } from '@cntxt-labs/medha';
 import {
   ACTIVE_THRESHOLD,
@@ -232,7 +232,7 @@ export async function runStatus(
 }
 
 /** Every hint in the store, paged to completion. */
-export async function pageAll(engine: Sage, now: number): Promise<readonly EvidentialHint[]> {
+export async function pageAll(engine: Medha, now: number): Promise<readonly EvidentialHint[]> {
   const hints: EvidentialHint[] = [];
   let cursor: string | undefined;
   for (;;) {

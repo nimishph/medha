@@ -320,7 +320,7 @@ export function renderUpdaterFork(report: UpdaterForkReport): string {
   const lines = [
     `scaffolded custom updater from '${report.name}'`,
     `  path: ${report.path}`,
-    `  load: import and pass via SageOptions { updaters: new UpdaterRegistry({ project: { ... } }) }`,
+    `  load: import and pass via MedhaOptions { updaters: new UpdaterRegistry({ project: { ... } }) }`,
   ];
   return `${lines.join('\n')}\n`;
 }

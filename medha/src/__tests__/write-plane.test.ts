@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { type EntityKey, InvalidArgumentError } from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
-import { Sage } from '../engine.ts';
+import { Medha } from '../engine.ts';
 
 /**
  * Write plane (§6.2) acceptance: every mutation writes an episode; the weight-updater runs through
  * the registry and its EMA fallback is *reported*; override transitions are recorded; a guard
- * report changes G (and trust/status) but Sage executes nothing else.
+ * report changes G (and trust/status) but Medha executes nothing else.
  */
 
 const NOW = 1_700_000_000_000;
@@ -18,7 +18,7 @@ function makeEngine() {
   const store = new MemoryStore({
     registries: { kinds: [HOST_KIND], signalSpecs: [], anchorKinds: ['week'] },
   });
-  return { store, sage: new Sage({ store }) };
+  return { store, medha: new Medha({ store }) };
 }
 
 // Register each custom updater with a distinct weight so the registry route is unambiguous.
@@ -28,8 +28,8 @@ function fixedUpdater(name: string, newWeight: number) {
 
 describe('write plane — record (§6.2)', () => {
   test('writes an episode for every signal and returns the new hint plus updater usage', async () => {
-    const { store, sage } = makeEngine();
-    const out = await sage.record(KEY, 'APPLY', ctx, {
+    const { store, medha } = makeEngine();
+    const out = await medha.record(KEY, 'APPLY', ctx, {
       ensure: true,
       runRef: 'run-1',
       note: 'ran twice in CI',
@@ -51,8 +51,8 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('records a signal with an anchor and returns the growth it produced', async () => {
-    const { sage } = makeEngine();
-    const out = await sage.record(KEY, 'REJECT_RULE', ctx, {
+    const { medha } = makeEngine();
+    const out = await medha.record(KEY, 'REJECT_RULE', ctx, {
       ensure: true,
       anchor: { kind: 'git', value: 'abc1234' },
     });
@@ -65,8 +65,8 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('a signal with an anchor on a success is durable', async () => {
-    const { sage } = makeEngine();
-    const out = await sage.record(KEY, 'APPLY', ctx, {
+    const { medha } = makeEngine();
+    const out = await medha.record(KEY, 'APPLY', ctx, {
       ensure: true,
       anchor: { kind: 'git', value: 'abc1234' },
     });
@@ -74,8 +74,8 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('an un-ensured signal on an unknown id is a logged no-op (spec §5.2)', async () => {
-    const { store, sage } = makeEngine();
-    const out = await sage.record({ namespace: '', kind: 'tool', id: 'never' }, 'APPLY', ctx);
+    const { store, medha } = makeEngine();
+    const out = await medha.record({ namespace: '', kind: 'tool', id: 'never' }, 'APPLY', ctx);
     expect(out.state).toBeUndefined();
     expect(out.updater).toBeUndefined();
     expect(out.hint.status).toBe('probation');
@@ -83,9 +83,9 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('a custom updater is reachable from the write path — not just the four built-ins', async () => {
-    const { store, sage } = makeEngine();
-    sage.updaters.register(fixedUpdater('fixed-delta', 0.99), 'project');
-    const out = await sage.record(KEY, 'APPLY', ctx, { ensure: true, updater: 'fixed-delta' });
+    const { store, medha } = makeEngine();
+    medha.updaters.register(fixedUpdater('fixed-delta', 0.99), 'project');
+    const out = await medha.record(KEY, 'APPLY', ctx, { ensure: true, updater: 'fixed-delta' });
     expect(out.updater?.name).toBe('fixed-delta');
     expect(out.hint.temporal.emaWeight).toBe(0.99);
     expect(out.state?.ema.mu).toBe(0.99);
@@ -96,8 +96,8 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('an updater that throws falls back to EMA and the fallback is reported', async () => {
-    const { sage } = makeEngine();
-    sage.updaters.register(
+    const { medha } = makeEngine();
+    medha.updaters.register(
       {
         name: 'buggy',
         computeWeight: () => {
@@ -106,7 +106,7 @@ describe('write plane — record (§6.2)', () => {
       },
       'project',
     );
-    const out = await sage.record(KEY, 'APPLY', ctx, { ensure: true, updater: 'buggy' });
+    const out = await medha.record(KEY, 'APPLY', ctx, { ensure: true, updater: 'buggy' });
     expect(out.updater?.name).toBe('ema');
     expect(out.updater?.fallbackFrom).toBe('buggy');
     expect(out.updater?.error).toBeDefined();
@@ -114,9 +114,9 @@ describe('write plane — record (§6.2)', () => {
   });
 
   test('the entity-level updater is honoured when record does not override it', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     // Host ships its belief about the strategy per kind; the engine reads state.updater.
-    const out = await sage.record(KEY, 'APPLY', ctx, {
+    const out = await medha.record(KEY, 'APPLY', ctx, {
       ensure: true,
       updater: 'asymmetric-penalty',
     });
@@ -127,12 +127,12 @@ describe('write plane — record (§6.2)', () => {
 
 describe('write plane — reportGuard (§6.2)', () => {
   test('changes G and therefore trust, appending exactly one episode — executes nothing', async () => {
-    const { store, sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', ctx, { ensure: true });
-    await sage.record(KEY, 'APPLY', { now: NOW + 1 });
-    const before = await sage.hints([KEY], { now: NOW + 2 });
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', ctx, { ensure: true });
+    await medha.record(KEY, 'APPLY', { now: NOW + 1 });
+    const before = await medha.hints([KEY], { now: NOW + 2 });
 
-    const after = await sage.reportGuard(KEY, { ok: true, kind: 'harness-ast' }, { now: NOW + 3 });
+    const after = await medha.reportGuard(KEY, { ok: true, kind: 'harness-ast' }, { now: NOW + 3 });
     expect(after.components.guard).toBe(1);
     expect(before.get(entityKey(KEY))?.components.guard).toBe(0.5);
     expect(after.components.guard).toBeGreaterThan(
@@ -146,35 +146,40 @@ describe('write plane — reportGuard (§6.2)', () => {
   });
 
   test('a failed guard zeroes G and quarantines the entity', async () => {
-    const { sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', ctx, { ensure: true });
-    const hint = await sage.reportGuard(KEY, { ok: false, kind: 'harness-ast' }, { now: NOW + 1 });
+    const { medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', ctx, { ensure: true });
+    const hint = await medha.reportGuard(KEY, { ok: false, kind: 'harness-ast' }, { now: NOW + 1 });
     expect(hint.components.guard).toBe(0);
     expect(hint.status).toBe('quarantined');
     expect(hint.trustScore).toBe(0);
   });
 
   test('report.at overrides context.now as the episode clock (determinism preserved)', async () => {
-    const { sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true });
-    const hint = await sage.reportGuard(
+    const { medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true });
+    const hint = await medha.reportGuard(
       KEY,
       { ok: true, at: NOW + 5000, kind: 'harness-ast' },
       { now: NOW },
     );
     expect(hint.asOf).toBe(NOW);
-    expect((await sage.store.episodes())[1]?.at).toBe(NOW + 5000);
+    expect((await medha.store.episodes())[1]?.at).toBe(NOW + 5000);
     expect(hint.components.guard).toBe(1);
   });
 });
 
 describe('write plane — override (§6.2)', () => {
   test('records the override episode and transitions the lifecycle', async () => {
-    const { store, sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', ctx, { ensure: true });
-    await sage.record(KEY, 'APPLY', { now: NOW + 1 });
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', ctx, { ensure: true });
+    await medha.record(KEY, 'APPLY', { now: NOW + 1 });
 
-    const hint = await sage.override(KEY, 'retire', { now: NOW + 2 }, 'deprecated in favour of v2');
+    const hint = await medha.override(
+      KEY,
+      'retire',
+      { now: NOW + 2 },
+      'deprecated in favour of v2',
+    );
     expect(hint).not.toBeNull();
     expect(hint?.status).toBe('retired');
     expect(hint?.trustScore).toBe(0);
@@ -188,17 +193,17 @@ describe('write plane — override (§6.2)', () => {
   });
 
   test('quarantine and restore both transition cleanly', async () => {
-    const { sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', ctx, { ensure: true });
-    const quarantined = await sage.override(KEY, 'quarantine', { now: NOW + 1 }, 'incident');
+    const { medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', ctx, { ensure: true });
+    const quarantined = await medha.override(KEY, 'quarantine', { now: NOW + 1 }, 'incident');
     expect(quarantined?.status).toBe('quarantined');
-    const restored = await sage.override(KEY, 'restore', { now: NOW + 2 }, 'resolved');
+    const restored = await medha.override(KEY, 'restore', { now: NOW + 2 }, 'resolved');
     expect(restored?.status).toBe('probation');
   });
 
   test('an override on an unknown entity is a logged no-op returning null', async () => {
-    const { store, sage } = makeEngine();
-    const result = await sage.override(
+    const { store, medha } = makeEngine();
+    const result = await medha.override(
       { namespace: '', kind: 'tool', id: 'missing' },
       'retire',
       ctx,
@@ -208,16 +213,16 @@ describe('write plane — override (§6.2)', () => {
     const log = await store.episodes();
     expect(log).toHaveLength(1);
     expect(log[0]).toMatchObject({ type: 'override' });
-    expect(await sage.store.get({ namespace: '', kind: 'tool', id: 'missing' })).toBeUndefined();
+    expect(await medha.store.get({ namespace: '', kind: 'tool', id: 'missing' })).toBeUndefined();
   });
 });
 
 describe('write plane — authorship and permissions (§6.2)', () => {
   test('records author provenance on signal, guard, and override episodes', async () => {
-    const { store, sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:claude-3-7' });
-    await sage.reportGuard(KEY, { ok: true, author: 'reviewer:bob' }, { now: NOW + 1 });
-    await sage.override(KEY, 'retire', { now: NOW + 2 }, 'obsolete', 'user:admin');
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:claude-3-7' });
+    await medha.reportGuard(KEY, { ok: true, author: 'reviewer:bob' }, { now: NOW + 1 });
+    await medha.override(KEY, 'retire', { now: NOW + 2 }, 'obsolete', 'user:admin');
 
     const log = await store.episodes();
     expect(log[0]?.author).toBe('agent:claude-3-7');
@@ -227,34 +232,39 @@ describe('write plane — authorship and permissions (§6.2)', () => {
 
   test('enforces write permissions: readOnly and requireAuthor', async () => {
     const { store } = makeEngine();
-    const readOnlySage = new Sage({
+    const readOnlyMedha = new Medha({
       store,
       permissions: { readOnly: true },
     });
     expect(() =>
-      readOnlySage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' }),
+      readOnlyMedha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' }),
     ).toThrow();
 
-    const requireAuthorSage = new Sage({
+    const requireAuthorMedha = new Medha({
       store,
       permissions: { requireAuthor: true },
     });
-    expect(() => requireAuthorSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true })).toThrow();
+    expect(() => requireAuthorMedha.record(KEY, 'APPLY', { now: NOW }, { ensure: true })).toThrow();
     // With author, it succeeds
-    await requireAuthorSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    await requireAuthorMedha.record(
+      KEY,
+      'APPLY',
+      { now: NOW },
+      { ensure: true, author: 'agent:1' },
+    );
   });
 
   test('enforces allowedAuthors list', async () => {
     const { store } = makeEngine();
-    const authSage = new Sage({
+    const authMedha = new Medha({
       store,
       permissions: { allowedAuthors: ['agent:trusted', 'admin'] },
     });
     expect(() =>
-      authSage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:rogue' }),
+      authMedha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:rogue' }),
     ).toThrow();
 
-    const ok = await authSage.record(
+    const ok = await authMedha.record(
       KEY,
       'APPLY',
       { now: NOW },
@@ -266,17 +276,17 @@ describe('write plane — authorship and permissions (§6.2)', () => {
 
 describe('write plane — retract and removeEpisode (§6.2)', () => {
   test('retract masks bad episode and updates entity projection', async () => {
-    const { store, sage } = makeEngine();
+    const { store, medha } = makeEngine();
     // Trial 1: success
-    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
     // Trial 2: spurious success recorded in error
-    await sage.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
+    await medha.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
 
     let state = await store.get(KEY);
     expect(state?.evidence.k).toBe(2);
 
     // Retract episode 1
-    const ret = await sage.retract(1, 'spurious accept', { now: NOW + 2000 }, { author: 'admin' });
+    const ret = await medha.retract(1, 'spurious accept', { now: NOW + 2000 }, { author: 'admin' });
     expect(ret.episode.type).toBe('retract');
 
     state = await store.get(KEY);
@@ -285,14 +295,14 @@ describe('write plane — retract and removeEpisode (§6.2)', () => {
   });
 
   test('removeEpisode physically removes bad episode from log and rebuilds', async () => {
-    const { store, sage } = makeEngine();
-    await sage.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
-    await sage.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    await medha.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
 
     const before = await store.episodes();
     expect(before).toHaveLength(2);
 
-    const res = await sage.removeEpisode(1);
+    const res = await medha.removeEpisode(1);
     expect(res.removed).toBe(true);
     expect(res.remainingCount).toBe(1);
 

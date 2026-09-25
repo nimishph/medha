@@ -14,11 +14,11 @@ describe('GitRefSyncAdapter', () => {
   let tempRepo: string;
 
   beforeEach(() => {
-    tempRepo = mkdtempSync(join(tmpdir(), 'sage-git-sync-test-'));
+    tempRepo = mkdtempSync(join(tmpdir(), 'medha-git-sync-test-'));
     // Initialize a real git repository
     execFileSync('git', ['init'], { cwd: tempRepo });
-    execFileSync('git', ['config', 'user.name', 'Sage Test'], { cwd: tempRepo });
-    execFileSync('git', ['config', 'user.email', 'sage@test.local'], { cwd: tempRepo });
+    execFileSync('git', ['config', 'user.name', 'Medha Test'], { cwd: tempRepo });
+    execFileSync('git', ['config', 'user.email', 'medha@test.local'], { cwd: tempRepo });
     // Initial empty commit so HEAD exists
     execFileSync('git', ['commit', '--allow-empty', '-m', 'initial commit'], { cwd: tempRepo });
   });
@@ -134,10 +134,10 @@ describe('GitRefSyncAdapter', () => {
 
   it('pulls from a path remote without invalid refspec errors', async () => {
     // Create remote repo
-    const remoteRepo = mkdtempSync(join(tmpdir(), 'sage-remote-repo-'));
+    const remoteRepo = mkdtempSync(join(tmpdir(), 'medha-remote-repo-'));
     try {
       execFileSync('git', ['init'], { cwd: remoteRepo });
-      execFileSync('git', ['config', 'user.name', 'Sage Remote'], { cwd: remoteRepo });
+      execFileSync('git', ['config', 'user.name', 'Medha Remote'], { cwd: remoteRepo });
       execFileSync('git', ['config', 'user.email', 'remote@test.local'], { cwd: remoteRepo });
       execFileSync('git', ['commit', '--allow-empty', '-m', 'remote init'], { cwd: remoteRepo });
 
@@ -179,7 +179,7 @@ describe('GitRefSyncAdapter', () => {
 
   it('propagates push failure instead of claiming success on divergence', async () => {
     // Create a remote repo
-    const remoteRepo = mkdtempSync(join(tmpdir(), 'sage-diverge-remote-'));
+    const remoteRepo = mkdtempSync(join(tmpdir(), 'medha-diverge-remote-'));
     try {
       execFileSync('git', ['init', '--bare'], { cwd: remoteRepo });
       execFileSync('git', ['remote', 'add', 'origin', remoteRepo], { cwd: tempRepo });
@@ -199,10 +199,10 @@ describe('GitRefSyncAdapter', () => {
       expect(firstPush.ok).toBe(true);
 
       // Now create a divergent commit directly on the bare remote ref
-      const secondRepo = mkdtempSync(join(tmpdir(), 'sage-diverge-second-'));
+      const secondRepo = mkdtempSync(join(tmpdir(), 'medha-diverge-second-'));
       try {
         execFileSync('git', ['clone', remoteRepo, secondRepo], { cwd: tmpdir() });
-        execFileSync('git', ['config', 'user.name', 'Sage Second'], { cwd: secondRepo });
+        execFileSync('git', ['config', 'user.name', 'Medha Second'], { cwd: secondRepo });
         execFileSync('git', ['config', 'user.email', 'second@test.local'], { cwd: secondRepo });
 
         const store2 = createTestStore();

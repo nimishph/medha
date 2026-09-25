@@ -90,7 +90,7 @@ export interface ProposalEpisode extends BaseEpisode {
   readonly evidenceRefs?: readonly string[] | undefined;
   /** Optional anchor observed at the time of proposal. */
   readonly anchor?: Anchor | undefined;
-  /** Whether this proposal was promoted by Sage's promotion policy. */
+  /** Whether this proposal was promoted by Medha's promotion policy. */
   readonly promoted?: boolean | undefined;
   /** Reason associated with the promotion decision. */
   readonly promotionReason?: string | undefined;

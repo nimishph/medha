@@ -10,7 +10,7 @@
  *     entity and reports the folded range — the recomputability loss the spec requires to be
  *     named, not hidden.
  *
- * The `Sage` engine orchestrates the store around these, appends one episode per decision and
+ * The `Medha` engine orchestrates the store around these, appends one episode per decision and
  * persists a last-sweep marker, so a sweep that runs is never silent and one that is skipped says
  * why.
  */
@@ -299,7 +299,7 @@ export interface CompactedLog {
 /**
  * Fold the log prefix strictly older than `cutoffAt` into one `BaselineEpisode` per entity that
  * still has a state there, keeping the log contiguous from seq 0. A baseline reproduces the
- * folded prefix, so the result is fold-equivalent — the `Sage` engine verifies that against the
+ * folded prefix, so the result is fold-equivalent — the `Medha` engine verifies that against the
  * live store rather than trusting it.
  */
 export function compactPrefix(log: readonly Episode[], cutoffAt: number): CompactedLog {

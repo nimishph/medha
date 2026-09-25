@@ -7,8 +7,8 @@ import { statusFrom, type TrustComponents, trustOf } from './trust.ts';
 /**
  * The read-plane record for one entity, library spec §5.4.
  *
- * `SageRoutingHint.recommendation` is intentionally absent: a recommendation reads as a command,
- * and Sage is a hinter, not a decider (model §1, §2). The consumer compares `trustScore` (or
+ * `EvidentialHint.recommendation` is intentionally absent: a recommendation reads as a command,
+ * and Medha is a hinter, not a decider (model §1, §2). The consumer compares `trustScore` (or
  * `clearsThreshold`) against its own break-even.
  */
 

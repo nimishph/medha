@@ -14,7 +14,7 @@ import {
   type Proposal,
 } from '@cntxt-labs/medha-core';
 import { FilePolicyStore, MemoryStore, SQLiteStore } from '@cntxt-labs/medha-store';
-import { Sage } from '../engine.ts';
+import { Medha } from '../engine.ts';
 
 const NOW = 1_700_000_000_000;
 const CTX: Context = { now: NOW, seed: 42 };
@@ -81,13 +81,13 @@ function makeEngine(
       anchorKinds: ['git-head', 'week'],
     },
   });
-  const sage = new Sage({ store, promotionPolicy: options.promotionPolicy });
-  return { store, sage };
+  const medha = new Medha({ store, promotionPolicy: options.promotionPolicy });
+  return { store, medha };
 }
 
 describe('MinerPort contract (§7.3)', () => {
   test('fake miner mines from an Iterable evidence stream', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const miner = new FakeMiner('cluster-miner');
 
     const evidence: TestEvidence[] = [
@@ -96,7 +96,7 @@ describe('MinerPort contract (§7.3)', () => {
       { id: '3', category: 'cache', pattern: 'lru-bust', runId: 'run-103', commitSha: 'sha-b' },
     ];
 
-    const mined = await sage.mine(evidence, miner, CTX);
+    const mined = await medha.mine(evidence, miner, CTX);
 
     expect(miner.mineCallCount).toBe(1);
     expect(mined).toHaveLength(2);
@@ -111,7 +111,7 @@ describe('MinerPort contract (§7.3)', () => {
   });
 
   test('fake miner mines from an AsyncIterable stream', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const miner = new FakeMiner('async-miner');
 
     async function* evidenceStream() {
@@ -119,7 +119,7 @@ describe('MinerPort contract (§7.3)', () => {
       yield { id: '2', category: 'db', pattern: 'wal-lock', runId: 'run-202' };
     }
 
-    const mined = await sage.mine(evidenceStream(), miner, CTX);
+    const mined = await medha.mine(evidenceStream(), miner, CTX);
 
     expect(mined).toHaveLength(1);
     expect(mined[0]?.id).toBe('recipe-wal-lock');
@@ -127,8 +127,8 @@ describe('MinerPort contract (§7.3)', () => {
     expect(mined[0]?.outcome.state?.evidence.n).toBe(0);
   });
 
-  test('miners never write state directly; Sage owns episode logging (Invariant I)', async () => {
-    const { store, sage } = makeEngine();
+  test('miners never write state directly; Medha owns episode logging (Invariant I)', async () => {
+    const { store, medha } = makeEngine();
     const miner = new FakeMiner('non-agency-miner');
 
     const evidence: TestEvidence[] = [
@@ -139,7 +139,7 @@ describe('MinerPort contract (§7.3)', () => {
     const episodesBefore = await store.episodes();
     expect(episodesBefore).toHaveLength(0);
 
-    await sage.mine(evidence, miner, CTX);
+    await medha.mine(evidence, miner, CTX);
 
     const episodesAfter = await store.episodes();
     expect(episodesAfter).toHaveLength(1);
@@ -151,10 +151,10 @@ describe('MinerPort contract (§7.3)', () => {
 
 describe('propose flow and read-plane provenance (§6.1, §6.2)', () => {
   test('propose puts proposal on probation with provenance', async () => {
-    const { store, sage } = makeEngine();
+    const { store, medha } = makeEngine();
     const key: EntityKey = { namespace: '', kind: 'recipe', id: 'singleton-cleanup' };
 
-    const outcome = await sage.propose(
+    const outcome = await medha.propose(
       {
         key,
         description: 'Clean singletons between tests',
@@ -177,10 +177,10 @@ describe('propose flow and read-plane provenance (§6.1, §6.2)', () => {
   });
 
   test('provenance is visible in show() for single and multiple converging proposals', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const key: EntityKey = { namespace: '', kind: 'recipe', id: 'auth-cache' };
 
-    await sage.propose(
+    await medha.propose(
       {
         key,
         provenance: 'miner-alpha',
@@ -190,13 +190,13 @@ describe('propose flow and read-plane provenance (§6.1, §6.2)', () => {
       { now: NOW },
     );
 
-    let detail = await sage.show(key, { now: NOW + 10 });
+    let detail = await medha.show(key, { now: NOW + 10 });
     expect(detail.known).toBe(true);
     expect(detail.provenance).toEqual(['miner-alpha']);
     expect(detail.promoted).toBe(false);
     expect(detail.recentEpisodes).toHaveLength(1);
 
-    await sage.propose(
+    await medha.propose(
       {
         key,
         provenance: 'miner-beta',
@@ -206,7 +206,7 @@ describe('propose flow and read-plane provenance (§6.1, §6.2)', () => {
       { now: NOW + 20 },
     );
 
-    detail = await sage.show(key, { now: NOW + 30 });
+    detail = await medha.show(key, { now: NOW + 30 });
     expect(detail.known).toBe(true);
     expect(detail.provenance).toContain('miner-alpha');
     expect(detail.provenance).toContain('miner-beta');
@@ -220,23 +220,23 @@ describe('propose flow and read-plane provenance (§6.1, §6.2)', () => {
 
 describe('promotion policy — overridable and tested (§7.3)', () => {
   test('default promotion policy requires >= 2 converging sources', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const key: EntityKey = { namespace: '', kind: 'recipe', id: 'dedup-check' };
 
-    const outcome1 = await sage.propose(
+    const outcome1 = await medha.propose(
       { key, provenance: 'source-1', evidenceRefs: ['e1'] },
       { now: NOW },
     );
     expect(outcome1.promoted).toBe(false);
     expect(outcome1.promotionReason).toContain('Requires >= 2 converging sources; saw 1');
 
-    const outcome1Repeat = await sage.propose(
+    const outcome1Repeat = await medha.propose(
       { key, provenance: 'source-1', evidenceRefs: ['e2'] },
       { now: NOW + 1 },
     );
     expect(outcome1Repeat.promoted).toBe(false);
 
-    const outcome2 = await sage.propose(
+    const outcome2 = await medha.propose(
       { key, provenance: 'source-2', evidenceRefs: ['e3'] },
       { now: NOW + 2 },
     );
@@ -245,18 +245,18 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
   });
 
   test('promotion policy can be overridden at engine constructor level', async () => {
-    const { sage } = makeEngine({
+    const { medha } = makeEngine({
       promotionPolicy: convergingSourcesPolicy({ minSources: 3 }),
     });
     const key: EntityKey = { namespace: '', kind: 'rule', id: 'strict-nulls' };
 
-    const p1 = await sage.propose({ key, provenance: 's1' }, { now: NOW });
+    const p1 = await medha.propose({ key, provenance: 's1' }, { now: NOW });
     expect(p1.promoted).toBe(false);
 
-    const p2 = await sage.propose({ key, provenance: 's2' }, { now: NOW + 1 });
+    const p2 = await medha.propose({ key, provenance: 's2' }, { now: NOW + 1 });
     expect(p2.promoted).toBe(false);
 
-    const p3 = await sage.propose({ key, provenance: 's3' }, { now: NOW + 2 });
+    const p3 = await medha.propose({ key, provenance: 's3' }, { now: NOW + 2 });
     expect(p3.promoted).toBe(true);
     expect(p3.promotionReason).toContain('3 converging sources');
   });
@@ -278,10 +278,10 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
   });
 
   test('promotion policy can be overridden per-call on propose()', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const key: EntityKey = { namespace: '', kind: 'tool', id: 'fast-formatter' };
 
-    const outcome = await sage.propose({ key, provenance: 'one-shot-source' }, CTX, {
+    const outcome = await medha.propose({ key, provenance: 'one-shot-source' }, CTX, {
       promotionPolicy: alwaysPromotePolicy(),
     });
 
@@ -290,14 +290,14 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
   });
 
   test('promotion policy can be overridden per-call on mine()', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const miner = new FakeMiner('single-pass-miner');
 
     const evidence: TestEvidence[] = [
       { id: '1', category: 'lint', pattern: 'no-eval', runId: 'run-1' },
     ];
 
-    const mined = await sage.mine(evidence, miner, CTX, {
+    const mined = await medha.mine(evidence, miner, CTX, {
       promotionPolicy: alwaysPromotePolicy(),
     });
 
@@ -306,18 +306,18 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
   });
 
   test('custom evidence-refs promotion policy', async () => {
-    const { sage } = makeEngine({
+    const { medha } = makeEngine({
       promotionPolicy: convergingEvidenceRefsPolicy({ minRefs: 3 }),
     });
     const key: EntityKey = { namespace: '', kind: 'recipe', id: 'socket-drain' };
 
-    const o1 = await sage.propose(
+    const o1 = await medha.propose(
       { key, provenance: 'm1', evidenceRefs: ['ref-1', 'ref-2'] },
       { now: NOW },
     );
     expect(o1.promoted).toBe(false);
 
-    const o2 = await sage.propose(
+    const o2 = await medha.propose(
       { key, provenance: 'm1', evidenceRefs: ['ref-3'] },
       { now: NOW + 1 },
     );
@@ -334,14 +334,14 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
       };
     };
 
-    const { sage } = makeEngine({ promotionPolicy: customPolicy });
+    const { medha } = makeEngine({ promotionPolicy: customPolicy });
     const key1: EntityKey = { namespace: '', kind: 'rule', id: 'rule-normal' };
     const key2: EntityKey = { namespace: '', kind: 'rule', id: 'rule-critical' };
 
-    const o1 = await sage.propose({ key: key1, description: 'standard rule' }, CTX);
+    const o1 = await medha.propose({ key: key1, description: 'standard rule' }, CTX);
     expect(o1.promoted).toBe(false);
 
-    const o2 = await sage.propose({ key: key2, description: 'CRITICAL security patch' }, CTX);
+    const o2 = await medha.propose({ key: key2, description: 'CRITICAL security patch' }, CTX);
     expect(o2.promoted).toBe(true);
     expect(o2.promotionReason).toBe('Critical priority proposal');
   });
@@ -349,40 +349,40 @@ describe('promotion policy — overridable and tested (§7.3)', () => {
 
 describe('validation and error handling', () => {
   test('unknown kind throws typed error naming known kinds', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     await expect(
-      sage.propose({ kind: 'alien-kind', id: 'x', provenance: 'm1' }, CTX),
+      medha.propose({ kind: 'alien-kind', id: 'x', provenance: 'm1' }, CTX),
     ).rejects.toThrow();
   });
 
   test('empty id or provenance throws InvalidArgumentError', async () => {
-    const { sage } = makeEngine();
-    await expect(sage.propose({ kind: 'recipe', id: '', provenance: 'm1' }, CTX)).rejects.toThrow(
+    const { medha } = makeEngine();
+    await expect(medha.propose({ kind: 'recipe', id: '', provenance: 'm1' }, CTX)).rejects.toThrow(
       InvalidArgumentError,
     );
 
-    await expect(sage.propose({ kind: 'recipe', id: 'x', provenance: '   ' }, CTX)).rejects.toThrow(
-      InvalidArgumentError,
-    );
+    await expect(
+      medha.propose({ kind: 'recipe', id: 'x', provenance: '   ' }, CTX),
+    ).rejects.toThrow(InvalidArgumentError);
   });
 
   test('invalid theta0 throws InvalidArgumentError', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     await expect(
-      sage.propose({ kind: 'recipe', id: 'x', theta0: 1.5, provenance: 'm1' }, CTX),
+      medha.propose({ kind: 'recipe', id: 'x', theta0: 1.5, provenance: 'm1' }, CTX),
     ).rejects.toThrow(InvalidArgumentError);
   });
 
   test('invalid miner name throws InvalidArgumentError', async () => {
-    const { sage } = makeEngine();
+    const { medha } = makeEngine();
     const badMiner = new FakeMiner('   ');
-    await expect(sage.mine([], badMiner, CTX)).rejects.toThrow(InvalidArgumentError);
+    await expect(medha.mine([], badMiner, CTX)).rejects.toThrow(InvalidArgumentError);
   });
 });
 
 describe('storage backend parity for mining flow', () => {
   test('mining flow works identically on FileStore and SQLiteStore', async () => {
-    const tmp = mkdtempSync(join(tmpdir(), 'sage-miner-parity-'));
+    const tmp = mkdtempSync(join(tmpdir(), 'medha-miner-parity-'));
     try {
       const fileStore = new FilePolicyStore({
         dir: join(tmp, 'file-store'),
@@ -394,18 +394,18 @@ describe('storage backend parity for mining flow', () => {
       });
 
       for (const store of [fileStore, sqliteStore]) {
-        const sage = new Sage({ store });
+        const medha = new Medha({ store });
         const miner = new FakeMiner(`miner-${store.name}`);
         const evidence: TestEvidence[] = [
           { id: '1', category: 'c', pattern: 'p1', runId: 'r1' },
           { id: '2', category: 'c', pattern: 'p1', runId: 'r2' },
         ];
 
-        const mined = await sage.mine(evidence, miner, CTX);
+        const mined = await medha.mine(evidence, miner, CTX);
         expect(mined).toHaveLength(1);
         expect(mined[0]?.id).toBe('recipe-p1');
 
-        const detail = await sage.show({ namespace: '', kind: 'recipe', id: 'recipe-p1' }, CTX);
+        const detail = await medha.show({ namespace: '', kind: 'recipe', id: 'recipe-p1' }, CTX);
         expect(detail.known).toBe(true);
         expect(detail.provenance).toEqual([`miner-${store.name}`]);
         await store.close();

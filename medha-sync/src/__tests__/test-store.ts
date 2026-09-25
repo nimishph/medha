@@ -1,5 +1,5 @@
 /**
- * Minimal in-memory StorePort for sage-sync unit tests (§7.1, §7.2).
+ * Minimal in-memory StorePort for medha-sync unit tests (§7.1, §7.2).
  * Conforms to @cntxt-labs/medha-core StorePort without violating dependency boundaries.
  */
 
