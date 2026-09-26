@@ -1,16 +1,52 @@
 {
   "name": "@cntxt-labs/medha-cli",
   "version": "0.4.0",
-  "private": true,
+  "description": "Evidential memory for rules, recipes and tools: records what happened and returns trust hints. CLI and MCP server.",
+  "keywords": [
+    "mcp",
+    "agent-memory",
+    "trust",
+    "evidence",
+    "ai-agents",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "nimishph",
+    "url": "https://github.com/nimishph"
+  },
+  "homepage": "https://github.com/nimishph/medha#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimishph/medha.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nimishph/medha/issues"
+  },
   "type": "module",
-  "description": "The medha command line: engine bootstrap (init) today, the read/write/maintenance planes as they land.",
   "bin": {
     "medha": "bin/medha.cjs"
   },
-  "exports": {
-    ".": "./src/index.ts"
+  "files": [
+    "bin",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
-  "dependencies": {
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@cntxt-labs/medha-linux-x64": "0.4.0",
+    "@cntxt-labs/medha-linux-arm64": "0.4.0",
+    "@cntxt-labs/medha-darwin-arm64": "0.4.0",
+    "@cntxt-labs/medha-darwin-x64": "0.4.0",
+    "@cntxt-labs/medha-win32-x64": "0.4.0"
+  },
+  "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@cntxt-labs/medha": "workspace:*",
     "@cntxt-labs/medha-core": "workspace:*",
@@ -18,7 +54,6 @@
     "citty": "^0.2.2",
     "zod": "^4.6.5"
   },
-  "license": "MIT",
   "scripts": {
     "build": "bun run ../tooling/package-release.ts"
   }

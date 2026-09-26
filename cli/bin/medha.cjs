@@ -1,53 +1,40 @@
 #!/usr/bin/env node
 'use strict';
+// The command a package manager links onto the PATH. The program itself is a compiled binary in
+// a per-platform package (`@cntxt-labs/medha-<os>-<cpu>`), installed alongside this one because
+// this package lists them all as optional dependencies and a package manager keeps only the one
+// that matches the machine. This file finds it and runs it.
 
 const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
 const path = require('node:path');
 
-const SUPPORTED = ['linux-x64', 'linux-arm64', 'darwin-arm64', 'win32-x64'];
+const SUPPORTED = ['linux-x64', 'linux-arm64', 'darwin-arm64', 'darwin-x64', 'win32-x64'];
 
+/** The package that holds the program for a platform, or `undefined` when there is none. */
 function platformPackage(platform, cpu) {
   const key = `${platform}-${cpu}`;
   return SUPPORTED.includes(key) ? `@cntxt-labs/medha-${key}` : undefined;
 }
 
+/** Where the installed program is, or why it cannot be found. */
 function locate(platform, cpu, resolve) {
   const name = platformPackage(platform, cpu);
+  if (name === undefined) {
+    return {
+      problem: `medha has no build for ${platform} on ${cpu}. It runs on: ${SUPPORTED.join(', ')}.`,
+    };
+  }
   const file = platform === 'win32' ? 'medha.exe' : 'medha';
-
-  // 1. Try local dist folders (monorepo / checkout)
-  const localCandidates = [
-    path.resolve(__dirname, '..', '..', 'dist', 'medha', file),
-    path.resolve(__dirname, '..', 'dist', file),
-    path.resolve(__dirname, file),
-  ];
-  for (const candidate of localCandidates) {
-    if (fs.existsSync(candidate)) {
-      return { program: candidate };
-    }
+  try {
+    return { program: resolve(`${name}/bin/${file}`) };
+  } catch (failure) {
+    return {
+      problem:
+        `The ${name} package is not installed (${failure.code ?? failure.message}). ` +
+        'It is an optional dependency of @cntxt-labs/medha-cli: reinstall without --no-optional, or ' +
+        `install ${name} directly.`,
+    };
   }
-
-  // 2. Try installed optional dependency package
-  if (name !== undefined) {
-    try {
-      return { program: resolve(`${name}/bin/${file}`) };
-    } catch (failure) {
-      return {
-        problem:
-          `The ${name} package is not installed (${failure.code ?? failure.mesmedha}). ` +
-          'It is an optional dependency of @cntxt-labs/medha: reinstall without --no-optional, or ' +
-          `install ${name} directly.`,
-      };
-    }
-  }
-
-  return {
-    problem:
-      `medha binary not found for ${platform}-${cpu}. ` +
-      `Run 'bun run build' in the medha repo to produce dist/medha/${file}, ` +
-      `or install the platform package ${name ?? ''}.`,
-  };
 }
 
 function main() {
@@ -63,7 +50,7 @@ function main() {
   });
   if (child.error) {
     process.stderr.write(
-      `medha: could not start ${path.basename(found.program)}: ${child.error.mesmedha}\n`,
+      `medha: could not start ${path.basename(found.program)}: ${child.error.message}\n`,
     );
     process.exitCode = 1;
     return;

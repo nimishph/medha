@@ -1,24 +1,153 @@
 # medha
 
-Evidential memory for rules, recipes and tools. Medha records what has actually happened —
-uses, rejections, guard results — and returns **trust hints**. It never decides an action itself.
+**Evidential memory for the rules, recipes and tools your agents rely on.**
 
-## Quick start
+Agents accumulate rules ("never leave `console.log` in a commit"), recipes ("how we run migrations")
+and tools (an MCP server, a linter). Some of them help. Some are stale, wrong, or quietly ignored.
+Most memory systems store *what was said* and treat all of it as equally true.
 
-Download the release binary for your platform (a single self-contained executable), then:
+Medha stores *what happened*: each time something was applied, rejected, skipped, or checked by a
+guard. From that record it computes a **trust hint** for every entity. It reports evidence and never
+decides an action; you and your agent decide what to do with it.
+
+- **Earned, not asserted.** A new rule starts on probation. Usage alone never makes it trusted; a
+  passing guard is required.
+- **Honest about small samples.** Trust uses a Wilson lower bound, so 2 successes out of 2 is not
+  treated like 200 out of 200.
+- **Explainable.** Every number can be traced: `medha show` splits trust into its components and
+  `medha explain-threshold` says which bars were cleared and which were not.
+- **Safe to try.** `medha simulate` shows what a signal would do without recording anything.
+- **One binary, no server.** CLI and MCP server in a single executable. State is an append-only
+  episode log you can back up, compact, sync, or replay.
+
+## Install
 
 ```sh
-medha init                                        # creates .medha/ in the current directory
-medha propose --id no-console-log --source review # a new rule enters on probation
-medha record  --id no-console-log --signal APPLY --ensure
-medha guard   --id no-console-log --ok --guard review
-medha show    --id no-console-log                 # trust, status, recent episodes
-medha explain-threshold --id no-console-log       # which thresholds clear, and why
+npm install -g @cntxt-labs/medha-cli      # or: bun add -g, pnpm add -g, npx @cntxt-labs/medha-cli
+medha --version
+```
+
+It is a single self-contained program: no Node, Bun or Python is needed to run it. Linux, macOS (Apple silicon and Intel) and Windows are supported.
+
+Prefer no package manager? Download the archive for your platform from the GitHub release, unpack it
+and put `medha` (or `medha.exe`) on your `PATH`.
+
+## A first session
+
+```sh
+medha init                                         # creates .medha/ in the current directory
+medha propose --id no-console-log --source review  # a candidate rule enters on probation
+```
+```
+medha: proposed rule/no-console-log (not promoted)
+  reason:   Requires >= 2 converging sources; saw 1 (review)
+  trust:    0.000  status: probation
+```
+
+Promotion needs agreement from at least two independent sources. Now record what happens as the
+rule is used:
+
+```sh
+medha record --id no-console-log --signal APPLY --ensure    # used, and it worked
+medha record --id no-console-log --signal APPLY
+medha guard  --id no-console-log --ok --guard review        # a check that the rule still holds
+```
+```
+medha: recorded APPLY on rule/no-console-log   trust: 0.103  status: probation
+medha: recorded APPLY on rule/no-console-log   trust: 0.171  status: probation
+medha: guard passed on rule/no-console-log     trust: 0.378  status: active
+```
+
+See why it is where it is:
+
+```sh
+medha show --id no-console-log
+```
+```
+medha: rule/no-console-log (known)
+  status:   active
+  trust:    0.378  (wilson 0.342, guard 1.000, recency 1.000, durability 1.104, ceiling 1.000)
+  evidence: 2/2 successes, wilson lower bound 0.342
+  temporal: ema 0.595, drift no (delta 0.095)
+  clears:   trusted no, active yes
+```
+```sh
+medha explain-threshold --id no-console-log
+```
+```
+  trusted: not met
+    no     trust 0.378 >= 0.6
+    no     uses 2 >= 5
+  active: MET
+    ok     trust 0.378 >= 0.25
+```
+
+Before recording something consequential, preview it:
+
+```sh
+medha simulate --id no-console-log --signal REJECT_RULE
+```
+```
+medha: simulate REJECT_RULE on rule/no-console-log
+  trust:    0.378 -> 0.229 (delta -0.149)
+  status:   active -> probation (changed)
 ```
 
 Every command accepts `--json`. `medha --help` and `medha <command> --help` list all options.
 
-## Use from an agent (MCP)
+## Concepts
+
+**Entity.** The thing being trusted, addressed by `namespace` (default empty), `kind` and `id`. The
+built-in kinds are `rule`, `recipe` and `tool`; you can register your own.
+
+**Signal.** One piece of evidence about an entity.
+
+| Signal | Meaning |
+|---|---|
+| `APPLY` | It was used and it worked. |
+| `REJECT_RULE` | A human rejected it. |
+| `SKIP` | It did not apply. Neutral: it never counts for or against. |
+
+**Guard.** An independent check that the entity is still correct (a test, a linter run, a review).
+Report the result with `medha guard --ok` or `--fail`.
+
+**Episode.** Every proposal, signal and guard result is an immutable entry in an append-only log.
+Entity state is a fold over that log, so it can always be rebuilt, audited, or corrected
+(`medha retract`, `medha remove-episode`).
+
+### How trust is computed
+
+```
+trust = min( ceiling,  wilson × recency × durability × guard )
+```
+
+| Component | What it does |
+|---|---|
+| **Wilson lower bound** | A conservative estimate of the true success rate given `k` successes in `n` trials. Small samples score low. |
+| **Recency** | Evidence decays with a 45-day half-life, down to a floor, so old wins fade. |
+| **Durability** | A bonus (up to 1.5×) for evidence that has held up over time. |
+| **Guard** | Scales trust by the outcome of guard results. |
+| **Ceiling** | Caps trust at **0.5 while no guard has passed**, so usage alone can never reach `trusted`. |
+
+Separately, an exponential moving average watches for **drift**: entities whose recent behaviour
+diverges from their baseline show up in `medha drift`.
+
+`medha params` prints every constant and threshold.
+
+### Lifecycle
+
+```
+probation ──► active ──► trusted
+    │            │
+    └────────────┴──► quarantined / retired   (repeated rejection; trust below 0.1)
+```
+
+| Status | Bar |
+|---|---|
+| `active` | trust ≥ 0.25 |
+| `trusted` | trust ≥ 0.6, at least 5 uses, and a passing guard |
+
+## Use it from an agent (MCP)
 
 Register the server in your project's `.mcp.json`:
 
@@ -26,95 +155,50 @@ Register the server in your project's `.mcp.json`:
 { "mcpServers": { "medha": { "command": "medha", "args": ["mcp", "serve"] } } }
 ```
 
-Copy [`SKILL.md`](SKILL.md) (included in each release archive) to `.claude/skills/medha/SKILL.md`
-so the agent knows when and how to use it.
+Then copy [`SKILL.md`](SKILL.md) to
+`.claude/skills/medha/SKILL.md` so the agent knows when and how to use it.
 
-## How trust works
+| Tool | Purpose |
+|---|---|
+| `hints` | Batch-fetch trust hints for the entities you are about to rely on. Returns `{ hints, unknown }`; treat `unknown` as probation. |
+| `list_entities` | Paginated search by kind, status, namespace or drift. |
+| `show_entity` | Full detail for one entity: components, temporal state, recent episodes. |
+| `record_signal` | Record `APPLY`, `REJECT_RULE`, `SKIP`, and so on. Returns `recorded: false` for an unknown entity unless `ensure` is set. |
+| `report_guard` | Record a guard result. |
+| `propose` | Submit a candidate entity. |
+| `drift` | List drifting entities. |
+| `simulate` | Preview a signal's effect; persists nothing. |
+| `status` | Engine health and preflight. |
 
-Trust combines a Wilson lower bound over successes/trials, an exponential moving average for drift,
-recency decay and a durability multiplier. A passing guard is required to reach `trusted`; without
-one, trust is capped at 0.5. Run `medha params` for every constant and threshold.
+### Fitting trust into a prompt
 
-Lifecycle: `probation → active → trusted`, and `quarantined` / `retired` after repeated rejection.
+`medha pack --budget 2000` selects the active and probation rules that fit a token budget, so a
+host can inject the most trusted guidance without overrunning its context.
 
-## Library packages
+## Inspect and share
 
-| Package | Contains | Depends on |
-|---|---|---|
-| `@cntxt-labs/medha-core` | Types, the math (Wilson, EMA, guards, decay, durability, thresholds), signal and kind registries, the ports, typed errors | nothing |
-| `@cntxt-labs/medha-store` | Memory, file and SQLite backends, the shared contract suite | `medha-core` |
-| `@cntxt-labs/medha-sync` | Optional sync-port adapters | `medha-core` |
-| `@cntxt-labs/medha` | Engine facade (planes, sweep, exploration helper), CLI, MCP | `medha-core`, `medha-store`, `medha-sync` |
+- **`medha ui`** launches a local web dashboard over the store.
+- **`medha report`** writes a standalone, offline HTML snapshot you can attach to a review.
+- **`medha sync status|pull|push`** shares evidence between machines through a git ref or a file.
+  Registries travel with the episodes, so custom kinds and signals do not have to be copied by hand.
 
-Boundaries are enforced from the first commit by dependency-cruiser (inward only, through each
-package's `index`).
+## Extend it
 
-## Engineering standards
+- **Kinds and signals.** Register your own in `.medha/config.json`. A kind can set its own trust
+  thresholds and recency half-life, and can weight evidence by a signal's value (for example, a
+  timeout counts less against a tool than a crash).
+- **Weight updaters.** Swap how evidence moves trust with `medha updater list` and `medha updater fork <name>`, which scaffolds a custom one.
 
-The same standards as `@cntxt-labs/anvesa`:
-
-- no static caps or blind truncation — limits derive from real constraints, are caller-supplied,
-  and are always reported (`LimitReport`); overflow chunks or paginates instead of cutting
-- no empty `catch` — every catch handles, wraps with a typed `MedhaError` carrying context, or rethrows
-- no bare `Error` — throw typed `MedhaError` subclasses with a stable `code`, `subsystem`, `context` and cause chain
-
-These are enforced by Biome, four Grit plugin rules in `tooling/plugins/`, and the fixture suite in
-`tooling/standards.test.ts` (the same fixtures as `anvesa`, proving the rules do what they claim).
-
-## CLI & MCP reference
-
-### CLI Subcommands
-
-- **`medha init`**: Initialize engine home (`.medha/config.json` + store). Use `--home <path>` to place the home elsewhere; standalone medha never touches `.sutra/` unless told to.
-- **`medha list`**: List evidential entities filtered by kind, status, namespace, or drift.
-- **`medha show`**: Inspect an entity with its trust breakdown, temporal state, and recent episodes.
-- **`medha status`**: Check overall store health, preflight status, and entity lifecycle distribution.
-- **`medha drift`**: Identify entities whose weights have drifted from their priors.
-- **`medha params`**: Print the canonical mathematical constants and thresholds used by the kernel.
-- **`medha propose`** / **`medha record`** / **`medha guard`**: Write evidence from the shell (`--source`; `--signal … --ensure`; `--ok`|`--fail`). `record` reports `recorded: false` for an unknown entity without `--ensure`.
-- **`medha simulate`**: Compute the hypothetical trust delta of a signal without persisting changes.
-- **`medha explain-threshold`**: Show which thresholds an entity clears (trusted, active) and why.
-- **`medha maintain`**: Maintenance commands:
-  - `medha maintain preflight`: Check store integrity and verify registry match.
-  - `medha maintain compact [--older-than <days>]`: Fold historical episodes into baselines and name the folded range.
-  - `medha maintain backup <path>`: Export an atomic, portable `MedhaSnapshot` JSON file.
-  - `medha maintain restore <path>`: Headlessly restore store state from a snapshot.
-- **`medha updater`**: Weight-updater commands:
-  - `medha updater list`: List all registered updaters (project -> user -> built-in).
-  - `medha updater show <name>`: Inspect an updater's strategy and details.
-  - `medha updater fork <name> [--out <path>]`: Scaffold a custom TypeScript updater template.
-- **`medha mcp [serve]`**: Run the stdio Model Context Protocol (MCP) server.
-
-### MCP Tools
-
-The MCP server exposes 9 tools over JSON-RPC stdio:
-1. `hints`: Batch fetch hints; returns `{ hints, unknown }`. Pass `compact: true` on `hints`, `list_entities`, `record_signal` and `propose` for one-line hints and unindented JSON.
-2. `list_entities`: Paginated search with filtering.
-3. `show_entity`: Detailed entity inspection.
-4. `record_signal`: Record evidential signals (`APPLY`, `REJECT_RULE`, `SKIP`, etc.). Returns `recorded: false` for an unknown entity without `ensure`.
-5. `report_guard`: Record verification/guard results.
-6. `propose`: Submit candidate entity proposals for promotion.
-7. `drift`: List drifting entities.
-8. `simulate`: Preview the trust delta of a signal.
-9. `status`: Engine health and preflight report.
-
-### Packaging & Smoke Testing
-
-To package the standalone native binary for your platform:
+## Maintain it
 
 ```sh
-bun run build     # compiles cli/src/bin.ts to dist/medha/medha[.exe]
-bun run smoke     # runs init, list, status, drift, and MCP handshake on todo-list
+medha maintain preflight                  # verify store integrity and registry match
+medha maintain compact --older-than 90    # fold old episodes into baselines, and say what was folded
+medha maintain backup snapshot.json       # atomic, portable snapshot
+medha maintain restore snapshot.json
 ```
 
-## Development (from source)
-
-```sh
-bun install
-bun run check     # lint + typecheck + boundaries + test
-```
-
-Requires Bun >= 1.3.
+Everything lives under `.medha/`. Add it to `.gitignore`, or commit it on purpose to share the evidence.
 
 ## Author & Attribution
 

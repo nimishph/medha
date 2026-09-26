@@ -4,11 +4,13 @@
  *
  *   bun run tooling/package-release.ts [--out dist] [--target darwin-x64]
  *
- * Result: `<out>/medha-<version>-<platform>-<arch>/medha[.exe]` and `<out>/medha/medha[.exe]`.
+ * Result: `<out>/medha-<version>-<platform>-<arch>/medha[.exe]`, `<out>/medha/medha[.exe]` and the same
+ * program as an npm package in `<out>/npm/medha-<platform>-<arch>/`.
  */
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { PLATFORMS, platformPackage } from './platforms.ts';
 
 const baseRoot = resolve(import.meta.dir, '..');
 const { values } = parseArgs({
@@ -83,3 +85,43 @@ const tarChild = Bun.spawn({
 });
 await tarChild.exited;
 process.stdout.write(`Archived: ${join(out, archive)}\n`);
+
+// The same program as an npm package for this target, which the launcher package depends on.
+const [targetOs, targetCpu] = target.split('-');
+const platform = PLATFORMS.find((p) => p.os === targetOs && p.cpu === targetCpu);
+if (platform === undefined) {
+  process.stderr.write(
+    `No npm package for ${target}; known: ${PLATFORMS.map((p) => `${p.os}-${p.cpu}`).join(', ')}\n`,
+  );
+  process.exit(1);
+}
+const npmName = platformPackage(platform);
+const npmFolder = join(out, 'npm', npmName.split('/')[1] as string);
+rmSync(npmFolder, { recursive: true, force: true });
+mkdirSync(join(npmFolder, 'bin'), { recursive: true });
+cpSync(targetPath, join(npmFolder, 'bin', program));
+if (existsSync(join(baseRoot, 'LICENSE'))) {
+  cpSync(join(baseRoot, 'LICENSE'), join(npmFolder, 'LICENSE'));
+}
+await Bun.write(
+  join(npmFolder, 'package.json'),
+  `${JSON.stringify(
+    {
+      name: npmName,
+      version,
+      description: `The medha program for ${platform.os} on ${platform.cpu}. Install @cntxt-labs/medha-cli instead.`,
+      license: 'MIT',
+      author: { name: 'nimishph', url: 'https://github.com/nimishph' },
+      homepage: 'https://github.com/nimishph/medha#readme',
+      repository: { type: 'git', url: 'git+https://github.com/nimishph/medha.git' },
+      bugs: { url: 'https://github.com/nimishph/medha/issues' },
+      os: [platform.os],
+      cpu: [platform.cpu],
+      files: ['bin', 'LICENSE'],
+      publishConfig: { access: 'public' },
+    },
+    null,
+    2,
+  )}\n`,
+);
+process.stdout.write(`npm package: ${npmFolder}\n`);

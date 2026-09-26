@@ -21,7 +21,7 @@
     "test": "bun test",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "build": "bun run tooling/package-release.ts",
-    "smoke": "bun run tooling/smoke-package.ts",
+    "smoke": "bun run tooling/smoke-package.ts && bun run tooling/smoke-npm.ts",
     "changelog": "git-cliff -o CHANGELOG.md",
     "changelog:preview": "git-cliff --unreleased"
   },
