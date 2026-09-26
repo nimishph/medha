@@ -1,0 +1,3119 @@
+{
+  "specVersion": "1.0.0",
+  "scenarios": [
+    {
+      "name": "fresh-unguarded",
+      "description": "No evidence: trust 0, probation.",
+      "steps": [],
+      "now": 1700000000000,
+      "expected": {
+        "trust": 0.0,
+        "components": {
+          "wilson": 0,
+          "guard": 0.5,
+          "recency": 0.3,
+          "durability": 1,
+          "ceiling": 0.5
+        },
+        "status": "probation",
+        "storedStatus": "probation",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.0,
+        "isDrifting": false,
+        "evidence": {
+          "k": 0,
+          "n": 0,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.5
+        }
+      }
+    },
+    {
+      "name": "fresh-guarded-unverified",
+      "description": "Guard declared but never reported: G=0.8, no evidence.",
+      "steps": [],
+      "now": 1700000000000,
+      "guardKind": "ci",
+      "expected": {
+        "trust": 0.0,
+        "components": {
+          "wilson": 0,
+          "guard": 0.8,
+          "recency": 0.3,
+          "durability": 1,
+          "ceiling": 1
+        },
+        "status": "probation",
+        "storedStatus": "probation",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.0,
+        "isDrifting": false,
+        "evidence": {
+          "k": 0,
+          "n": 0,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.5
+        }
+      }
+    },
+    {
+      "name": "unguarded-capped",
+      "description": "Unguarded entities never reach their 0.5 ceiling (Invariant IV).",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000
+        }
+      ],
+      "now": 1700000041000,
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.456188,
+        "components": {
+          "wilson": 0.912375,
+          "guard": 0.5,
+          "recency": 1.0,
+          "durability": 1,
+          "ceiling": 0.5
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.098522,
+        "isDrifting": false,
+        "evidence": {
+          "k": 40,
+          "n": 40,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.998522
+        }
+      }
+    },
+    {
+      "name": "guarded-trusted",
+      "description": "38 applies, guard passed: trusted.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "ok": true,
+          "at": 1700000040000
+        }
+      ],
+      "now": 1700000041000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 1.0,
+        "components": {
+          "wilson": 0.908187,
+          "guard": 1,
+          "recency": 0.999999,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.098175,
+        "isDrifting": false,
+        "evidence": {
+          "k": 38,
+          "n": 38,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.998175
+        }
+      }
+    },
+    {
+      "name": "guarded-many-applies-no-guard-report",
+      "description": "Enough evidence but guard never reported: not trusted.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000
+        }
+      ],
+      "now": 1700000041000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.805789,
+        "components": {
+          "wilson": 0.912375,
+          "guard": 0.8,
+          "recency": 1.0,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.098522,
+        "isDrifting": false,
+        "evidence": {
+          "k": 40,
+          "n": 40,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.998522
+        }
+      }
+    },
+    {
+      "name": "trusted-needs-min-uses",
+      "description": "High score but n < 5: stays active, not trusted.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "ok": true,
+          "at": 1700000005000
+        }
+      ],
+      "now": 1700000006000,
+      "guardKind": "ci",
+      "theta0": 1.0,
+      "expected": {
+        "trust": 0.563136,
+        "components": {
+          "wilson": 0.5101,
+          "guard": 1,
+          "recency": 0.999999,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.0,
+        "isDrifting": false,
+        "evidence": {
+          "k": 4,
+          "n": 4,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 1.0
+        }
+      }
+    },
+    {
+      "name": "guard-failure-quarantines",
+      "description": "Failed guard -> quarantined, trust 0.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "ok": false,
+          "at": 1700000020000
+        }
+      ],
+      "now": 1700000021000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0,
+        "components": {
+          "wilson": 0.72246,
+          "guard": 0,
+          "recency": 0.999998,
+          "durability": 1,
+          "ceiling": 1
+        },
+        "status": "quarantined",
+        "storedStatus": "quarantined",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.065132,
+        "isDrifting": false,
+        "evidence": {
+          "k": 10,
+          "n": 10,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.965132
+        }
+      }
+    },
+    {
+      "name": "quarantine-recovery-status-lag",
+      "description": "After a failed guard then a pass, the fold recomputes on the previous (quarantined) status so T=0 in that step: storedStatus is probation while a read at `now` derives trusted (spec section 9).",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "ok": false,
+          "at": 1700000020000
+        },
+        {
+          "ok": true,
+          "at": 1700000021000
+        }
+      ],
+      "now": 1700000022000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.797574,
+        "components": {
+          "wilson": 0.72246,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "probation",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.065132,
+        "isDrifting": false,
+        "evidence": {
+          "k": 10,
+          "n": 10,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.965132
+        }
+      }
+    },
+    {
+      "name": "recency-floor",
+      "description": "A year of idleness decays recency to the 0.3 floor.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "ok": true,
+          "at": 1700000030000
+        }
+      ],
+      "now": 1731536000000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.277827,
+        "components": {
+          "wilson": 0.83887,
+          "guard": 1,
+          "recency": 0.3,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.087843,
+        "isDrifting": false,
+        "evidence": {
+          "k": 20,
+          "n": 20,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.987843
+        }
+      }
+    },
+    {
+      "name": "recency-half-life",
+      "description": "One half-life (45d) of idleness.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "ok": true,
+          "at": 1700000030000
+        }
+      ],
+      "now": 1703888030000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.463044,
+        "components": {
+          "wilson": 0.83887,
+          "guard": 1,
+          "recency": 0.499999,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.087843,
+        "isDrifting": false,
+        "evidence": {
+          "k": 20,
+          "n": 20,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.987843
+        }
+      }
+    },
+    {
+      "name": "skip-never-refreshes-recency",
+      "description": "SKIP leaves n, k and lastSignalAt untouched.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "ok": true,
+          "at": 1700000012000
+        },
+        {
+          "signal": "SKIP",
+          "at": 1705184000000
+        }
+      ],
+      "now": 1705184000000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.316519,
+        "components": {
+          "wilson": 0.72246,
+          "guard": 1,
+          "recency": 0.396851,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.031381,
+        "isDrifting": false,
+        "evidence": {
+          "k": 10,
+          "n": 10,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.868619
+        }
+      }
+    },
+    {
+      "name": "reject-context-not-a-trial",
+      "description": "REJECT_CONTEXT damps the EMA but no counters.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000010000
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000011000
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000012000
+        },
+        {
+          "ok": true,
+          "at": 1700000020000
+        }
+      ],
+      "now": 1700000021000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.673043,
+        "components": {
+          "wilson": 0.609657,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.263942,
+        "isDrifting": false,
+        "evidence": {
+          "k": 6,
+          "n": 6,
+          "contextRejects": 3
+        },
+        "ema": {
+          "mu": 0.636058
+        }
+      }
+    },
+    {
+      "name": "retire-by-failure",
+      "description": "n >= 3 and undecayed L*G < 0.1: retired.",
+      "steps": [
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000001000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000002000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000003000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000004000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000005000
+        },
+        {
+          "ok": true,
+          "at": 1700000010000
+        }
+      ],
+      "now": 1700000011000,
+      "guardKind": "ci",
+      "theta0": 0.0,
+      "expected": {
+        "trust": 0,
+        "components": {
+          "wilson": 0.0,
+          "guard": 1,
+          "recency": 0.999999,
+          "durability": 1,
+          "ceiling": 1
+        },
+        "status": "retired",
+        "storedStatus": "retired",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.0,
+        "isDrifting": false,
+        "evidence": {
+          "k": 0,
+          "n": 6,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.0
+        }
+      }
+    },
+    {
+      "name": "age-alone-never-retires",
+      "description": "A dormant entity is not retired by decay.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "ok": true,
+          "at": 1700000005000
+        }
+      ],
+      "now": 1777760000000,
+      "guardKind": "ci",
+      "theta0": 1.0,
+      "expected": {
+        "trust": 0.145226,
+        "components": {
+          "wilson": 0.438494,
+          "guard": 1,
+          "recency": 0.3,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "probation",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.0,
+        "isDrifting": false,
+        "evidence": {
+          "k": 3,
+          "n": 3,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 1.0
+        }
+      }
+    },
+    {
+      "name": "drift-quarantines",
+      "description": "Learned weight moves >= 0.4 from the baseline with n >= 3.",
+      "steps": [
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000001000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000002000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000003000
+        },
+        {
+          "ok": true,
+          "at": 1700000010000
+        }
+      ],
+      "now": 1700000011000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0,
+        "components": {
+          "wilson": 0.0,
+          "guard": 1,
+          "recency": 0.999999,
+          "durability": 1,
+          "ceiling": 1
+        },
+        "status": "quarantined",
+        "storedStatus": "quarantined",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": true
+        },
+        "driftDelta": 0.65341,
+        "isDrifting": true,
+        "evidence": {
+          "k": 0,
+          "n": 4,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.24659
+        }
+      }
+    },
+    {
+      "name": "durability-declared-anchors",
+      "description": "Distinct host anchors raise durability.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "anchors": [
+            [
+              "git",
+              "h0"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000,
+          "anchors": [
+            [
+              "git",
+              "h1"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000,
+          "anchors": [
+            [
+              "git",
+              "h2"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000,
+          "anchors": [
+            [
+              "git",
+              "h3"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000,
+          "anchors": [
+            [
+              "git",
+              "h4"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000,
+          "anchors": [
+            [
+              "git",
+              "h5"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000,
+          "anchors": [
+            [
+              "git",
+              "h6"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000,
+          "anchors": [
+            [
+              "git",
+              "h7"
+            ]
+          ]
+        },
+        {
+          "ok": true,
+          "at": 1700000020000
+        }
+      ],
+      "now": 1700000021000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.898244,
+        "components": {
+          "wilson": 0.675584,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.329584,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.056953,
+        "isDrifting": false,
+        "evidence": {
+          "k": 8,
+          "n": 8,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.956953
+        }
+      }
+    },
+    {
+      "name": "durability-week-fallback",
+      "description": "No anchors: one fallback anchor per calendar week.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700604800000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1701209600000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1701814400000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1702419200000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1703024000000
+        },
+        {
+          "ok": true,
+          "at": 1703628800000
+        }
+      ],
+      "now": 1703628801000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.707103,
+        "components": {
+          "wilson": 0.609657,
+          "guard": 1,
+          "recency": 0.897786,
+          "durability": 1.291887,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.046856,
+        "isDrifting": false,
+        "evidence": {
+          "k": 6,
+          "n": 6,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.946856
+        }
+      }
+    },
+    {
+      "name": "durability-capped",
+      "description": "Durability saturates at 1.5.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "anchors": [
+            [
+              "git",
+              "h0"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000,
+          "anchors": [
+            [
+              "git",
+              "h1"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000,
+          "anchors": [
+            [
+              "git",
+              "h2"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000,
+          "anchors": [
+            [
+              "git",
+              "h3"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000,
+          "anchors": [
+            [
+              "git",
+              "h4"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000,
+          "anchors": [
+            [
+              "git",
+              "h5"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000,
+          "anchors": [
+            [
+              "git",
+              "h6"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000,
+          "anchors": [
+            [
+              "git",
+              "h7"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000,
+          "anchors": [
+            [
+              "git",
+              "h8"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000,
+          "anchors": [
+            [
+              "git",
+              "h9"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000,
+          "anchors": [
+            [
+              "git",
+              "h10"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000,
+          "anchors": [
+            [
+              "git",
+              "h11"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000,
+          "anchors": [
+            [
+              "git",
+              "h12"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000,
+          "anchors": [
+            [
+              "git",
+              "h13"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000,
+          "anchors": [
+            [
+              "git",
+              "h14"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000,
+          "anchors": [
+            [
+              "git",
+              "h15"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000,
+          "anchors": [
+            [
+              "git",
+              "h16"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000,
+          "anchors": [
+            [
+              "git",
+              "h17"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000,
+          "anchors": [
+            [
+              "git",
+              "h18"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000,
+          "anchors": [
+            [
+              "git",
+              "h19"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000,
+          "anchors": [
+            [
+              "git",
+              "h20"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000,
+          "anchors": [
+            [
+              "git",
+              "h21"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000,
+          "anchors": [
+            [
+              "git",
+              "h22"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000,
+          "anchors": [
+            [
+              "git",
+              "h23"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000,
+          "anchors": [
+            [
+              "git",
+              "h24"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000,
+          "anchors": [
+            [
+              "git",
+              "h25"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000,
+          "anchors": [
+            [
+              "git",
+              "h26"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000,
+          "anchors": [
+            [
+              "git",
+              "h27"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000,
+          "anchors": [
+            [
+              "git",
+              "h28"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000,
+          "anchors": [
+            [
+              "git",
+              "h29"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000,
+          "anchors": [
+            [
+              "git",
+              "h30"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000,
+          "anchors": [
+            [
+              "git",
+              "h31"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000,
+          "anchors": [
+            [
+              "git",
+              "h32"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000,
+          "anchors": [
+            [
+              "git",
+              "h33"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000,
+          "anchors": [
+            [
+              "git",
+              "h34"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000,
+          "anchors": [
+            [
+              "git",
+              "h35"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000,
+          "anchors": [
+            [
+              "git",
+              "h36"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000,
+          "anchors": [
+            [
+              "git",
+              "h37"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000,
+          "anchors": [
+            [
+              "git",
+              "h38"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000,
+          "anchors": [
+            [
+              "git",
+              "h39"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000040000,
+          "anchors": [
+            [
+              "git",
+              "h40"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000041000,
+          "anchors": [
+            [
+              "git",
+              "h41"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000042000,
+          "anchors": [
+            [
+              "git",
+              "h42"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000043000,
+          "anchors": [
+            [
+              "git",
+              "h43"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000044000,
+          "anchors": [
+            [
+              "git",
+              "h44"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000045000,
+          "anchors": [
+            [
+              "git",
+              "h45"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000046000,
+          "anchors": [
+            [
+              "git",
+              "h46"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000047000,
+          "anchors": [
+            [
+              "git",
+              "h47"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000048000,
+          "anchors": [
+            [
+              "git",
+              "h48"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000049000,
+          "anchors": [
+            [
+              "git",
+              "h49"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000050000,
+          "anchors": [
+            [
+              "git",
+              "h50"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000051000,
+          "anchors": [
+            [
+              "git",
+              "h51"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000052000,
+          "anchors": [
+            [
+              "git",
+              "h52"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000053000,
+          "anchors": [
+            [
+              "git",
+              "h53"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000054000,
+          "anchors": [
+            [
+              "git",
+              "h54"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000055000,
+          "anchors": [
+            [
+              "git",
+              "h55"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000056000,
+          "anchors": [
+            [
+              "git",
+              "h56"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000057000,
+          "anchors": [
+            [
+              "git",
+              "h57"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000058000,
+          "anchors": [
+            [
+              "git",
+              "h58"
+            ]
+          ]
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000059000,
+          "anchors": [
+            [
+              "git",
+              "h59"
+            ]
+          ]
+        },
+        {
+          "ok": true,
+          "at": 1700000070000
+        }
+      ],
+      "now": 1700000071000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 1.0,
+        "components": {
+          "wilson": 0.939826,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.5,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.099821,
+        "isDrifting": false,
+        "evidence": {
+          "k": 60,
+          "n": 60,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.999821
+        }
+      }
+    },
+    {
+      "name": "kind-override-thresholds",
+      "description": "Per-kind minUsesForTrusted=50 keeps a well-evidenced entity active.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "ok": true,
+          "at": 1700000040000
+        }
+      ],
+      "now": 1700000041000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "thresholds": {
+          "trusted": 0.95,
+          "minUsesForTrusted": 50
+        }
+      },
+      "expected": {
+        "trust": 1.0,
+        "components": {
+          "wilson": 0.908187,
+          "guard": 1,
+          "recency": 0.999999,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.098175,
+        "isDrifting": false,
+        "evidence": {
+          "k": 38,
+          "n": 38,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.998175
+        }
+      }
+    },
+    {
+      "name": "kind-override-recency",
+      "description": "Per-kind half-life 10d, floor 0.5.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "ok": true,
+          "at": 1700000030000
+        }
+      ],
+      "now": 1702592000000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "recency": {
+          "halfLifeDays": 10,
+          "floor": 0.5
+        }
+      },
+      "expected": {
+        "trust": 0.463044,
+        "components": {
+          "wilson": 0.83887,
+          "guard": 1,
+          "recency": 0.5,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.087843,
+        "isDrifting": false,
+        "evidence": {
+          "k": 20,
+          "n": 20,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.987843
+        }
+      }
+    },
+    {
+      "name": "kind-override-unguarded-ceiling",
+      "description": "Ceiling 0.3 binds (raw ~0.456) and is clamped strictly below: 0.299999.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000
+        }
+      ],
+      "now": 1700000041000,
+      "theta0": 0.9,
+      "kindSpec": {
+        "thresholds": {
+          "unguardedCeiling": 0.3
+        }
+      },
+      "expected": {
+        "trust": 0.299999,
+        "components": {
+          "wilson": 0.912375,
+          "guard": 0.5,
+          "recency": 1.0,
+          "durability": 1,
+          "ceiling": 0.3
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.098522,
+        "isDrifting": false,
+        "evidence": {
+          "k": 40,
+          "n": 40,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.998522
+        }
+      }
+    },
+    {
+      "name": "signal-value-weighting",
+      "description": "Weighted evidence: ADOPTED(0.6) adds 0.6 to n and k.",
+      "steps": [
+        {
+          "signal": "ADOPTED",
+          "at": 1700000000000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000001000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000002000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000003000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000004000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000005000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000006000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000007000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000008000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000009000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000010000
+        },
+        {
+          "signal": "ADOPTED",
+          "at": 1700000011000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000020000
+        },
+        {
+          "ok": true,
+          "at": 1700000021000
+        }
+      ],
+      "now": 1700000022000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "evidenceWeighting": "signal-value"
+      },
+      "expected": {
+        "trust": 0.592549,
+        "components": {
+          "wilson": 0.536743,
+          "guard": 1,
+          "recency": 1.0,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.383744,
+        "isDrifting": false,
+        "evidence": {
+          "k": 7.2,
+          "n": 8.2,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.516256
+        }
+      }
+    },
+    {
+      "name": "mixed-history",
+      "description": "Applies interleaved with rejects and a late guard pass.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000020000
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000021000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000
+        },
+        {
+          "ok": true,
+          "at": 1700000050000
+        }
+      ],
+      "now": 1700259200000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.807776,
+        "components": {
+          "wilson": 0.7663,
+          "guard": 1,
+          "recency": 0.954848,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.038312,
+        "isDrifting": false,
+        "evidence": {
+          "k": 25,
+          "n": 27,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.861688
+        }
+      }
+    },
+    {
+      "name": "guard-kind-change",
+      "description": "A guard report may rename the guard kind; 'none' makes it unguarded.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "ok": true,
+          "at": 1700000020000,
+          "kind": "none"
+        }
+      ],
+      "now": 1700000021000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "expected": {
+        "trust": 0.361229,
+        "components": {
+          "wilson": 0.72246,
+          "guard": 0.5,
+          "recency": 0.999998,
+          "durability": 1,
+          "ceiling": 0.5
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.065132,
+        "isDrifting": false,
+        "evidence": {
+          "k": 10,
+          "n": 10,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.965132
+        }
+      }
+    }
+  ]
+}

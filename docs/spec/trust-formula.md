@@ -120,6 +120,11 @@ if unguarded and T >= ceiling: T = round6(ceiling − 1e-6)
 
 The last line ensures an unguarded entity is always strictly below its ceiling.
 
+With default parameters the ceiling never binds on its own: an unguarded entity has `G = 0.5` and
+`D = 1`, so `raw <= 0.5 · L · R` and `L < 1` at any realistic `n`. It matters only for a per-kind
+`unguardedCeiling` below that (e.g. 0.3), or `n` so large that `L` rounds to 1. Ports MUST still
+implement it exactly.
+
 **Terminal statuses.** If the stored `status` is `quarantined` or `retired`, `T = 0` (components
 are still reported, with `durability = 1`). This is checked on the stored status, before §5.
 
@@ -175,7 +180,11 @@ Applying a signal `s` at time `t`:
 - `lastSignalAt = t`, **except** `SKIP`, which leaves it unchanged (Invariant III: SKIP never
   counts as evidence and never refreshes recency).
 - On `countsAsSuccess`, merge the incoming anchors (or the week fallback) into `anchors`.
-- Recompute `status` per §6 at time `t`.
+- Recompute `status` per §6 at time `t`, **on the entity carrying its previous stored status**.
+  Because §5 forces `T = 0` for a stored `quarantined`/`retired` status, the step that leaves
+  quarantine (e.g. a guard pass after a failure) evaluates with `T = 0` and stores `probation`
+  (or `retired`); the next fold, or any read, evaluates normally. Reads (`statusFrom` at `now`)
+  are computed from the stored state and are what `hint.status` reports.
 
 ## 10. Invariants a conformant port MUST preserve
 

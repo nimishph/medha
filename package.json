@@ -19,6 +19,7 @@
     "lint:fix": "biome check --write .",
     "boundaries": "depcruise --config .dependency-cruiser.cjs medha-core/src medha-store/src medha-sync/src medha/src cli/src",
     "test": "bun test",
+    "spec:check": "python docs/spec/vectors/generate.py --check",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "build": "bun run tooling/package-release.ts",
     "smoke": "bun run tooling/smoke-package.ts && bun run tooling/smoke-npm.ts",

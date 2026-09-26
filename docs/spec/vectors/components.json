@@ -1,0 +1,236 @@
+{
+  "specVersion": "1.0.0",
+  "round6": [
+    {
+      "input": 0,
+      "expected": 0.0
+    },
+    {
+      "input": 0.5,
+      "expected": 0.5
+    },
+    {
+      "input": 1e-07,
+      "expected": 0.0
+    },
+    {
+      "input": 4.9999999e-07,
+      "expected": 0.0
+    },
+    {
+      "input": 5e-07,
+      "expected": 1e-06
+    },
+    {
+      "input": 0.1234565,
+      "expected": 0.123457
+    },
+    {
+      "input": -0.1234565,
+      "expected": -0.123457
+    },
+    {
+      "input": 2.5e-06,
+      "expected": 3e-06
+    },
+    {
+      "input": 0.9999995,
+      "expected": 1.0
+    },
+    {
+      "input": 0.3333333333333333,
+      "expected": 0.333333
+    },
+    {
+      "input": -0.3333333333333333,
+      "expected": -0.333333
+    }
+  ],
+  "wilsonLower": [
+    {
+      "k": 0,
+      "n": 0,
+      "expected": 0
+    },
+    {
+      "k": 0,
+      "n": 1,
+      "expected": 0.0
+    },
+    {
+      "k": 1,
+      "n": 1,
+      "expected": 0.206543
+    },
+    {
+      "k": 1,
+      "n": 2,
+      "expected": 0.094529
+    },
+    {
+      "k": 5,
+      "n": 5,
+      "expected": 0.565509
+    },
+    {
+      "k": 8,
+      "n": 10,
+      "expected": 0.490157
+    },
+    {
+      "k": 38,
+      "n": 40,
+      "expected": 0.834958
+    },
+    {
+      "k": 0,
+      "n": 40,
+      "expected": 0.0
+    },
+    {
+      "k": 40,
+      "n": 40,
+      "expected": 0.912375
+    },
+    {
+      "k": 3,
+      "n": 7,
+      "expected": 0.158217
+    },
+    {
+      "k": 2.4,
+      "n": 4,
+      "expected": 0.204634
+    },
+    {
+      "k": 0.6,
+      "n": 0.6,
+      "expected": 0.135086
+    }
+  ],
+  "recency": [
+    {
+      "lastUsedAt": null,
+      "now": 1700000000000,
+      "config": {},
+      "expected": 0.3
+    },
+    {
+      "lastUsedAt": 1700000000000,
+      "now": 1700000000000,
+      "config": {},
+      "expected": 1.0
+    },
+    {
+      "lastUsedAt": 1700000000000,
+      "now": 1703888000000,
+      "config": {},
+      "expected": 0.5
+    },
+    {
+      "lastUsedAt": 1700000000000,
+      "now": 1707776000000,
+      "config": {},
+      "expected": 0.3
+    },
+    {
+      "lastUsedAt": 1700000000000,
+      "now": 1734560000000,
+      "config": {},
+      "expected": 0.3
+    },
+    {
+      "lastUsedAt": 1700000000005,
+      "now": 1700000000000,
+      "config": {},
+      "expected": 1.0
+    },
+    {
+      "lastUsedAt": 1700000000000,
+      "now": 1701728000000,
+      "config": {
+        "halfLifeDays": 10,
+        "floor": 0.5
+      },
+      "expected": 0.5
+    }
+  ],
+  "durability": [
+    {
+      "h": 0,
+      "expected": 1
+    },
+    {
+      "h": 1,
+      "expected": 1.103972
+    },
+    {
+      "h": 2,
+      "expected": 1.164792
+    },
+    {
+      "h": 5,
+      "expected": 1.268764
+    },
+    {
+      "h": 8,
+      "expected": 1.329584
+    },
+    {
+      "h": 20,
+      "expected": 1.456678
+    },
+    {
+      "h": 100,
+      "expected": 1.5
+    },
+    {
+      "h": 10000,
+      "expected": 1.5
+    }
+  ],
+  "emaStep": [
+    {
+      "mu": null,
+      "signal": 1,
+      "alpha": 0.1,
+      "expected": 0.1
+    },
+    {
+      "mu": 0.5,
+      "signal": 1,
+      "alpha": 0.1,
+      "expected": 0.55
+    },
+    {
+      "mu": 0.5,
+      "signal": -1,
+      "alpha": 0.1,
+      "expected": 0.35
+    },
+    {
+      "mu": 0.05,
+      "signal": -1,
+      "alpha": 0.1,
+      "expected": 0.0
+    },
+    {
+      "mu": 0.9,
+      "signal": -0.2,
+      "alpha": 0.1,
+      "expected": 0.79
+    },
+    {
+      "mu": 0.5,
+      "signal": 0.6,
+      "alpha": 0.5,
+      "expected": 0.55
+    },
+    {
+      "mu": 0.0,
+      "signal": 1,
+      "alpha": 1.0,
+      "expected": 1.0
+    }
+  ]
+}
