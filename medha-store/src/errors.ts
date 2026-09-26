@@ -59,3 +59,16 @@ export class StoreLayoutError extends MedhaError {
     );
   }
 }
+
+/** A key, episode, or admin action reached outside the namespaces a scoped store was granted. */
+export class NamespaceViolationError extends MedhaError {
+  readonly code = 'STORE_NAMESPACE_VIOLATION';
+  readonly subsystem = 'store' as const;
+
+  constructor(action: string, namespace: string, allowed: readonly string[], init: ErrorInit = {}) {
+    super(
+      `Namespace '${namespace}' is outside this store's scope (${allowed.map((n) => `'${n}'`).join(', ')}); cannot ${action}`,
+      { ...init, context: { action, namespace, allowed: [...allowed], ...init.context } },
+    );
+  }
+}

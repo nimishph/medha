@@ -51,6 +51,11 @@ export interface AppendResult {
 export type StorePort = {
   readonly name: string;
   readonly registries: StoreRegistries;
+  /**
+   * Set by a namespace-scoped view: the only namespaces this handle can see or write. Whole-log
+   * maintenance (compaction, restore) is unavailable through it.
+   */
+  readonly scope?: readonly string[];
 } & Readonly<{
   open(): Promise<OpenResult>;
   isOpen(): boolean;

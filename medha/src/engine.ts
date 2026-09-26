@@ -751,6 +751,11 @@ export class Medha {
   private async runCompaction(now: number, olderThanDays: number): Promise<SweepReport['compact']> {
     const cutoffAt = now - olderThanDays * DAY_MS;
     const log = await this.store.episodes();
+    // A namespace-scoped store cannot rewrite the whole log; the session sweep skips compaction
+    // there (an explicit `compact()` still fails loudly).
+    if (this.store.scope !== undefined) {
+      return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
+    }
     const compacted = compactPrefix(log, cutoffAt, { kinds: this.kindRegistry() });
     if (compacted.folded === null) {
       return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };

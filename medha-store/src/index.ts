@@ -13,4 +13,5 @@ export * from './errors.ts';
 export * from './file-store.ts';
 export * from './memory-store.ts';
 export { resolveRegistries } from './registries.ts';
+export { scopeStore } from './scoped-store.ts';
 export * from './sqlite-store.ts';
