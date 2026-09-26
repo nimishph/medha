@@ -5,6 +5,9 @@
  * shapes trust. These are the "code identifiers" of the model's canonical table.
  */
 
+/** Version of docs/spec/trust-formula.md this kernel implements; conformance vectors target it. */
+export const TRUST_SPEC_VERSION = '1.0.0';
+
 /** Normal distribution quantile, 95% confidence. */
 export const WILSON_Z = 1.96;
 
