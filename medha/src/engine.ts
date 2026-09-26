@@ -26,6 +26,7 @@ import {
   episodeToInput,
   evaluateGates,
   foldEpisode,
+  foldLog,
   freshState,
   type Gate,
   InvalidArgumentError,
@@ -602,7 +603,7 @@ export class Medha {
     }
     const cutoffAt = context.now - olderThanDays * DAY_MS;
     const log = await this.store.episodes();
-    const compacted = compactPrefix(log, cutoffAt);
+    const compacted = compactPrefix(log, cutoffAt, { kinds: this.kindRegistry() });
     const entities = (await this.store.list()).length;
     if (compacted.folded === null) {
       return {
@@ -617,6 +618,14 @@ export class Medha {
     }
 
     const before = await this.store.list();
+    // Prove fold-equivalence in memory *before* touching the log: a mismatch must abort, not
+    // leave a rewritten log behind.
+    const projected = foldLog(compacted.episodes, { kinds: this.kindRegistry() });
+    if (!statesEquivalent(before, projected)) {
+      throw new InvariantViolationError('compact', {
+        context: { folded: compacted.folded, olderThanDays, phase: 'pre-write' },
+      });
+    }
     await this.store.replaceLog(compacted.episodes);
     const after = await this.store.list();
     if (!statesEquivalent(before, after)) {
@@ -742,11 +751,17 @@ export class Medha {
   private async runCompaction(now: number, olderThanDays: number): Promise<SweepReport['compact']> {
     const cutoffAt = now - olderThanDays * DAY_MS;
     const log = await this.store.episodes();
-    const compacted = compactPrefix(log, cutoffAt);
+    const compacted = compactPrefix(log, cutoffAt, { kinds: this.kindRegistry() });
     if (compacted.folded === null) {
       return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
     }
     const before = await this.store.list();
+    const projected = foldLog(compacted.episodes, { kinds: this.kindRegistry() });
+    if (!statesEquivalent(before, projected)) {
+      throw new InvariantViolationError('open', {
+        context: { folded: compacted.folded, olderThanDays, phase: 'pre-write' },
+      });
+    }
     await this.store.replaceLog(compacted.episodes);
     const after = await this.store.list();
     if (!statesEquivalent(before, after)) {
@@ -840,10 +855,16 @@ export class Medha {
       context.now,
       this.kindSpecFor(key.kind),
     );
+    const suppressed =
+      this.kindSpecFor(key.kind)?.signalLimits !== undefined && spec.countsAsSuccess
+        ? (appended.state?.authors?.[options.author ?? '']?.suppressed ?? 0) >
+          (state?.authors?.[options.author ?? '']?.suppressed ?? 0)
+        : undefined;
     return {
       hint,
       state: appended.state,
       ...(updater === undefined ? {} : { updater }),
+      ...(suppressed === undefined ? {} : { suppressed }),
     };
   }
 
@@ -1332,6 +1353,11 @@ export interface RecordOutcome {
   readonly state: EntityState | undefined;
   /** Which updater produced the new weight (and any fallback), when a state grew/received one. */
   readonly updater?: UpdaterUsage;
+  /**
+   * True when the kind's `signalLimits` suppressed this success: it is in the log but counted for
+   * nothing (spec §9.1). Absent (not `false`) when the kind declares no limits.
+   */
+  readonly suppressed?: boolean;
 }
 
 export interface GuardReportInput {

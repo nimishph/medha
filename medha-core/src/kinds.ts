@@ -19,6 +19,17 @@ export interface KindThresholds {
   readonly retiredTrustThreshold?: number;
 }
 
+/**
+ * Opt-in limits on how much one author can raise an entity's trust (spec §9.1). They apply only to
+ * signals that can raise trust (`countsAsSuccess`); negative evidence is never throttled.
+ */
+export interface KindSignalLimits {
+  /** A success from the same author within this many ms of their last counted one is suppressed. */
+  readonly minIntervalMs?: number;
+  /** At most this many counted successes per author per entity; later ones are suppressed. */
+  readonly maxSuccessesPerAuthor?: number;
+}
+
 export interface KindRecency {
   readonly halfLifeDays?: number;
   readonly floor?: number;
@@ -32,6 +43,7 @@ export interface KindSpec {
   readonly thresholds?: KindThresholds;
   readonly recency?: KindRecency;
   readonly evidenceWeighting?: EvidenceWeightingMode;
+  readonly signalLimits?: KindSignalLimits;
 }
 
 export class KindRegistry {
@@ -61,7 +73,7 @@ export class KindRegistry {
       throw new InvalidArgumentError('kind spec', 'a KindSpec object or string', nameOrSpec);
     }
 
-    const { name, thresholds, recency, evidenceWeighting } = nameOrSpec;
+    const { name, thresholds, recency, evidenceWeighting, signalLimits } = nameOrSpec;
     if (typeof name !== 'string' || name.trim() === '') {
       throw new InvalidArgumentError('kind spec.name', 'a non-empty string', name);
     }
@@ -116,6 +128,27 @@ export class KindRegistry {
           "'count' | 'signal-value'",
           evidenceWeighting,
         );
+      }
+    }
+
+    if (signalLimits !== undefined) {
+      if (typeof signalLimits !== 'object' || signalLimits === null) {
+        throw new InvalidArgumentError('kind spec.signalLimits', 'an object', signalLimits);
+      }
+      for (const field of ['minIntervalMs', 'maxSuccessesPerAuthor'] as const) {
+        const val = signalLimits[field];
+        if (val === undefined) continue;
+        const ok =
+          typeof val === 'number' &&
+          Number.isFinite(val) &&
+          (field === 'minIntervalMs' ? val >= 0 : Number.isInteger(val) && val >= 1);
+        if (!ok) {
+          throw new InvalidArgumentError(
+            `signalLimits.${field}`,
+            field === 'minIntervalMs' ? 'a non-negative number' : 'a positive integer',
+            val,
+          );
+        }
       }
     }
 

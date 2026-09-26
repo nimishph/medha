@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { durabilityFactor } from '../durability.ts';
 import { emaStep } from '../ema.ts';
-import { freshState } from '../entity.ts';
-import { applySignal, reportGuard } from '../fold.ts';
+import { type EntityState, freshState } from '../entity.ts';
+import { type Episode, foldEpisode } from '../episode.ts';
 import { evaluateGates } from '../hint.ts';
 import type { KindSpec } from '../kinds.ts';
 import { recencyDecay } from '../recency.ts';
@@ -39,6 +39,7 @@ interface Step {
   kind?: string;
   at: number;
   anchors?: [string, string][];
+  author?: string;
 }
 
 describe('conformance vectors', () => {
@@ -81,25 +82,22 @@ describe('conformance vectors', () => {
         theta0: scn.theta0 ?? 0.5,
         guard: { kind: scn.guardKind ?? 'none', lastOk: null, lastOkAt: null },
       });
+      let seq = 0;
       for (const step of scn.steps as Step[]) {
-        const ctx = { now: step.at, kindSpec };
-        state =
+        const base = { seq: ++seq, key: KEY, at: step.at, ensure: true };
+        const episode: Episode =
           step.ok !== undefined
-            ? reportGuard(
-                state,
-                { ok: step.ok, ...(step.kind !== undefined ? { kind: step.kind } : {}) },
-                ctx,
-              ).state
-            : applySignal(
-                state,
-                {
-                  spec: SIGNALS[step.signal as string] as SignalSpec,
-                  ...(step.anchors
-                    ? { anchors: step.anchors.map(([kind, value]) => ({ kind, value })) }
-                    : {}),
-                },
-                ctx,
-              ).state;
+            ? { ...base, type: 'guard', ok: step.ok, ...(step.kind ? { kind: step.kind } : {}) }
+            : {
+                ...base,
+                type: 'signal',
+                spec: SIGNALS[step.signal as string] as SignalSpec,
+                ...(step.author !== undefined ? { author: step.author } : {}),
+                ...(step.anchors
+                  ? { anchors: step.anchors.map(([kind, value]) => ({ kind, value })) }
+                  : {}),
+              };
+        state = foldEpisode(state, episode, { kindSpec }) as EntityState;
       }
 
       const result = trustOf(state, scn.now, kindSpec);
@@ -116,6 +114,7 @@ describe('conformance vectors', () => {
       expect(drifting.met).toBe(want.isDrifting);
       expect(state.evidence).toEqual(want.evidence);
       expect(state.ema.mu).toBe(want.ema.mu);
+      expect(state.authors ?? {}).toEqual(want.authors);
     });
   }
 });

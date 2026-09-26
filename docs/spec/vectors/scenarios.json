@@ -1,5 +1,5 @@
 {
-  "specVersion": "1.0.0",
+  "specVersion": "1.1.0",
   "scenarios": [
     {
       "name": "fresh-unguarded",
@@ -31,7 +31,8 @@
         },
         "ema": {
           "mu": 0.5
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -65,7 +66,8 @@
         },
         "ema": {
           "mu": 0.5
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -260,7 +262,8 @@
         },
         "ema": {
           "mu": 0.998522
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -452,7 +455,8 @@
         },
         "ema": {
           "mu": 0.998175
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -648,7 +652,8 @@
         },
         "ema": {
           "mu": 0.998522
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -704,7 +709,8 @@
         },
         "ema": {
           "mu": 1.0
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -784,7 +790,8 @@
         },
         "ema": {
           "mu": 0.965132
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -868,7 +875,8 @@
         },
         "ema": {
           "mu": 0.965132
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -988,7 +996,8 @@
         },
         "ema": {
           "mu": 0.987843
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1108,7 +1117,8 @@
         },
         "ema": {
           "mu": 0.987843
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1192,7 +1202,8 @@
         },
         "ema": {
           "mu": 0.868619
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1268,7 +1279,8 @@
         },
         "ema": {
           "mu": 0.636058
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1332,7 +1344,8 @@
         },
         "ema": {
           "mu": 0.0
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1384,7 +1397,8 @@
         },
         "ema": {
           "mu": 1.0
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1440,7 +1454,8 @@
         },
         "ema": {
           "mu": 0.24659
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1560,7 +1575,8 @@
         },
         "ema": {
           "mu": 0.956953
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -1624,7 +1640,8 @@
         },
         "ema": {
           "mu": 0.946856
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -2264,7 +2281,8 @@
         },
         "ema": {
           "mu": 0.999821
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -2462,7 +2480,8 @@
         },
         "ema": {
           "mu": 0.998175
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -2588,7 +2607,8 @@
         },
         "ema": {
           "mu": 0.987843
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -2788,7 +2808,8 @@
         },
         "ema": {
           "mu": 0.998522
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -2883,7 +2904,8 @@
         },
         "ema": {
           "mu": 0.516256
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -3031,7 +3053,8 @@
         },
         "ema": {
           "mu": 0.861688
-        }
+        },
+        "authors": {}
       }
     },
     {
@@ -3124,6 +3147,693 @@
         },
         "ema": {
           "mu": 0.971757
+        },
+        "authors": {}
+      }
+    },
+    {
+      "name": "limits-min-interval",
+      "description": "Successes from one author closer than minIntervalMs are suppressed.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000000500,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000000999,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001500,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002100,
+          "author": "a"
+        },
+        {
+          "ok": true,
+          "at": 1700000003000
+        }
+      ],
+      "now": 1700000004000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "signalLimits": {
+          "minIntervalMs": 1000
+        }
+      },
+      "expected": {
+        "trust": 0.484085,
+        "components": {
+          "wilson": 0.438494,
+          "guard": 1,
+          "recency": 1.0,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.0271,
+        "isDrifting": false,
+        "evidence": {
+          "k": 3,
+          "n": 3,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.9271
+        },
+        "authors": {
+          "a": {
+            "lastAt": 1700000002100,
+            "counted": 3,
+            "suppressed": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "limits-max-per-author",
+      "description": "Each author counts at most 3 successes; a second author counts independently.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000,
+          "author": "b"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000,
+          "author": "b"
+        },
+        {
+          "ok": true,
+          "at": 1700000030000
+        }
+      ],
+      "now": 1700000031000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "signalLimits": {
+          "maxSuccessesPerAuthor": 3
+        }
+      },
+      "expected": {
+        "trust": 0.624305,
+        "components": {
+          "wilson": 0.565509,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.040951,
+        "isDrifting": false,
+        "evidence": {
+          "k": 5,
+          "n": 5,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.940951
+        },
+        "authors": {
+          "a": {
+            "lastAt": 1700000002000,
+            "counted": 3,
+            "suppressed": 7
+          },
+          "b": {
+            "lastAt": 1700000021000,
+            "counted": 2,
+            "suppressed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "limits-anonymous-bucket",
+      "description": "Signals without an author share one anonymous bucket.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "ok": true,
+          "at": 1700000010000
+        }
+      ],
+      "now": 1700000011000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "signalLimits": {
+          "maxSuccessesPerAuthor": 2
+        }
+      },
+      "expected": {
+        "trust": 0.377968,
+        "components": {
+          "wilson": 0.342372,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.019,
+        "isDrifting": false,
+        "evidence": {
+          "k": 2,
+          "n": 2,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.919
+        },
+        "authors": {
+          "": {
+            "lastAt": 1700000001000,
+            "counted": 2,
+            "suppressed": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "limits-never-throttle-negative",
+      "description": "Failures and context rejections always count.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "author": "a"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000000001,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000010,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000011,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000012,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_RULE",
+          "at": 1700000000013,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000000020,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000000021,
+          "author": "a"
+        },
+        {
+          "signal": "REJECT_CONTEXT",
+          "at": 1700000000022,
+          "author": "a"
+        },
+        {
+          "ok": true,
+          "at": 1700000000100
+        }
+      ],
+      "now": 1700000000200,
+      "guardKind": "ci",
+      "theta0": 0.5,
+      "kindSpec": {
+        "signalLimits": {
+          "maxSuccessesPerAuthor": 1
+        }
+      },
+      "expected": {
+        "trust": 0,
+        "components": {
+          "wilson": 0.036223,
+          "guard": 1,
+          "recency": 1.0,
+          "durability": 1,
+          "ceiling": 1
+        },
+        "status": "retired",
+        "storedStatus": "retired",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": true
+        },
+        "driftDelta": 0.5,
+        "isDrifting": true,
+        "evidence": {
+          "k": 1,
+          "n": 5,
+          "contextRejects": 3
+        },
+        "ema": {
+          "mu": 0.0
+        },
+        "authors": {
+          "a": {
+            "lastAt": 1700000000000,
+            "counted": 1,
+            "suppressed": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "limits-suppressed-does-not-refresh-recency",
+      "description": "A suppressed success changes no evidence, EMA or recency.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "author": "a"
+        },
+        {
+          "ok": true,
+          "at": 1700000000001
+        },
+        {
+          "signal": "APPLY",
+          "at": 1705184000000,
+          "author": "a"
+        }
+      ],
+      "now": 1705184000000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "signalLimits": {
+          "maxSuccessesPerAuthor": 1
+        }
+      },
+      "expected": {
+        "trust": 0.090489,
+        "components": {
+          "wilson": 0.206543,
+          "guard": 1,
+          "recency": 0.39685,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "probation",
+        "storedStatus": "probation",
+        "gates": {
+          "trusted": false,
+          "active": false,
+          "drifting": false
+        },
+        "driftDelta": 0.01,
+        "isDrifting": false,
+        "evidence": {
+          "k": 1,
+          "n": 1,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.91
+        },
+        "authors": {
+          "a": {
+            "lastAt": 1700000000000,
+            "counted": 1,
+            "suppressed": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "limits-flooding-cannot-reach-trusted",
+      "description": "40 successes from one author under a cap of 3 stay below trusted.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000020000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000021000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000022000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000023000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000024000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000025000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000026000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000027000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000028000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000029000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000030000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000031000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000032000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000033000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000034000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000035000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000036000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000037000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000038000,
+          "author": "agent"
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000039000,
+          "author": "agent"
+        },
+        {
+          "ok": true,
+          "at": 1700000050000
+        }
+      ],
+      "now": 1700000051000,
+      "guardKind": "ci",
+      "theta0": 0.9,
+      "kindSpec": {
+        "signalLimits": {
+          "maxSuccessesPerAuthor": 3
+        }
+      },
+      "expected": {
+        "trust": 0.484081,
+        "components": {
+          "wilson": 0.438494,
+          "guard": 1,
+          "recency": 0.999991,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.0271,
+        "isDrifting": false,
+        "evidence": {
+          "k": 3,
+          "n": 3,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.9271
+        },
+        "authors": {
+          "agent": {
+            "lastAt": 1700000002000,
+            "counted": 3,
+            "suppressed": 37
+          }
         }
       }
     },
@@ -3205,7 +3915,8 @@
         },
         "ema": {
           "mu": 0.965132
-        }
+        },
+        "authors": {}
       }
     }
   ]

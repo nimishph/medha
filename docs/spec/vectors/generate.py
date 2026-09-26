@@ -15,7 +15,7 @@ import math
 import pathlib
 import sys
 
-SPEC_VERSION = "1.0.0"
+SPEC_VERSION = "1.1.0"
 DAY_MS = 86_400_000
 WEEK_MS = 7 * DAY_MS
 
@@ -103,7 +103,7 @@ def fresh(theta0, guard_kind, at):
     return dict(
         k=0, n=0, contextRejects=0, mu=theta0, theta0=theta0,
         guard=dict(kind=guard_kind, lastOk=None), anchors=[], status="probation",
-        override=None, last=None,
+        override=None, last=None, authors={},
     )
 
 
@@ -176,7 +176,7 @@ def observe(st, now, ks):
         trust=t, components=comps, status=status, storedStatus=st["status"], gates=gates(st, t, ks),
         driftDelta=drift_delta(st["mu"], st["theta0"]), isDrifting=drifting(st),
         evidence=dict(k=st["k"], n=st["n"], contextRejects=st["contextRejects"]),
-        ema=dict(mu=st["mu"]),
+        ema=dict(mu=st["mu"]), authors=st["authors"],
     )
 
 
@@ -184,6 +184,19 @@ def fold_signal(st, step, ks):
     spec = SIGNALS[step["signal"]]
     at = step["at"]
     st = dict(st)
+    lim = ks.get("signalLimits")
+    if lim is not None and spec["success"]:
+        who = step.get("author", "")
+        led = dict(st["authors"].get(who, dict(lastAt=None, counted=0, suppressed=0)))
+        too_soon = "minIntervalMs" in lim and led["lastAt"] is not None and at - led["lastAt"] < lim["minIntervalMs"]
+        over_cap = "maxSuccessesPerAuthor" in lim and led["counted"] >= lim["maxSuccessesPerAuthor"]
+        st["authors"] = dict(st["authors"])
+        if too_soon or over_cap:
+            led["suppressed"] += 1
+            st["authors"][who] = led
+            return st
+        led["lastAt"], led["counted"] = at, led["counted"] + 1
+        st["authors"][who] = led
     if ks.get("evidenceWeighting") == "signal-value":
         tw = abs(spec["value"]) if spec["trial"] else 0
         sw = max(0, spec["value"]) if spec["success"] else 0
@@ -317,6 +330,31 @@ def scenarios():
         "per-kind trusted threshold it must still not be trusted (found by the property test).",
         applies(12) + [guard(True, T0 + 20_000)], T0 + 21_000, theta0=0.9,
         kindSpec=dict(thresholds=dict(trusted=0.2, minUsesForTrusted=1)))
+    lim = lambda **kw: dict(signalLimits=kw)
+    add("limits-min-interval", "Successes from one author closer than minIntervalMs are suppressed.",
+        [dict(signal="APPLY", at=T0 + t, author="a") for t in (0, 500, 999, 1000, 1500, 2100)]
+        + [guard(True, T0 + 3000)], T0 + 4000, guardKind="ci", theta0=0.9, kindSpec=lim(minIntervalMs=1000))
+    add("limits-max-per-author", "Each author counts at most 3 successes; a second author counts independently.",
+        [dict(signal="APPLY", at=T0 + i * 1000, author="a") for i in range(10)]
+        + [dict(signal="APPLY", at=T0 + 20_000 + i * 1000, author="b") for i in range(2)]
+        + [guard(True, T0 + 30_000)], T0 + 31_000, guardKind="ci", theta0=0.9,
+        kindSpec=lim(maxSuccessesPerAuthor=3))
+    add("limits-anonymous-bucket", "Signals without an author share one anonymous bucket.",
+        applies(6) + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.9,
+        kindSpec=lim(maxSuccessesPerAuthor=2))
+    add("limits-never-throttle-negative", "Failures and context rejections always count.",
+        [dict(signal="APPLY", at=T0, author="a"), dict(signal="APPLY", at=T0 + 1, author="a")]
+        + [dict(signal="REJECT_RULE", at=T0 + 10 + i, author="a") for i in range(4)]
+        + [dict(signal="REJECT_CONTEXT", at=T0 + 20 + i, author="a") for i in range(3)]
+        + [guard(True, T0 + 100)], T0 + 200, guardKind="ci", theta0=0.5, kindSpec=lim(maxSuccessesPerAuthor=1))
+    add("limits-suppressed-does-not-refresh-recency", "A suppressed success changes no evidence, EMA or recency.",
+        [dict(signal="APPLY", at=T0, author="a"), guard(True, T0 + 1),
+         dict(signal="APPLY", at=T0 + 60 * DAY_MS, author="a")],
+        T0 + 60 * DAY_MS, guardKind="ci", theta0=0.9, kindSpec=lim(maxSuccessesPerAuthor=1))
+    add("limits-flooding-cannot-reach-trusted", "40 successes from one author under a cap of 3 stay below trusted.",
+        [dict(signal="APPLY", at=T0 + i * 1000, author="agent") for i in range(40)]
+        + [guard(True, T0 + 50_000)], T0 + 51_000, guardKind="ci", theta0=0.9,
+        kindSpec=lim(maxSuccessesPerAuthor=3))
     add("guard-kind-change", "A guard report may rename the guard kind; 'none' makes it unguarded.",
         applies(10) + [guard(True, T0 + 20_000, "none")], T0 + 21_000, guardKind="ci", theta0=0.9)
     return S

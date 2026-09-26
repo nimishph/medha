@@ -49,6 +49,16 @@ export type Override = 'retired' | 'quarantined' | 'restore';
 /** `updater` names a weight-updater strategy; 'ema' is the kernel default. */
 export type UpdaterName = string;
 
+/** Per-author bookkeeping for `signalLimits`; only maintained for kinds that declare limits. */
+export interface AuthorLedger {
+  /** `at` of this author's last counted success. */
+  readonly lastAt: number;
+  /** Counted successes from this author. */
+  readonly counted: number;
+  /** Successes suppressed by the limits (kept for observability; never counted as evidence). */
+  readonly suppressed: number;
+}
+
 export interface EntityState {
   readonly key: EntityKey;
   readonly evidence: Evidence;
@@ -70,6 +80,8 @@ export interface EntityState {
    */
   readonly restoredAt: number | null;
   readonly updater: UpdaterName;
+  /** Author -> ledger (key `''` is anonymous). Absent unless the kind declares `signalLimits`. */
+  readonly authors?: Readonly<Record<string, AuthorLedger>>;
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
   /** The natural language note or rationale from the latest episode (if any). */

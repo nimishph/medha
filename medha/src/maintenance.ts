@@ -26,9 +26,11 @@ import {
   type Episode,
   entityKeyString,
   episodeToInput,
+  type FoldEpisodeOptions,
   foldLog,
   InvalidArgumentError,
   isDrifting,
+  type KindRegistry,
   RECENCY_FLOOR,
   recencyDecay,
   round6,
@@ -302,7 +304,11 @@ export interface CompactedLog {
  * folded prefix, so the result is fold-equivalent — the `Medha` engine verifies that against the
  * live store rather than trusting it.
  */
-export function compactPrefix(log: readonly Episode[], cutoffAt: number): CompactedLog {
+export function compactPrefix(
+  log: readonly Episode[],
+  cutoffAt: number,
+  options?: FoldEpisodeOptions | KindRegistry,
+): CompactedLog {
   const ordered = [...log].sort((a, b) => a.seq - b.seq);
   let border = -1;
   for (let i = 0; i < ordered.length; i++) {
@@ -315,7 +321,9 @@ export function compactPrefix(log: readonly Episode[], cutoffAt: number): Compac
 
   const prefix = ordered.slice(0, border + 1);
   const suffix = ordered.slice(border + 1);
-  const states = foldLog(prefix);
+  // Fold with the store's kind registry: kind specs (evidence weighting, thresholds, signal limits)
+  // shape the state, so folding with defaults would bake a different state into the baseline.
+  const states = foldLog(prefix, options);
 
   // The checkpoint clock: the last time each entity changed inside the folded prefix.
   const lastAt = new Map<string, number>();

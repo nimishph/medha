@@ -1,6 +1,6 @@
 # Medha trust formula — specification
 
-**Spec version: 1.0.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
+**Spec version: 1.1.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
 
 This document is the normative definition of how Medha turns an entity's history into a trust
 score, a lifecycle status, and the threshold gates. A port (Python, Go, …) is conformant when it
@@ -55,8 +55,9 @@ matches every vector.
 | `MIN_USES_FOR_RETIRED` | 3 | trials before retirement by trust |
 
 A **kind spec** may override, per kind: `thresholds.{trusted, minUsesForTrusted, active,
-unguardedCeiling, minUsesForRetired, retiredTrustThreshold}`, `recency.{halfLifeDays, floor}`, and
-`evidenceWeighting` (`'count'` default | `'signal-value'`). Overrides replace the default for that
+unguardedCeiling, minUsesForRetired, retiredTrustThreshold}`, `recency.{halfLifeDays, floor}`,
+`evidenceWeighting` (`'count'` default | `'signal-value'`), and `signalLimits` (§9.1, off by
+default). Overrides replace the default for that
 kind only; unspecified fields keep the defaults above.
 
 ## 3. Entity state (inputs to the formula)
@@ -188,6 +189,33 @@ Applying a signal `s` at time `t`:
   (or `retired`); the next fold, or any read, evaluates normally. Reads (`statusFrom` at `now`)
   are computed from the stored state and are what `hint.status` reports.
 
+### 9.1 Signal limits (opt-in, since 1.1.0)
+
+Purpose: one author must not be able to inflate an entity's trust by repeating success signals.
+Active only when the kind declares `signalLimits` (`minIntervalMs`, `maxSuccessesPerAuthor`, either
+or both); with none declared nothing below applies and no `authors` state is kept.
+
+Applies to a signal only when `countsAsSuccess` is true. Negative evidence (`REJECT_RULE`,
+`REJECT_CONTEXT`) and `SKIP` are **never** limited: throttling failure reports would let a bad rule
+hide its failures. The author key is the episode's `author`, or `""` (one shared anonymous bucket)
+when absent. Each entity keeps `authors[author] = {lastAt, counted, suppressed}`.
+
+A success at time `t` is **suppressed** when either
+- `minIntervalMs` is set, the author has a counted success, and `t − lastAt < minIntervalMs`
+  (out-of-order timestamps therefore suppress), or
+- `maxSuccessesPerAuthor` is set and `counted >= maxSuccessesPerAuthor`.
+
+A suppressed success changes **only** `authors[author].suppressed += 1`: no `k`/`n`, no EMA step, no
+anchors, no `lastSignalAt`, no status recomputation. Otherwise the success is applied per §9 and
+the ledger becomes `{lastAt: t, counted: counted + 1, suppressed}`.
+
+Limits are a pure function of the episode log (`author`, `at`), so replays and compaction
+baselines (which embed the ledger) decide identically.
+
+**Limits of this mechanism.** `author` is a caller-supplied label until episodes are signed
+(medha-nwf.3/.4): an agent that varies its author string sidesteps the limits. The ledger also
+grows with the number of distinct authors; pair it with `allowedAuthors` on untrusted stores.
+
 ## 10. Invariants a conformant port MUST preserve
 
 - **I** Determinism: same inputs → same outputs, bit-for-bit after `round6`.
@@ -197,6 +225,7 @@ Applying a signal `s` at time `t`:
 - `trusted` is unreachable unless the entity is guarded, `guard.lastOk == true`, and
   `n >= minUsesForTrusted` — for any per-kind thresholds (property-tested).
 - A gate is met iff all its conditions are met.
+- With `signalLimits`, suppressed successes never change evidence, EMA, anchors, recency or status.
 
 ## 11. Conformance vectors
 

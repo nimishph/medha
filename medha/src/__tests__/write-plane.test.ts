@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { type EntityKey, InvalidArgumentError } from '@cntxt-labs/medha-core';
+import {
+  type EntityKey,
+  foldLog,
+  InvalidArgumentError,
+  KindRegistry,
+} from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Medha } from '../engine.ts';
 
@@ -318,3 +323,104 @@ describe('write plane — retract and removeEpisode (§6.2)', () => {
 function entityKey(k: EntityKey): string {
   return `${k.namespace}\u0000${k.kind}\u0000${k.id}`;
 }
+
+describe('signal limits (spec §9.1)', () => {
+  const NOW = 1_700_000_000_000;
+  const key = { namespace: 'ns', kind: 'rule', id: 'limited' };
+  const limitedStore = () =>
+    new MemoryStore({
+      registries: {
+        kinds: [],
+        signalSpecs: [],
+        anchorKinds: [],
+        kindSpecs: [{ name: 'rule', signalLimits: { maxSuccessesPerAuthor: 3 } }],
+      },
+    });
+
+  test('an author flooding successes is capped, told so, and cannot reach trusted', async () => {
+    const store = limitedStore();
+    const medha = new Medha({ store });
+    await medha.reportGuard(key, { ok: true, kind: 'ci' }, { now: NOW });
+    const outcomes = [];
+    for (let i = 0; i < 40; i++) {
+      outcomes.push(
+        await medha.record(key, 'APPLY', { now: NOW + i }, { ensure: true, author: 'agent' }),
+      );
+    }
+    expect(outcomes.filter((o) => o.suppressed === false)).toHaveLength(3);
+    expect(outcomes.filter((o) => o.suppressed === true)).toHaveLength(37);
+    const { hint } = await medha.show(key, { now: NOW + 100 });
+    expect(hint.evidence.totalTrials).toBe(3);
+    expect(hint.status).not.toBe('trusted');
+  });
+
+  test('a rejection is never suppressed, and a kind without limits reports no flag', async () => {
+    const store = limitedStore();
+    const medha = new Medha({ store });
+    await medha.record(key, 'APPLY', { now: NOW }, { ensure: true, author: 'a' });
+    const rejected = await medha.record(key, 'REJECT_RULE', { now: NOW + 1 }, { author: 'a' });
+    expect(rejected.suppressed).toBeUndefined();
+    expect(rejected.hint.evidence.totalTrials).toBe(2);
+
+    const plain = new Medha({
+      store: new MemoryStore({ registries: { kinds: [], signalSpecs: [], anchorKinds: [] } }),
+    });
+    const out = await plain.record(key, 'APPLY', { now: NOW }, { ensure: true, author: 'a' });
+    expect(out.suppressed).toBeUndefined();
+  });
+
+  test('replaying the log from scratch reproduces the same limited state', async () => {
+    const store = limitedStore();
+    const medha = new Medha({ store });
+    for (let i = 0; i < 8; i++) {
+      await medha.record(key, 'APPLY', { now: NOW + i }, { ensure: true, author: 'a' });
+    }
+    const live = await store.get(key);
+    const replayed = foldLog(await store.episodes(), {
+      kinds: new KindRegistry([{ name: 'rule', signalLimits: { maxSuccessesPerAuthor: 3 } }]),
+    });
+    expect(live?.authors?.a).toEqual({ lastAt: NOW + 2, counted: 3, suppressed: 5 });
+    expect(replayed[0]?.authors).toEqual(live?.authors);
+    expect(replayed[0]?.evidence).toEqual(live?.evidence);
+  });
+
+  test('compaction keeps the ledger, so it cannot be used to reset an author cap', async () => {
+    const store = limitedStore();
+    const medha = new Medha({ store });
+    for (let i = 0; i < 6; i++) {
+      await medha.record(key, 'APPLY', { now: NOW + i }, { ensure: true, author: 'a' });
+    }
+    const before = (await store.get(key))?.authors;
+    const later = NOW + 400 * 86_400_000;
+    await medha.compact({ now: later }, { olderThan: 90 });
+    expect((await store.get(key))?.authors).toEqual(before);
+    const again = await medha.record(key, 'APPLY', { now: later }, { author: 'a' });
+    expect(again.suppressed).toBe(true);
+  });
+});
+
+describe('compaction respects kind specs', () => {
+  const NOW = 1_700_000_000_000;
+  const key = { namespace: 'ns', kind: 'rule', id: 'weighted' };
+
+  test('signal-value weighted evidence survives compaction unchanged', async () => {
+    const store = new MemoryStore({
+      registries: {
+        kinds: [],
+        signalSpecs: [{ name: 'HALF', value: 0.5, countsAsTrial: true, countsAsSuccess: true }],
+        anchorKinds: [],
+        kindSpecs: [{ name: 'rule', evidenceWeighting: 'signal-value' }],
+      },
+    });
+    const medha = new Medha({ store });
+    for (let i = 0; i < 6; i++) {
+      await medha.record(key, 'HALF', { now: NOW + i }, { ensure: true });
+    }
+    const before = await store.get(key);
+    expect(before?.evidence.n).toBe(3);
+    await medha.compact({ now: NOW + 400 * 86_400_000 }, { olderThan: 90 });
+    const after = await store.get(key);
+    expect(after?.evidence).toEqual(before?.evidence);
+    expect(after?.status).toBe(before?.status);
+  });
+});

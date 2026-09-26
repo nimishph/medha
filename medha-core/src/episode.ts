@@ -381,6 +381,39 @@ export interface FoldEpisodeOptions {
  * the same timestamp always produces the same state. Returns `undefined` when the episode has
  * no effect on the key (no entity and no `ensure`, or a purge).
  */
+/**
+ * Spec §9.1. When the kind declares `signalLimits`, a success from an author who is over the
+ * limit is *suppressed*: it changes nothing but that author's `suppressed` counter (no evidence,
+ * EMA, anchors, recency, or status). Otherwise the author's ledger records the counted success.
+ * Pure in (state, episode): replay decides identically.
+ */
+function applySignalLimits(
+  prev: EntityState,
+  episode: Extract<Episode, { type: 'signal' }>,
+  kindSpec: KindSpec | undefined,
+): { readonly suppressed: boolean; readonly state: EntityState } {
+  const limits = kindSpec?.signalLimits;
+  if (limits === undefined || !episode.spec.countsAsSuccess) {
+    return { suppressed: false, state: prev };
+  }
+  const author = episode.author ?? '';
+  const ledger = prev.authors?.[author] ?? {
+    lastAt: Number.NEGATIVE_INFINITY,
+    counted: 0,
+    suppressed: 0,
+  };
+  const tooSoon =
+    limits.minIntervalMs !== undefined && episode.at - ledger.lastAt < limits.minIntervalMs;
+  const overCap =
+    limits.maxSuccessesPerAuthor !== undefined && ledger.counted >= limits.maxSuccessesPerAuthor;
+  if (tooSoon || overCap) {
+    const next = { ...ledger, suppressed: ledger.suppressed + 1 };
+    return { suppressed: true, state: { ...prev, authors: { ...prev.authors, [author]: next } } };
+  }
+  const next = { lastAt: episode.at, counted: ledger.counted + 1, suppressed: ledger.suppressed };
+  return { suppressed: false, state: { ...prev, authors: { ...prev.authors, [author]: next } } };
+}
+
 export function foldEpisode(
   prev: EntityState | undefined,
   episode: Episode,
@@ -398,6 +431,9 @@ export function foldEpisode(
         if (!episode.ensure) return undefined;
         prev = freshState(episode.key, episode.at);
       }
+      const limited = applySignalLimits(prev, episode, kindSpec);
+      if (limited.suppressed) return limited.state;
+      prev = limited.state;
       const applied: SignalApplication =
         episode.anchors === undefined
           ? { spec: episode.spec }
@@ -472,7 +508,7 @@ export function foldEpisode(
     case 'baseline': {
       // The checkpoint reproduces the folded prefix: apply as-is, re-derive the status at its
       // clock so recency/trust stay live — determinism is structural, not cached.
-      return { ...episode.state, status: statusFor({ ...episode.state }, episode.at) };
+      return { ...episode.state, status: statusFor({ ...episode.state }, episode.at, kindSpec) };
     }
     case 'retract':
       return prev;
