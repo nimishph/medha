@@ -3035,6 +3035,99 @@
       }
     },
     {
+      "name": "unguarded-guard-report-never-trusted",
+      "description": "A guard report with ok=true on an unguarded entity leaves lastOk=true, but with a low per-kind trusted threshold it must still not be trusted (found by the property test).",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "ok": true,
+          "at": 1700000020000
+        }
+      ],
+      "now": 1700000021000,
+      "theta0": 0.9,
+      "kindSpec": {
+        "thresholds": {
+          "trusted": 0.2,
+          "minUsesForTrusted": 1
+        }
+      },
+      "expected": {
+        "trust": 0.378749,
+        "components": {
+          "wilson": 0.757499,
+          "guard": 0.5,
+          "recency": 0.999998,
+          "durability": 1,
+          "ceiling": 0.5
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": false
+        },
+        "driftDelta": 0.071757,
+        "isDrifting": false,
+        "evidence": {
+          "k": 12,
+          "n": 12,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.971757
+        }
+      }
+    },
+    {
       "name": "guard-kind-change",
       "description": "A guard report may rename the guard kind; 'none' makes it unguarded.",
       "steps": [

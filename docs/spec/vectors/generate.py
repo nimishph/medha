@@ -150,7 +150,7 @@ def status_from(st, t, comps, ks):
         return "retired"
     if t >= thr(ks, "trusted", D["trusted"]) and \
             st["n"] >= thr(ks, "minUsesForTrusted", D["min_uses_trusted"]) and \
-            st["guard"]["lastOk"] is True:
+            st["guard"]["lastOk"] is True and not unguarded(st["guard"]):
         return "trusted"
     if t >= thr(ks, "active", D["active"]):
         return "active"
@@ -162,7 +162,7 @@ def gates(st, t, ks):
         thr(ks, "active", D["active"])
     dd = drift_delta(st["mu"], st["theta0"])
     conds = {
-        "trusted": [t >= tr, st["n"] >= mn, st["guard"]["lastOk"] is True],
+        "trusted": [t >= tr, st["n"] >= mn, st["guard"]["lastOk"] is True and not unguarded(st["guard"])],
         "active": [t >= ac],
         "drifting": [st["n"] >= D["min_samples_drift"], dd >= D["drift"]],
     }
@@ -312,6 +312,11 @@ def scenarios():
     add("mixed-history", "Applies interleaved with rejects and a late guard pass.",
         applies(15) + rejects(2, T0 + 20_000) + applies(10, T0 + 30_000)
         + [guard(True, T0 + 50_000)], T0 + 3 * DAY_MS, guardKind="ci", theta0=0.9)
+    add("unguarded-guard-report-never-trusted",
+        "A guard report with ok=true on an unguarded entity leaves lastOk=true, but with a low "
+        "per-kind trusted threshold it must still not be trusted (found by the property test).",
+        applies(12) + [guard(True, T0 + 20_000)], T0 + 21_000, theta0=0.9,
+        kindSpec=dict(thresholds=dict(trusted=0.2, minUsesForTrusted=1)))
     add("guard-kind-change", "A guard report may rename the guard kind; 'none' makes it unguarded.",
         applies(10) + [guard(True, T0 + 20_000, "none")], T0 + 21_000, guardKind="ci", theta0=0.9)
     return S

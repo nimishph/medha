@@ -1,5 +1,6 @@
 import { driftDelta } from './ema.ts';
 import type { EntityKey, EntityState, LifecycleStatus } from './entity.ts';
+import { isUnguarded } from './guard.ts';
 import type { KindSpec } from './kinds.ts';
 import {
   ACTIVE_THRESHOLD,
@@ -73,6 +74,7 @@ export function evaluateGates(
   const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
   const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
   const n = state.evidence.n;
+  const guardPassed = state.guard.lastOk === true && !isUnguarded(state.guard);
   const delta = driftDelta(state.ema.mu, state.ema.theta0);
   const gate = (
     name: Gate['name'],
@@ -86,8 +88,8 @@ export function evaluateGates(
       { name: 'uses', met: n >= minUsesForTrusted, actual: n, expected: minUsesForTrusted },
       {
         name: 'guard',
-        met: state.guard.lastOk === true,
-        actual: state.guard.lastOk === true,
+        met: guardPassed,
+        actual: guardPassed,
         expected: true,
       },
     ]),

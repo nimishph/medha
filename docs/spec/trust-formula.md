@@ -139,7 +139,9 @@ Evaluated in this order; the first match wins (`statusFrom`):
 5. `statusForTrust`:
    1. `n >= minUsesForRetired` **and** `L · G < retiredTrustThreshold` → `retired`
       (uses the *undecayed* product: age alone never retires).
-   2. `T >= trusted` **and** `n >= minUsesForTrusted` **and** `guard.lastOk == true` → `trusted`.
+   2. `T >= trusted` **and** `n >= minUsesForTrusted` **and** the guard passed (guarded kind with
+      `lastOk == true`) → `trusted`. An unguarded entity is never `trusted`, even if it carries
+      `lastOk == true` from a report against kind `none` and a per-kind threshold is low enough.
    3. `T >= active` → `active`.
    4. otherwise `probation`.
 
@@ -158,7 +160,7 @@ is**; `clearsThreshold` and `explain-threshold` both derive from it.
 
 | Gate | Conditions | `threshold` / `value` |
 |---|---|---|
-| `trusted` | `T >= trusted`; `n >= minUsesForTrusted`; `guard.lastOk == true` | trusted threshold / T |
+| `trusted` | `T >= trusted`; `n >= minUsesForTrusted`; guard passed (guarded and `lastOk == true`) | trusted threshold / T |
 | `active` | `T >= active` | active threshold / T |
 | `drifting` | `n >= MIN_SAMPLES_FOR_DRIFT`; `driftDelta >= DRIFT_THRESHOLD` | 0.4 / driftDelta |
 
@@ -192,7 +194,8 @@ Applying a signal `s` at time `t`:
 - **III** `SKIP` never changes `k`, `n`, or `lastSignalAt`.
 - **IV** An unguarded entity's trust is strictly below its ceiling.
 - Age or recency alone never retires an entity.
-- `trusted` is unreachable without `guard.lastOk == true` and `n >= minUsesForTrusted`.
+- `trusted` is unreachable unless the entity is guarded, `guard.lastOk == true`, and
+  `n >= minUsesForTrusted` — for any per-kind thresholds (property-tested).
 - A gate is met iff all its conditions are met.
 
 ## 11. Conformance vectors

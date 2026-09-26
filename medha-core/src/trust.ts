@@ -171,12 +171,15 @@ export function statusForTrust(
   }
 
   // Model §5.1: trusted requires T ≥ trustedThreshold AND n ≥ minUsesForTrusted AND G = 1.0 (the last guard passed).
+  // An unguarded entity can carry lastOk = true (a report against kind 'none'), but nothing was ever
+  // verified, so it can never be trusted — whatever a per-kind threshold says.
   const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
   const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
   if (
     trust.trust >= trustedThreshold &&
     state.evidence.n >= minUsesForTrusted &&
-    state.guard.lastOk === true
+    state.guard.lastOk === true &&
+    !isUnguarded(state.guard)
   ) {
     return 'trusted';
   }
