@@ -24,8 +24,10 @@ import {
   type EvidentialHint,
   entityKeyString,
   episodeToInput,
+  evaluateGates,
   foldEpisode,
   freshState,
+  type Gate,
   InvalidArgumentError,
   InvariantViolationError,
   KindRegistry,
@@ -291,16 +293,21 @@ export class Medha {
     const promoted = proposalEpisodes.some((episode) => episode.promoted === true);
     if (state === undefined) {
       // Spec §5.2: an unknown id reads back as a probation hint with the prior.
+      const fresh = freshState(key, context.now);
+      const freshHint = buildHint(fresh, context.now, this.kindSpecFor(key.kind));
       return {
-        hint: buildHint(freshState(key, context.now), context.now, this.kindSpecFor(key.kind)),
+        hint: freshHint,
+        gates: evaluateGates(fresh, freshHint.trustScore, this.kindSpecFor(key.kind)),
         known: false,
         recentEpisodes,
         provenance,
         promoted,
       };
     }
+    const hint = buildHint(state, context.now, this.kindSpecFor(state.key.kind));
     return {
-      hint: buildHint(state, context.now, this.kindSpecFor(state.key.kind)),
+      hint,
+      gates: evaluateGates(state, hint.trustScore, this.kindSpecFor(state.key.kind)),
       known: true,
       recentEpisodes,
       provenance,
@@ -1139,6 +1146,8 @@ export type ListFilter = {
 
 export interface EntityDetail {
   readonly hint: EvidentialHint;
+  /** The trusted/active/drifting gates the hint's flags derive from (same evaluation). */
+  readonly gates: readonly Gate[];
   /** False when the id is unknown — the hint is then the probation prior (spec §5.2). */
   readonly known: boolean;
   readonly recentEpisodes: readonly Episode[];

@@ -28,6 +28,7 @@ import {
   DURABILITY_MAX,
   type EntityKey,
   type EvidentialHint,
+  type GateCondition,
   InvalidArgumentError,
   type KindSpec,
   type LifecycleStatus,
@@ -504,6 +505,16 @@ export interface ExplainReport {
   readonly note: string;
 }
 
+function conditionLabel(condition: GateCondition): string {
+  const { name, actual, expected } = condition;
+  if (name === 'guard') return `guard last check passed: ${actual}`;
+  const value = formatNumber(Number(actual));
+  if (name === 'trust') return `trust ${value} >= ${expected}`;
+  if (name === 'uses') return `uses ${value} >= ${expected}`;
+  if (name === 'samples') return `samples ${value} >= ${expected}`;
+  return `|mu - theta0| ${value} >= ${expected}`;
+}
+
 export async function runExplainThreshold(
   options: ExplainOptions,
   environment: Environment,
@@ -514,57 +525,16 @@ export async function runExplainThreshold(
     const key = keyFromFlags(options);
     const detail = await opened.engine.show(key, { now });
     const hint = detail.hint;
-    const cleared = hint.clearsThreshold;
-    const kindSpec = opened.engine.getKindSpec(key.kind);
-    const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
-    const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
-    const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
-    const gates: ThresholdGate[] = [
-      {
-        name: 'trusted',
-        met: cleared.trusted,
-        threshold: trustedThreshold,
-        value: hint.trustScore,
-        conditions: [
-          {
-            label: `trust ${formatNumber(hint.trustScore)} >= ${trustedThreshold}`,
-            met: hint.trustScore >= trustedThreshold,
-          },
-          {
-            label: `uses ${hint.evidence.totalTrials} >= ${minUsesForTrusted}`,
-            met: hint.evidence.totalTrials >= minUsesForTrusted,
-          },
-        ],
-      },
-      {
-        name: 'active',
-        met: cleared.active,
-        threshold: activeThreshold,
-        value: hint.trustScore,
-        conditions: [
-          {
-            label: `trust ${formatNumber(hint.trustScore)} >= ${activeThreshold}`,
-            met: hint.trustScore >= activeThreshold,
-          },
-        ],
-      },
-      {
-        name: 'drifting',
-        met: hint.temporal.isDrifting,
-        threshold: DRIFT_THRESHOLD,
-        value: hint.temporal.driftDelta,
-        conditions: [
-          {
-            label: `samples ${hint.evidence.totalTrials} >= ${MIN_SAMPLES_FOR_DRIFT}`,
-            met: hint.evidence.totalTrials >= MIN_SAMPLES_FOR_DRIFT,
-          },
-          {
-            label: `|mu - theta0| ${formatNumber(hint.temporal.driftDelta)} >= ${DRIFT_THRESHOLD}`,
-            met: hint.temporal.driftDelta >= DRIFT_THRESHOLD,
-          },
-        ],
-      },
-    ];
+    const gates: ThresholdGate[] = detail.gates.map((gate) => ({
+      name: gate.name,
+      met: gate.met,
+      threshold: gate.threshold,
+      value: gate.value,
+      conditions: gate.conditions.map((condition) => ({
+        label: conditionLabel(condition),
+        met: condition.met,
+      })),
+    }));
     return {
       home: opened.home,
       asOf: now,

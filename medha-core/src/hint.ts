@@ -1,7 +1,13 @@
-import { driftDelta, isDrifting } from './ema.ts';
+import { driftDelta } from './ema.ts';
 import type { EntityKey, EntityState, LifecycleStatus } from './entity.ts';
 import type { KindSpec } from './kinds.ts';
-import { ACTIVE_THRESHOLD, MIN_USES_FOR_TRUSTED, TRUSTED_THRESHOLD } from './thresholds.ts';
+import {
+  ACTIVE_THRESHOLD,
+  DRIFT_THRESHOLD,
+  MIN_SAMPLES_FOR_DRIFT,
+  MIN_USES_FOR_TRUSTED,
+  TRUSTED_THRESHOLD,
+} from './thresholds.ts';
 import { statusFrom, type TrustComponents, trustOf } from './trust.ts';
 
 /**
@@ -37,13 +43,74 @@ export interface EvidentialHint {
   };
 }
 
+/** One named check inside a gate; `actual`/`expected` are null for boolean checks. */
+export interface GateCondition {
+  readonly name: 'trust' | 'uses' | 'guard' | 'samples' | 'drift';
+  readonly met: boolean;
+  readonly actual: number | boolean;
+  readonly expected: number | boolean;
+}
+
+export interface Gate {
+  readonly name: 'trusted' | 'active' | 'drifting';
+  readonly met: boolean;
+  readonly threshold: number;
+  readonly value: number;
+  readonly conditions: readonly GateCondition[];
+}
+
+/**
+ * The single definition of the trusted/active/drifting gates. `buildHint().clearsThreshold` and
+ * `explain-threshold` both derive from this, so they cannot disagree; a gate is met exactly when
+ * every one of its conditions is.
+ */
+export function evaluateGates(
+  state: EntityState,
+  trust: number,
+  kindSpec?: KindSpec,
+): readonly [Gate, Gate, Gate] {
+  const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
+  const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
+  const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
+  const n = state.evidence.n;
+  const delta = driftDelta(state.ema.mu, state.ema.theta0);
+  const gate = (
+    name: Gate['name'],
+    threshold: number,
+    value: number,
+    conditions: readonly GateCondition[],
+  ): Gate => ({ name, met: conditions.every((c) => c.met), threshold, value, conditions });
+  return [
+    gate('trusted', trustedThreshold, trust, [
+      { name: 'trust', met: trust >= trustedThreshold, actual: trust, expected: trustedThreshold },
+      { name: 'uses', met: n >= minUsesForTrusted, actual: n, expected: minUsesForTrusted },
+      {
+        name: 'guard',
+        met: state.guard.lastOk === true,
+        actual: state.guard.lastOk === true,
+        expected: true,
+      },
+    ]),
+    gate('active', activeThreshold, trust, [
+      { name: 'trust', met: trust >= activeThreshold, actual: trust, expected: activeThreshold },
+    ]),
+    gate('drifting', DRIFT_THRESHOLD, delta, [
+      {
+        name: 'samples',
+        met: n >= MIN_SAMPLES_FOR_DRIFT,
+        actual: n,
+        expected: MIN_SAMPLES_FOR_DRIFT,
+      },
+      { name: 'drift', met: delta >= DRIFT_THRESHOLD, actual: delta, expected: DRIFT_THRESHOLD },
+    ]),
+  ];
+}
+
 /** Build a hint from a state and `now`. Pure; no I/O. Single trust computation per hint. */
 export function buildHint(state: EntityState, now: number, kindSpec?: KindSpec): EvidentialHint {
   const result = trustOf(state, now, kindSpec);
   const status = statusFrom(state, result, kindSpec);
-  const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
-  const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
-  const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
+  const [trusted, active, drifting] = evaluateGates(state, result.trust, kindSpec);
   return {
     key: state.key,
     asOf: now,
@@ -56,17 +123,11 @@ export function buildHint(state: EntityState, now: number, kindSpec?: KindSpec):
     },
     temporal: {
       emaWeight: state.ema.mu,
-      isDrifting: isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n),
-      driftDelta: driftDelta(state.ema.mu, state.ema.theta0),
+      isDrifting: drifting.met,
+      driftDelta: drifting.value,
     },
     status,
     ...(state.lastNote !== undefined ? { lastNote: state.lastNote } : {}),
-    clearsThreshold: {
-      trusted:
-        result.trust >= trustedThreshold &&
-        state.guard.lastOk === true &&
-        state.evidence.n >= minUsesForTrusted,
-      active: result.trust >= activeThreshold,
-    },
+    clearsThreshold: { trusted: trusted.met, active: active.met },
   };
 }
