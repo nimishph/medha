@@ -217,6 +217,53 @@ describe('read plane — list, show, drift (§6.1)', () => {
   });
 });
 
+describe('read surfaces agree', () => {
+  const now = NOW + 500;
+
+  test('show, list and simulate.before report the identical hint', async () => {
+    const { medha } = makeEngine();
+    const keys = [
+      await seed(medha, 'a', 2, 0, true),
+      await seed(medha, 'b', 12, 3, false),
+      await seed(medha, 'c', 40, 0, true),
+      await seed(medha, 'd', 0),
+    ];
+    const listed = (await medha.list({}, { now })).items;
+    for (const k of keys) {
+      const shown = await medha.show(k, { now });
+      const sim = await medha.simulate(k, 'APPLY', { now });
+      expect(sim.before).toEqual(shown.hint);
+      expect(listed.find((h) => entityKeyString(h.key) === entityKeyString(k))).toEqual(shown.hint);
+      expect(shown.hint.clearsThreshold.trusted).toBe(
+        shown.gates.find((g) => g.name === 'trusted')?.met === true,
+      );
+    }
+  });
+
+  test('simulate predicts exactly what recording the signal then shows', async () => {
+    const { medha } = makeEngine();
+    for (const [id, applies, rejects, guard] of [
+      ['a', 2, 0, true],
+      ['b', 12, 3, false],
+      ['c', 0, 0, null],
+    ] as const) {
+      const k = await seed(medha, id, applies, rejects, guard);
+      for (const signal of ['APPLY', 'REJECT_RULE'] as const) {
+        const predicted = await medha.simulate(k, signal, { now });
+        await medha.record(k, signal, { now }, { ensure: true });
+        expect((await medha.show(k, { now })).hint).toEqual(predicted.after);
+      }
+    }
+  });
+
+  test('an unknown id reads back the same probation prior everywhere', async () => {
+    const { medha } = makeEngine();
+    const shown = await medha.show(key('ghost'), { now });
+    expect((await medha.simulate(key('ghost'), 'APPLY', { now })).before).toEqual(shown.hint);
+    expect(shown.known).toBe(false);
+  });
+});
+
 describe('explore — reference helper (§6.3)', () => {
   test('is deterministic for a given seed and reproducible elsewhere', async () => {
     const { medha } = makeEngine();
