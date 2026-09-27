@@ -110,3 +110,22 @@ export function caseTrust(kase: DecisionCase, now: number, kindSpec?: KindSpec):
 export function caseStatus(kase: DecisionCase, now: number, kindSpec?: KindSpec): LifecycleStatus {
   return statusFor(branchState(kase, kindSpec), now, kindSpec);
 }
+
+/** A `DecisionCase` plus the live status/trust it scores to — what a host renders (medha-arj.6). */
+export interface ScoredDecisionCase extends DecisionCase {
+  readonly status: LifecycleStatus;
+  readonly trust: number;
+}
+
+/** Score every case in a forest at once, in tree order. */
+export function scoreDecisionTree(
+  tree: readonly DecisionCase[],
+  now: number,
+  kindSpec?: KindSpec,
+): ScoredDecisionCase[] {
+  return tree.map((kase) => ({
+    ...kase,
+    status: caseStatus(kase, now, kindSpec),
+    trust: caseTrust(kase, now, kindSpec).trust,
+  }));
+}

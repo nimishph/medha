@@ -17,6 +17,8 @@ import {
   type CorruptLocation,
   convergingSourcesPolicy,
   DAY_MS,
+  type Decision,
+  type EntityDefinition,
   type EntityKey,
   type EntityState,
   type Episode,
@@ -25,6 +27,8 @@ import {
   entityKeyString,
   episodeToInput,
   evaluateGates,
+  foldDecisionTree,
+  foldDefinitions,
   foldEpisode,
   foldLog,
   freshState,
@@ -37,6 +41,7 @@ import {
   type MedhaError,
   type MinerPort,
   mulberry32,
+  newDecisionCaseId,
   type OpenResult,
   type PackCandidate,
   type PackOutcome,
@@ -53,17 +58,20 @@ import {
   paginate,
   resolveProposalKey,
   round6,
+  type ScoredDecisionCase,
   SignalRegistry,
   type SignalSpec,
   type StorePort,
   type SyncPort,
   sanitizeContext,
+  scoreDecisionTree,
   validateSignalSpec,
   wilsonWidth,
 } from '@cntxt-labs/medha-core';
 import { CorruptStoreError } from '@cntxt-labs/medha-store';
 import {
   type CompactionReport,
+  CURRENT_SNAPSHOT_FORMAT_VERSION,
   compactPrefix,
   DEFAULT_FOLD_DAYS,
   DEFAULT_RETENTION_DAYS,
@@ -81,6 +89,7 @@ import {
   type SweepReport,
   statesEquivalent,
 } from './maintenance.ts';
+import { migrateStoreSnapshot } from './snapshot-migrations.ts';
 import { UpdaterRegistry, type WeightUpdateContext } from './updaters.ts';
 
 export interface WritePermissionsPolicy {
@@ -292,6 +301,14 @@ export class Medha {
     );
     const provenance = [...new Set(proposalEpisodes.map((episode) => episode.provenance))];
     const promoted = proposalEpisodes.some((episode) => episode.promoted === true);
+    // Non-evidential (medha-arj.1/.2/.3): folded from the same per-key episode slice, never from
+    // `state`, so a definition or decision tree renders even for an id with no signal history yet.
+    const definition = foldDefinitions(episodes).get(keyString);
+    const decisionTree = scoreDecisionTree(
+      foldDecisionTree(episodes, key, this.kindSpecFor(key.kind)),
+      context.now,
+      this.kindSpecFor(key.kind),
+    );
     if (state === undefined) {
       // Spec §5.2: an unknown id reads back as a probation hint with the prior.
       const fresh = freshState(key, context.now);
@@ -303,6 +320,8 @@ export class Medha {
         recentEpisodes,
         provenance,
         promoted,
+        ...(definition === undefined ? {} : { definition }),
+        ...(decisionTree.length === 0 ? {} : { decisionTree }),
       };
     }
     const hint = buildHint(state, context.now, this.kindSpecFor(state.key.kind));
@@ -313,6 +332,8 @@ export class Medha {
       recentEpisodes,
       provenance,
       promoted,
+      ...(definition === undefined ? {} : { definition }),
+      ...(decisionTree.length === 0 ? {} : { decisionTree }),
     };
   }
 
@@ -691,6 +712,7 @@ export class Medha {
     return {
       snapshot: {
         format: SNAPSHOT_FORMAT,
+        formatVersion: CURRENT_SNAPSHOT_FORMAT_VERSION,
         exportedAt: context?.now ?? Date.now(),
         registries: this.store.registries,
         episodes,
@@ -702,21 +724,26 @@ export class Medha {
   /**
    * Restore a snapshot: atomically replace the episode log (validated contiguous, against this
    * store's registries) and the engine meta it carries. Returns the seq range that was replaced.
-   * Accept only snapshots this build wrote — `format` is checked, mismatched registries fail loud.
+   * Transparently migrates older snapshot formats (e.g. v0, legacy Sage v1) to MedhaSnapshot v1.
    */
-  async restore(
-    source: MedhaSnapshot,
-  ): Promise<{ readonly restored: { from: number; to: number } }> {
+  async restore(source: unknown): Promise<{
+    readonly restored: { from: number; to: number };
+    readonly migration?: { from: number; to: number };
+  }> {
     const opened = await this.ensureOpen();
     if (opened.status === 'corrupt') {
       this.assertMaintainable(opened.location);
     }
-    this.validateSnapshot(source);
-    const restored = await this.store.replaceLog(source.episodes);
-    for (const [key, value] of Object.entries(source.meta)) {
+    const { doc: snapshot, fromVersion, toVersion, migrated } = migrateStoreSnapshot(source);
+    this.validateSnapshot(snapshot);
+    const restored = await this.store.replaceLog(snapshot.episodes);
+    for (const [key, value] of Object.entries(snapshot.meta)) {
       await this.store.setMeta(key, value);
     }
-    return { restored };
+    return {
+      restored,
+      ...(migrated ? { migration: { from: fromVersion, to: toVersion } } : {}),
+    };
   }
 
   private validateSnapshot(source: MedhaSnapshot): void {
@@ -725,6 +752,13 @@ export class Medha {
     }
     if (source.format !== SNAPSHOT_FORMAT) {
       throw new InvalidArgumentError('source.format', `'${SNAPSHOT_FORMAT}'`, source.format);
+    }
+    if (source.formatVersion !== CURRENT_SNAPSHOT_FORMAT_VERSION) {
+      throw new InvalidArgumentError(
+        'source.formatVersion',
+        `${CURRENT_SNAPSHOT_FORMAT_VERSION}`,
+        source.formatVersion,
+      );
     }
     if (typeof source.exportedAt !== 'number' || !Number.isFinite(source.exportedAt)) {
       throw new InvalidArgumentError('source.exportedAt', 'a finite epoch', source.exportedAt);
@@ -851,6 +885,7 @@ export class Medha {
       ...(options.runRef === undefined ? {} : { runRef: options.runRef }),
       ...(options.note === undefined ? {} : { note: options.note }),
       ...(options.author === undefined ? {} : { author: options.author }),
+      ...(options.caseId === undefined ? {} : { caseId: options.caseId }),
       ...weightEpisode,
     };
 
@@ -912,6 +947,70 @@ export class Medha {
     return appended.state === undefined
       ? buildHint(freshState(key, at), context.now, this.kindSpecFor(key.kind))
       : buildHint(appended.state, context.now, this.kindSpecFor(key.kind));
+  }
+
+  /**
+   * Record a host-authored definition (medha-arj.1): title/tags/rationale. Never evidential — it
+   * cannot create an entity and never changes `EntityState`, only what `show()` renders alongside
+   * it.
+   */
+  async define(
+    key: EntityKey,
+    definition: EntityDefinition,
+    context: Context,
+    options: { readonly author?: string } = {},
+  ): Promise<{ readonly episode: Episode; readonly definition: EntityDefinition }> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    this.validateKey(key);
+    this.requireKind(key);
+    this.checkWritePermission('define', options.author);
+    const input: EpisodeInput = {
+      type: 'define',
+      key,
+      at: context.now,
+      definition,
+      ...(options.author === undefined ? {} : { author: options.author }),
+    };
+    const appended = await this.store.append(input);
+    return { episode: appended.episode, definition };
+  }
+
+  /**
+   * Grow or edit a branch of the entity's decision tree (medha-arj.2/.4). Pass `caseId` to edit an
+   * existing branch (latest-write-wins); omit it to mint a fresh one via `newDecisionCaseId`.
+   * `decisionPolicy.requireHumanFor` (medha-arj.4) is enforced by the store's own validation, so a
+   * policy-gated `apply` from a non-human author surfaces as a typed `PermissionDeniedError` here.
+   */
+  async decision(
+    key: EntityKey,
+    input: {
+      readonly condition: string;
+      readonly decision: Decision;
+      readonly parentId?: string | undefined;
+      readonly caseId?: string | undefined;
+    },
+    context: Context,
+    options: { readonly author?: string; readonly random?: () => number } = {},
+  ): Promise<{ readonly episode: Episode; readonly caseId: string }> {
+    sanitizeContext(context);
+    await this.ensureOpen();
+    this.validateKey(key);
+    this.requireKind(key);
+    this.checkWritePermission('decision', options.author);
+    const caseId = input.caseId ?? newDecisionCaseId(key, options.random);
+    const episodeInput: EpisodeInput = {
+      type: 'decision',
+      key,
+      at: context.now,
+      caseId,
+      condition: input.condition,
+      decision: input.decision,
+      ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+      ...(options.author === undefined ? {} : { author: options.author }),
+    };
+    const appended = await this.store.append(episodeInput);
+    return { episode: appended.episode, caseId };
   }
 
   /**
@@ -1181,6 +1280,10 @@ export interface EntityDetail {
   readonly provenance: readonly string[];
   /** True if any proposal episode for this key was promoted by Medha's promotion policy. */
   readonly promoted: boolean;
+  /** The host-authored definition (medha-arj.1), when one has been recorded. Never evidential. */
+  readonly definition?: EntityDefinition | undefined;
+  /** The entity's decision-tree forest (medha-arj.2/.3), when any branch has been recorded. */
+  readonly decisionTree?: readonly ScoredDecisionCase[] | undefined;
 }
 
 export interface DriftEntry {
@@ -1342,6 +1445,8 @@ export interface RecordOptions {
   readonly updater?: string;
   /** Author or agent identifier recording this evidence. */
   readonly author?: string;
+  /** Tie this signal to one decision-tree branch (medha-arj.3); see `SignalEpisode.caseId`. */
+  readonly caseId?: string;
 }
 
 export interface UpdaterUsage {

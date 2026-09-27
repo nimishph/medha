@@ -348,3 +348,50 @@ describe('explore — reference helper (§6.3)', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('medha-arj.1/.2/.3: show() surfaces definition + decision tree', () => {
+  test('show omits definition/decisionTree for an entity that has neither', async () => {
+    const { medha } = makeEngine();
+    const k = await seed(medha, 'plain', 3);
+    const detail = await medha.show(k, { now: NOW + 100 });
+    expect(detail.definition).toBeUndefined();
+    expect(detail.decisionTree).toBeUndefined();
+  });
+
+  test('show renders a recorded definition and a multi-level decision tree with live per-branch trust', async () => {
+    const { medha } = makeEngine();
+    const k = key('tree', HOST_KIND);
+    await medha.define(k, { title: 'tree', tags: ['x'], rationale: 'why' }, { now: NOW });
+    const root = await medha.decision(
+      k,
+      { condition: 'root cond', decision: { type: 'probability', value: 0.5 } },
+      { now: NOW + 1 },
+      { random: () => 0.1 },
+    );
+    const child = await medha.decision(
+      k,
+      { condition: 'child cond', decision: { type: 'apply' }, parentId: root.caseId },
+      { now: NOW + 2 },
+      { random: () => 0.2 },
+    );
+    for (let i = 0; i < 6; i++) {
+      await medha.record(k, 'ADOPTED', { now: NOW + 10 + i }, { caseId: child.caseId });
+    }
+
+    const detail = await medha.show(k, { now: NOW + 100 });
+    expect(detail.definition).toEqual({ title: 'tree', tags: ['x'], rationale: 'why' });
+    expect(detail.decisionTree).toHaveLength(2);
+    const childCase = detail.decisionTree?.find((c) => c.id === child.caseId);
+    expect(childCase?.parentId).toBe(root.caseId);
+    expect(childCase?.evidence.n).toBe(6);
+  });
+
+  test('an unknown id can still surface a definition/decision tree (neither is evidential)', async () => {
+    const { medha } = makeEngine();
+    const k = key('ghost-with-def', HOST_KIND);
+    await medha.define(k, { title: 'ghost', rationale: 'never signaled' }, { now: NOW });
+    const detail = await medha.show(k, { now: NOW + 1 });
+    expect(detail.known).toBe(false);
+    expect(detail.definition?.title).toBe('ghost');
+  });
+});

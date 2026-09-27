@@ -871,6 +871,140 @@ describe('medha write plane', () => {
   });
 });
 
+describe('medha-arj.5: define and decision commands', () => {
+  test('define appends a define episode and show renders title/tags/rationale', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    expect(
+      await runCli(
+        [
+          'define',
+          '--id',
+          'r1',
+          '--title',
+          'Retry on timeout',
+          '--rationale',
+          'network calls are flaky in CI',
+          '--tags',
+          'network,flaky',
+        ],
+        env,
+      ),
+    ).toBe(0);
+    expect(out()).toContain('medha: defined rule/r1');
+    expect(out()).toContain('title:     Retry on timeout');
+
+    const beforeShow = out();
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = out().slice(beforeShow.length);
+    expect(shown).toContain('definition: Retry on timeout');
+    expect(shown).toContain('tags:      network, flaky');
+    expect(shown).toContain('rationale: network calls are flaky in CI');
+  });
+
+  test('decision creates a root case, a child under --parent, and renders an indented tree', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    const beforeRoot = out();
+    expect(
+      await runCli(
+        ['decision', '--id', 'r1', '--condition', 'touched often', '--probability', '0.5'],
+        env,
+      ),
+    ).toBe(0);
+    const rootReport = out().slice(beforeRoot.length);
+    const rootId = /decision case (\S+) on/.exec(rootReport)?.[1];
+    expect(rootId).toBeDefined();
+
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'reviewer approved',
+          '--apply',
+          '--parent',
+          rootId as string,
+        ],
+        env,
+      ),
+    ).toBe(0);
+
+    const beforeShow = out();
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = out().slice(beforeShow.length);
+    expect(shown).toContain('decision tree:');
+    expect(shown).toContain(`touched often -> probability(0.5)  [probation]`);
+    // The child is indented one level deeper than its parent.
+    const rootLine = shown.split('\n').find((l) => l.includes('touched often'));
+    const childLine = shown.split('\n').find((l) => l.includes('reviewer approved'));
+    expect(rootLine).toBeDefined();
+    expect(childLine).toBeDefined();
+    expect(childLine?.match(/^\s*/)?.[0].length ?? 0).toBeGreaterThan(
+      rootLine?.match(/^\s*/)?.[0].length ?? 0,
+    );
+  });
+
+  test('decision requires exactly one of --apply/--ignore/--probability', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    expect(await runCli(['decision', '--id', 'r1', '--condition', 'x'], env)).toBe(2);
+    expect(err()).toContain('--apply/--ignore/--probability');
+  });
+
+  test('decisionPolicy.requireHumanFor rejects an agent-authored apply branch cleanly (exit 1, no stack trace)', async () => {
+    const { env, err } = fresh();
+    const configPath = join(env.cwd, 'registries.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        kinds: { 'tool-gate': { decisionPolicy: { requireHumanFor: 'apply' } } },
+      }),
+    );
+    await runCli(['init', '--config', configPath], env);
+
+    const rejected = await runCli(
+      [
+        'decision',
+        '--kind',
+        'tool-gate',
+        '--id',
+        't1',
+        '--condition',
+        'never touched',
+        '--apply',
+        '--author',
+        'agent:reviewer',
+      ],
+      env,
+    );
+    expect(rejected).toBe(1);
+    expect(err()).toContain('CORE_PERMISSION_DENIED');
+    expect(err()).not.toContain('at ');
+
+    const accepted = await runCli(
+      [
+        'decision',
+        '--kind',
+        'tool-gate',
+        '--id',
+        't1',
+        '--condition',
+        'never touched',
+        '--apply',
+        '--author',
+        'human:nimish',
+      ],
+      env,
+    );
+    expect(accepted).toBe(0);
+  });
+});
+
 describe('medha pack command', () => {
   test('packs rules into token budget with markdown format', async () => {
     const { env, out } = fresh();

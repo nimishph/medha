@@ -1,4 +1,4 @@
-import type { EntityKey } from '@cntxt-labs/medha-core';
+import type { EntityKey, ScoredDecisionCase } from '@cntxt-labs/medha-core';
 import { MedhaError } from '@cntxt-labs/medha-core';
 import type { InitReport } from './init.ts';
 import type {
@@ -81,6 +81,40 @@ function fixed(value: number): string {
   return value.toFixed(3);
 }
 
+function decisionLabel(kase: ScoredDecisionCase): string {
+  return kase.decision.type === 'probability'
+    ? `probability(${kase.decision.value})`
+    : kase.decision.type;
+}
+
+/**
+ * An indented forest, root cases first: a `parentId` naming a case not in this tree (a dangling
+ * reference, or a compacted-away branch) renders that case as a root rather than dropping it.
+ */
+function renderDecisionForest(tree: readonly ScoredDecisionCase[]): string[] {
+  const ids = new Set(tree.map((kase) => kase.id));
+  const byParent = new Map<string | undefined, ScoredDecisionCase[]>();
+  for (const kase of tree) {
+    const parent =
+      kase.parentId !== undefined && ids.has(kase.parentId) ? kase.parentId : undefined;
+    const siblings = byParent.get(parent) ?? [];
+    siblings.push(kase);
+    byParent.set(parent, siblings);
+  }
+  const lines: string[] = [];
+  const walk = (parent: string | undefined, depth: number) => {
+    for (const kase of byParent.get(parent) ?? []) {
+      const indent = '  '.repeat(depth);
+      lines.push(
+        `${indent}- ${kase.condition} -> ${decisionLabel(kase)}  [${kase.status}]  k=${kase.evidence.k} n=${kase.evidence.n}  (${kase.id})`,
+      );
+      walk(kase.id, depth + 1);
+    }
+  };
+  walk(undefined, 0);
+  return lines;
+}
+
 export function renderList(report: ListReport): string {
   const { page } = report;
   const lines = [
@@ -136,6 +170,17 @@ export function renderShow(report: ShowReport): string {
   ];
   if (h.lastNote !== undefined) {
     lines.push(`  last note: ${h.lastNote}`);
+  }
+  if (detail.definition !== undefined) {
+    lines.push(`  definition: ${detail.definition.title}`);
+    if (detail.definition.tags !== undefined && detail.definition.tags.length > 0) {
+      lines.push(`    tags:      ${detail.definition.tags.join(', ')}`);
+    }
+    lines.push(`    rationale: ${detail.definition.rationale}`);
+  }
+  if (detail.decisionTree !== undefined && detail.decisionTree.length > 0) {
+    lines.push('  decision tree:');
+    lines.push(...renderDecisionForest(detail.decisionTree).map((line) => `    ${line}`));
   }
   if (detail.recentEpisodes.length > 0) {
     lines.push('  recent episodes:');
@@ -301,6 +346,9 @@ export function renderMaintainRestore(report: MaintainRestoreReport): string {
   const lines = [
     `medha: restore for ${report.home}`,
     `  source:     ${report.path}`,
+    ...(report.migration
+      ? [`  migration:  v${report.migration.from} -> v${report.migration.to}`]
+      : []),
     `  episodes:   ${report.restored.from} -> ${report.restored.to}`,
   ];
   return `${lines.join('\n')}\n`;

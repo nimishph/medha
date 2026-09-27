@@ -9,6 +9,8 @@ import {
   runMaintainRestore,
 } from './maintain.ts';
 import {
+  decisionCommandArgs,
+  defineCommandArgs,
   driftCommandArgs,
   explainThresholdCommandArgs,
   guardCommandArgs,
@@ -70,11 +72,15 @@ import {
 import { runUpdaterFork, runUpdaterList, runUpdaterShow } from './updater.ts';
 import { VERSION } from './version.ts';
 import {
+  renderDecision,
+  renderDefine,
   renderGuard,
   renderPropose,
   renderRecord,
   renderRemoveEpisode,
   renderRetract,
+  runDecision,
+  runDefine,
   runGuard,
   runPropose,
   runRecord,
@@ -437,6 +443,63 @@ export const proposeCommand = defineCommand({
   },
 });
 
+export const defineEntityCommand = defineCommand({
+  meta: {
+    name: 'define',
+    description: 'Record a host-authored definition (title/tags/rationale) for an entity.',
+  },
+  args: defineCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runDefine(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.title === undefined ? {} : { title: args.title }),
+        ...(args.rationale === undefined ? {} : { rationale: args.rationale }),
+        ...(args.tags === undefined ? {} : { tags: args.tags }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderDefine(report));
+  },
+});
+
+export const decisionCommand = defineCommand({
+  meta: {
+    name: 'decision',
+    description: "Grow or edit a branch of an entity's decision tree.",
+  },
+  args: decisionCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runDecision(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.condition === undefined ? {} : { condition: args.condition }),
+        ...(args.apply === true ? { apply: true } : {}),
+        ...(args.ignore === true ? { ignore: true } : {}),
+        ...(args.probability === undefined ? {} : { probability: args.probability }),
+        ...(args.parent === undefined ? {} : { parent: args.parent }),
+        ...(args.caseId === undefined ? {} : { caseId: args.caseId }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderDecision(report));
+  },
+});
+
 export const retractCommand = defineCommand({
   meta: {
     name: 'retract',
@@ -783,6 +846,8 @@ export const commands = defineCommand({
     record: recordCommand,
     guard: guardCommand,
     propose: proposeCommand,
+    define: defineEntityCommand,
+    decision: decisionCommand,
     retract: retractCommand,
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,

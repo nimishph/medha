@@ -1,4 +1,6 @@
 import {
+  type Decision,
+  type EntityDefinition,
   type EntityKey,
   type Episode,
   type EvidentialHint,
@@ -340,6 +342,146 @@ export async function runRemoveEpisode(
   }
 }
 
+export interface DefineOptions extends WriteFlags {
+  readonly title?: string;
+  readonly rationale?: string;
+  readonly tags?: string;
+  readonly author?: string;
+  readonly at?: string | number;
+}
+
+export interface DefineReport {
+  readonly home: string;
+  readonly key: EntityKey;
+  readonly definition: EntityDefinition;
+}
+
+/** `medha define`: appends a `define` episode (medha-arj.1/.5) — never evidential. */
+export async function runDefine(
+  options: DefineOptions,
+  environment: Environment,
+): Promise<DefineReport> {
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  try {
+    if (options.title === undefined || options.title.trim() === '') {
+      throw new InvalidArgumentError('--title', 'a non-empty string', options.title);
+    }
+    if (options.rationale === undefined || options.rationale.trim() === '') {
+      throw new InvalidArgumentError('--rationale', 'a non-empty string', options.rationale);
+    }
+    const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
+    const at = parseTimestamp(options.at, environment.now());
+    const author = resolveAuthor(options.author);
+    const tags = (options.tags ?? '')
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter((tag) => tag !== '');
+    const definition: EntityDefinition = {
+      title: options.title,
+      rationale: options.rationale,
+      ...(tags.length === 0 ? {} : { tags }),
+    };
+    const outcome = await opened.engine.define(
+      key,
+      definition,
+      { now: at },
+      { ...(author === undefined ? {} : { author }) },
+    );
+    return { home: opened.home, key, definition: outcome.definition };
+  } finally {
+    await opened.engine.close();
+  }
+}
+
+export interface DecisionOptions extends WriteFlags {
+  readonly condition?: string;
+  readonly apply?: boolean;
+  readonly ignore?: boolean;
+  readonly probability?: string;
+  readonly parent?: string;
+  readonly caseId?: string;
+  readonly author?: string;
+  readonly at?: string | number;
+}
+
+export interface DecisionReport {
+  readonly home: string;
+  readonly key: EntityKey;
+  readonly caseId: string;
+  readonly parentId?: string | undefined;
+  readonly condition: string;
+  readonly decision: Decision;
+}
+
+/**
+ * `medha <kind> <id> decision`: appends a `decision` episode (medha-arj.2/.5), minting a fresh
+ * `caseId` via `Medha.decision` unless `--case-id` names an existing branch to edit. A
+ * `decisionPolicy.requireHumanFor` rejection (medha-arj.4) surfaces as the typed
+ * `PermissionDeniedError` it already is — the CLI layer's usual error rendering gives it a clean,
+ * non-zero exit rather than a stack trace.
+ */
+export async function runDecision(
+  options: DecisionOptions,
+  environment: Environment,
+): Promise<DecisionReport> {
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  try {
+    if (options.condition === undefined || options.condition.trim() === '') {
+      throw new InvalidArgumentError('--condition', 'a non-empty string', options.condition);
+    }
+    const chosen = [
+      options.apply === true,
+      options.ignore === true,
+      options.probability !== undefined,
+    ].filter(Boolean).length;
+    if (chosen !== 1) {
+      throw new InvalidArgumentError(
+        '--apply/--ignore/--probability',
+        'exactly one of --apply, --ignore, or --probability',
+        chosen === 0 ? 'none given' : 'more than one given',
+      );
+    }
+    let decision: Decision;
+    if (options.apply === true) {
+      decision = { type: 'apply' };
+    } else if (options.ignore === true) {
+      decision = { type: 'ignore' };
+    } else {
+      const value = Number(options.probability);
+      if (!Number.isFinite(value) || value < 0 || value > 1) {
+        throw new InvalidArgumentError('--probability', 'a number in [0,1]', options.probability);
+      }
+      decision = { type: 'probability', value };
+    }
+    const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
+    const at = parseTimestamp(options.at, environment.now());
+    const author = resolveAuthor(options.author);
+    const outcome = await opened.engine.decision(
+      key,
+      {
+        condition: options.condition,
+        decision,
+        ...(options.parent === undefined ? {} : { parentId: options.parent }),
+        ...(options.caseId === undefined ? {} : { caseId: options.caseId }),
+      },
+      { now: at },
+      { ...(author === undefined ? {} : { author }) },
+    );
+    return {
+      home: opened.home,
+      key,
+      caseId: outcome.caseId,
+      ...(options.parent === undefined ? {} : { parentId: options.parent }),
+      condition: options.condition,
+      decision,
+    };
+  } finally {
+    await opened.engine.close();
+  }
+}
+
 function fixed(value: number): string {
   return value.toFixed(3);
 }
@@ -391,4 +533,30 @@ export function renderRemoveEpisode(report: RemoveEpisodeReport): string {
   return report.removed
     ? `medha: removed episode #${report.seq} from log (${report.remainingCount} episodes remaining)\n`
     : `medha: episode #${report.seq} was not found in log (${report.remainingCount} episodes remaining)\n`;
+}
+
+export function renderDefine(report: DefineReport): string {
+  const lines = [
+    `medha: defined ${keyLabel(report.key)}`,
+    `  title:     ${report.definition.title}`,
+  ];
+  if (report.definition.tags !== undefined && report.definition.tags.length > 0) {
+    lines.push(`  tags:      ${report.definition.tags.join(', ')}`);
+  }
+  lines.push(`  rationale: ${report.definition.rationale}`);
+  return `${lines.join('\n')}\n`;
+}
+
+function decisionLabel(decision: Decision): string {
+  return decision.type === 'probability' ? `probability(${decision.value})` : decision.type;
+}
+
+export function renderDecision(report: DecisionReport): string {
+  const lines = [
+    `medha: decision case ${report.caseId} on ${keyLabel(report.key)}`,
+    ...(report.parentId === undefined ? [] : [`  parent:    ${report.parentId}`]),
+    `  condition: ${report.condition}`,
+    `  decision:  ${decisionLabel(report.decision)}`,
+  ];
+  return `${lines.join('\n')}\n`;
 }

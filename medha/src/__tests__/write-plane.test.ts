@@ -4,6 +4,7 @@ import {
   foldLog,
   InvalidArgumentError,
   KindRegistry,
+  PermissionDeniedError,
 } from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Medha } from '../engine.ts';
@@ -422,5 +423,63 @@ describe('compaction respects kind specs', () => {
     const after = await store.get(key);
     expect(after?.evidence).toEqual(before?.evidence);
     expect(after?.status).toBe(before?.status);
+  });
+});
+
+describe('medha-arj.1/.2/.4: write plane — define and decision', () => {
+  test('define appends a define episode and never creates the entity', async () => {
+    const { store, medha } = makeEngine();
+    const out = await medha.define(
+      { ...KEY, kind: HOST_KIND },
+      { title: 'r1', rationale: 'a rule worth defining' },
+      ctx,
+    );
+    expect(out.episode.type).toBe('define');
+    expect(await store.get({ ...KEY, kind: HOST_KIND })).toBeUndefined();
+  });
+
+  test('decision mints a fresh caseId when none is given, and reuses one passed to edit', async () => {
+    const { store, medha } = makeEngine();
+    const key = { ...KEY, kind: HOST_KIND };
+    const created = await medha.decision(
+      key,
+      { condition: 'x', decision: { type: 'ignore' } },
+      ctx,
+      { random: () => 0.5 },
+    );
+    expect(created.caseId).toMatch(/^r1-dec-[0-9a-z]{5}$/);
+
+    const edited = await medha.decision(
+      key,
+      { condition: 'x', decision: { type: 'apply' }, caseId: created.caseId },
+      { now: NOW + 1 },
+    );
+    expect(edited.caseId).toBe(created.caseId);
+
+    const log = await store.episodes();
+    expect(log.filter((e) => e.type === 'decision')).toHaveLength(2);
+  });
+
+  test("decisionPolicy.requireHumanFor rejects an agent-authored 'apply' branch and accepts a human one", async () => {
+    const store = new MemoryStore({
+      registries: {
+        kinds: [],
+        signalSpecs: [],
+        anchorKinds: [],
+        kindSpecs: [{ name: HOST_KIND, decisionPolicy: { requireHumanFor: 'apply' } }],
+      },
+    });
+    const medha = new Medha({ store });
+    const key = { ...KEY, kind: HOST_KIND };
+    await expect(
+      medha.decision(key, { condition: 'x', decision: { type: 'apply' } }, ctx, {
+        author: 'agent:reviewer',
+      }),
+    ).rejects.toThrow(PermissionDeniedError);
+
+    const out = await medha.decision(key, { condition: 'x', decision: { type: 'apply' } }, ctx, {
+      author: 'human:nimish',
+    });
+    expect(out.episode.type).toBe('decision');
   });
 });

@@ -13,11 +13,13 @@ import {
   DEFAULT_RETENTION_DAYS,
   DEFAULT_SWEEP_INTERVAL_MS,
   type DriftReport,
+  type EntityDefinition,
   type EntityDetail,
   type HintDelta,
   type ListFilter,
   type Medha,
   type PreflightReport,
+  type ScoredDecisionCase,
 } from '@cntxt-labs/medha';
 import {
   ACTIVE_THRESHOLD,
@@ -161,6 +163,10 @@ export interface ShowReport {
   readonly asOf: number;
   readonly key: EntityKey;
   readonly detail: EntityDetail;
+  /** Convenience passthrough of `detail.definition` (medha-arj.6). */
+  readonly definition?: EntityDefinition | undefined;
+  /** Convenience passthrough of `detail.decisionTree` (medha-arj.6). */
+  readonly decisionTree?: readonly ScoredDecisionCase[] | undefined;
 }
 
 export async function runShow(options: ShowOptions, environment: Environment): Promise<ShowReport> {
@@ -173,7 +179,14 @@ export async function runShow(options: ShowOptions, environment: Environment): P
       { now },
       options.recent === undefined ? {} : { recent: positiveInt('--recent', options.recent) },
     );
-    return { home: opened.home, asOf: now, key, detail };
+    return {
+      home: opened.home,
+      asOf: now,
+      key,
+      detail,
+      ...(detail.definition === undefined ? {} : { definition: detail.definition }),
+      ...(detail.decisionTree === undefined ? {} : { decisionTree: detail.decisionTree }),
+    };
   } finally {
     await opened.engine.close();
   }

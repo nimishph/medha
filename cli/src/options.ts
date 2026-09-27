@@ -270,6 +270,43 @@ export const proposeCommandArgs: ArgsDef = {
   note: { type: 'string', description: 'Natural language rationale or note.' },
 };
 
+export const defineCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  title: { type: 'string', description: 'Definition title.', required: true },
+  rationale: { type: 'string', description: 'Definition rationale.', required: true },
+  tags: { type: 'string', description: 'Comma-separated tags.' },
+  author: { type: 'string', description: 'Author or agent identifier recording this definition.' },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+};
+
+export const decisionCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  condition: { type: 'string', description: 'Branch condition text.', required: true },
+  apply: { type: 'boolean', description: 'Decision: apply.' },
+  ignore: { type: 'boolean', description: 'Decision: ignore.' },
+  probability: { type: 'string', description: 'Decision: probability value in [0,1].' },
+  parent: { type: 'string', description: 'Existing case id this branch attaches under.' },
+  caseId: {
+    type: 'string',
+    description: 'Existing case id to edit (latest-write-wins), instead of creating a new branch.',
+  },
+  author: {
+    type: 'string',
+    description:
+      "Author or agent identifier granting this decision. Use 'human:<id>' for a kind whose " +
+      'decisionPolicy.requireHumanFor gates this decision type.',
+  },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+};
+
 export const retractCommandArgs: ArgsDef = {
   ...readCommonArgs,
   seq: { type: 'string', description: 'Episode sequence number to retract.', required: true },
