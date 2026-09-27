@@ -1,3 +1,6 @@
+export type { Decision } from './decision-type.ts';
+
+import type { Decision } from './decision-type.ts';
 import type { EmaState, EntityState, Evidence, LifecycleStatus } from './entity.ts';
 import { InvalidArgumentError } from './errors.ts';
 import type { GuardState } from './guard.ts';
@@ -10,11 +13,6 @@ import { statusFor, type TrustResult, trustOf } from './trust.ts';
  * (apply/ignore/probability), growing incrementally from usage, with its own Wilson evidence
  * separate from the entity's aggregate trust.
  */
-
-export type Decision =
-  | { readonly type: 'apply' }
-  | { readonly type: 'ignore' }
-  | { readonly type: 'probability'; readonly value: number };
 
 export interface DecisionCase {
   /** `<entity-id>-dec-<5-char-alnum>`, salted by entityKeyString so concurrent hosts don't collide. */

@@ -1,4 +1,4 @@
-import type { Decision } from './decision.ts';
+import type { Decision } from './decision-type.ts';
 import { InvalidArgumentError, UnknownKindError } from './errors.ts';
 
 /**
