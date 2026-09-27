@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs';
-import type { CompactionReport, MedhaSnapshot, PreflightReport } from '@cntxt-labs/medha';
+import {
+  type CompactionReport,
+  type MedhaSnapshot,
+  migrateStoreSnapshot,
+  type PreflightReport,
+} from '@cntxt-labs/medha';
 import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 import { resolveRegistries } from '@cntxt-labs/medha-store';
 import type { Environment } from './environment.ts';
@@ -130,6 +135,7 @@ export interface MaintainRestoreReport {
   readonly asOf: number;
   readonly path: string;
   readonly restored: { readonly from: number; readonly to: number };
+  readonly migration?: { readonly from: number; readonly to: number } | undefined;
 }
 
 export async function runMaintainRestore(
@@ -142,9 +148,15 @@ export async function runMaintainRestore(
   const snapshot = readSnapshotFile(options.path);
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
-    const { restored } = await opened.adminEngine.restore(snapshot);
+    const { restored, migration } = await opened.adminEngine.restore(snapshot);
     const now = environment.now();
-    return { home: opened.home, asOf: now, path: options.path, restored };
+    return {
+      home: opened.home,
+      asOf: now,
+      path: options.path,
+      restored,
+      ...(migration ? { migration } : {}),
+    };
   } finally {
     await opened.adminEngine.close();
   }
@@ -169,19 +181,10 @@ export function readSnapshotFile(path: string): MedhaSnapshot {
   if (!parsed || typeof parsed !== 'object') {
     throw new SnapshotFileError(path, 'expected a JSON object');
   }
-  const snapObj =
-    'snapshot' in parsed && parsed.snapshot && typeof parsed.snapshot === 'object'
-      ? parsed.snapshot
-      : parsed;
-  const cand = snapObj as Record<string, unknown>;
-  if (cand.format !== 'sutras.medha/v1') {
-    throw new SnapshotFileError(
-      path,
-      `unsupported snapshot format: '${cand.format}', expected 'sutras.medha/v1'`,
-    );
+  try {
+    const result = migrateStoreSnapshot(parsed);
+    return result.doc;
+  } catch (err) {
+    throw new SnapshotFileError(path, err instanceof Error ? err.message : String(err));
   }
-  if (!Array.isArray(cand.episodes)) {
-    throw new SnapshotFileError(path, 'snapshot missing episodes array');
-  }
-  return cand as unknown as MedhaSnapshot;
 }

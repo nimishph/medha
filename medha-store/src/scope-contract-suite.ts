@@ -124,14 +124,16 @@ export function runScopeStoreContractSuite(setup: StoreContractSetup): void {
       expect((await scoped.episodes()).filter((e) => e.type === 'retract')).toHaveLength(1);
     });
 
-    test('a retraction naming no existing episode is left to the inner store, not judged here', async () => {
+    test("a retraction naming no existing episode is the inner store's call, not a namespace one", async () => {
       const raw = await seeded();
       const scoped = scopeStore(raw, [A]);
       const before = await raw.episodes();
-      await scoped.append(
-        retractAt({ namespace: A, kind: setup.extraKind, id: 'r1' }, 9_999, 1_000),
-      );
-      expect((await raw.episodes()).length).toBe(before.length + 1);
+      // The wrapper has no namespace judgment to make here — the target names no namespace. The
+      // inner store still refuses it, because an armed pointer into a growing log is not inert.
+      await expect(
+        scoped.append(retractAt({ namespace: A, kind: setup.extraKind, id: 'r1' }, 9_999, 1_000)),
+      ).rejects.toThrow();
+      expect(await raw.episodes()).toEqual(before);
     });
 
     test('list, rebuild and episodes are filtered to the scope', async () => {

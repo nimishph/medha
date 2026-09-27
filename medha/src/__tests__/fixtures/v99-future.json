@@ -1,0 +1,11 @@
+{
+  "format": "sutras.medha/v99",
+  "formatVersion": 99,
+  "exportedAt": 1727300000000,
+  "registries": {
+    "kinds": ["rule"],
+    "signalSpecs": []
+  },
+  "episodes": [],
+  "meta": {}
+}

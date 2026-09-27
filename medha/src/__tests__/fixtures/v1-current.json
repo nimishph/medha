@@ -1,0 +1,23 @@
+{
+  "format": "sutras.medha/v1",
+  "formatVersion": 1,
+  "exportedAt": 1727200000000,
+  "registries": {
+    "kinds": ["rule"],
+    "signalSpecs": [],
+    "anchorKinds": ["week"]
+  },
+  "episodes": [
+    {
+      "type": "signal",
+      "seq": 0,
+      "key": { "namespace": "", "kind": "rule", "id": "rule-medha-1" },
+      "at": 1727200000000,
+      "spec": { "name": "APPLY", "value": 1, "countsAsTrial": true, "countsAsSuccess": true },
+      "ensure": true
+    }
+  ],
+  "meta": {
+    "sweep:lastRun": "1727200000000"
+  }
+}

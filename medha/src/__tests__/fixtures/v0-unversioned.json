@@ -1,0 +1,21 @@
+{
+  "last_state_update": 1727000000000,
+  "episodes": [
+    {
+      "type": "signal",
+      "seq": 0,
+      "key": { "namespace": "", "kind": "rule", "id": "rule-v0-1" },
+      "at": 1727000000000,
+      "spec": { "type": "rule", "name": "REJECT_CONTEXT", "valence": -1, "weight": 0.5 },
+      "ensure": true
+    },
+    {
+      "type": "signal",
+      "seq": 1,
+      "key": { "namespace": "", "kind": "rule", "id": "rule-v0-2" },
+      "at": 1727000001000,
+      "spec": { "type": "rule", "name": "APPLY_RULE", "valence": 1, "weight": 0.5 },
+      "ensure": true
+    }
+  ]
+}

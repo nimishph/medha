@@ -141,7 +141,8 @@ describe('medha ui dashboard & report', () => {
 
     expect(html).toContain('function escapeHtml(value)');
     // Inline onclick with an interpolated id (the XSS/breakout vector) must be gone.
-    expect(html).not.toContain("onclick=\"inspectEntity('");
+    expect(html).not.toContain('onclick="inspectEntity(\'');
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the literal template-string source, not interpolating
     expect(html).toContain('data-inspect-id="${escapeHtml(e.key.id)}"');
     expect(html).toContain("addEventListener('click'");
     // Every innerHTML template that carries a note/author/status/id must escape it.

@@ -29,6 +29,7 @@ import {
   type FoldEpisodeOptions,
   foldLog,
   InvalidArgumentError,
+  InvariantViolationError,
   isDrifting,
   type KindRegistry,
   RECENCY_FLOOR,
@@ -48,6 +49,7 @@ export const DEFAULT_FOLD_DAYS = 90;
 export const DEFAULT_RETENTION_DAYS = 90;
 
 /** Snapshot format marker written by `backup()` and required by `restore()`. */
+export const CURRENT_SNAPSHOT_FORMAT_VERSION = 1;
 export const SNAPSHOT_FORMAT = 'sutras.medha/v1';
 
 // ---------------------------------------------------------------------------------------------
@@ -150,7 +152,10 @@ export interface PreflightReport {
 
 /** A portable, JSON-serialisable capture of the store's source of truth (§6.4 backup/restore). */
 export interface MedhaSnapshot {
+  readonly [key: string]: unknown;
   readonly format: typeof SNAPSHOT_FORMAT;
+  /** Explicit integer format version (spec §6.4). */
+  readonly formatVersion: typeof CURRENT_SNAPSHOT_FORMAT_VERSION;
   /** When the snapshot was taken. Purely informational — restore never consults it. */
   readonly exportedAt: number;
   /** The registries the snapshot was taken under (restore validates the log against its host store). */
@@ -323,9 +328,28 @@ export function compactPrefix(
 
   const prefix = ordered.slice(0, border + 1);
   const suffix = ordered.slice(border + 1);
+  // A retraction in the suffix can still point backwards, into the prefix that is about to stop
+  // existing as episodes. Carrying the suffix over untouched would leave that `targetSeq` naming
+  // whatever now sits at that seq — usually the very baseline holding this entity's checkpoint.
+  // So each suffix retraction is resolved against the new layout before the log is renumbered:
+  //  - target inside the prefix → its effect belongs to the baseline, so fold it in and drop the
+  //    spent retraction. Folding the prefix alone would *not* apply it, and the retracted signal
+  //    would come back from the dead;
+  //  - target inside the kept suffix → renumber it to follow its episode;
+  //  - target naming no episode at all → drop it. It masks nothing today, and as a pointer into a
+  //    log that keeps growing it is the one that silently starts masking something tomorrow.
+  const suffixSeqs = new Set(suffix.map((episode) => episode.seq));
+  const spentOnPrefix: number[] = [];
+  const keptSuffix = suffix.filter((episode) => {
+    if (episode.type !== 'retract') return true;
+    if (episode.targetSeq > border) return suffixSeqs.has(episode.targetSeq);
+    spentOnPrefix.push(episode.targetSeq);
+    return false;
+  });
+
   // Fold with the store's kind registry: kind specs (evidence weighting, thresholds, signal limits)
   // shape the state, so folding with defaults would bake a different state into the baseline.
-  const states = foldLog(prefix, options);
+  const states = foldLog(prefix, options, spentOnPrefix);
 
   // The checkpoint clock: the last time each entity changed inside the folded prefix.
   const lastAt = new Map<string, number>();
@@ -346,9 +370,30 @@ export function compactPrefix(
     };
   });
 
-  const renumbered = [...baselines, ...suffix].map((episode, seq) =>
-    assignSeq(episodeToInput(episode), seq),
-  );
+  // Retractions are positional pointers into this log, so they are renumbered *after* the kept
+  // suffix is fixed, against the seq their target actually ends up at.
+  const newSeqOf = new Map<number, number>();
+  keptSuffix.forEach((episode, i) => {
+    newSeqOf.set(episode.seq, states.length + i);
+  });
+  const renumbered: Episode[] = [
+    ...baselines.map((episode, seq) => assignSeq(episodeToInput(episode), seq)),
+    ...keptSuffix.map((episode, i) => {
+      const input = episodeToInput(episode);
+      if (input.type !== 'retract') return assignSeq(input, states.length + i);
+      const targetSeq = newSeqOf.get(input.targetSeq);
+      if (targetSeq === undefined) {
+        throw new InvariantViolationError('compact', {
+          context: {
+            seq: episode.seq,
+            targetSeq: input.targetSeq,
+            reason: 'retraction lost its target',
+          },
+        });
+      }
+      return assignSeq({ ...input, targetSeq }, states.length + i);
+    }),
+  ];
 
   return {
     episodes: renumbered,

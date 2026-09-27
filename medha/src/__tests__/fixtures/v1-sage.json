@@ -1,0 +1,21 @@
+{
+  "format": "sutras.sage/v1",
+  "exportedAt": 1727100000000,
+  "registries": {
+    "kinds": ["rule", "prompt"],
+    "signalSpecs": []
+  },
+  "episodes": [
+    {
+      "type": "signal",
+      "seq": 0,
+      "key": { "namespace": "", "kind": "rule", "id": "rule-sage-1" },
+      "at": 1727100000000,
+      "spec": { "type": "rule", "name": "APPLY_RULE", "valence": 1, "weight": 0.5 },
+      "ensure": true
+    }
+  ],
+  "meta": {
+    "sweep:lastRun": "1727100000000"
+  }
+}

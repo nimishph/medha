@@ -10,6 +10,7 @@ import type {
 import {
   APPLY,
   foldLog,
+  InvalidArgumentError,
   MedhaError,
   REJECT_CONTEXT,
   REJECT_RULE,
@@ -191,6 +192,52 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       await store.append(retractAt(KEY, other.episode.seq, NOW + 3));
       expect(await store.get(KEY)).toBeUndefined();
       expect(await store.episodes()).toHaveLength(4);
+    });
+
+    test('a retraction naming no existing episode is refused, and nothing is written', async () => {
+      const store = await setup.create();
+      await store.open();
+      const applied = await store.append(applyAt(KEY, NOW));
+
+      // `targetSeq` is an index into a log that keeps growing, so an unresolvable one is not an
+      // inert no-op: it is an armed pointer that starts masking whatever later lands at that seq.
+      await expect(store.append(retractAt(KEY, 9_999, NOW + 1))).rejects.toThrow(
+        InvalidArgumentError,
+      );
+      // The boundary itself is a valid target — the next append's own seq does not exist yet.
+      await expect(store.append(retractAt(KEY, applied.episode.seq + 1, NOW + 1))).rejects.toThrow(
+        InvalidArgumentError,
+      );
+      expect(await store.episodes()).toHaveLength(1);
+      expect((await store.get(KEY))?.evidence.n).toBe(1);
+    });
+
+    test('a refused retraction cannot arm a later episode to be masked', async () => {
+      const store = await setup.create();
+      await store.open();
+      // Arm a pointer at seq 1 while the log is one episode long.
+      await store.append(applyAt(KEY, NOW));
+      await expect(store.append(retractAt(KEY, 1, NOW + 1))).rejects.toThrow(InvalidArgumentError);
+
+      // Grow past that seq. Nothing is masked, because nothing was ever armed.
+      const real = await store.append(applyAt(KEY, NOW + 2));
+      expect(real.episode.seq).toBe(1);
+      const state = await store.get(KEY);
+      expect(state?.evidence.n).toBe(2);
+      expect((await store.rebuild())[0]).toEqual(state);
+    });
+
+    test('a log carrying a dangling retraction is refused on replace', async () => {
+      const store = await setup.create();
+      await store.open();
+      const applied = await store.append(applyAt(KEY, NOW));
+      // A rewrite path (restore, merge, resequence) must not be a way to slip one in either.
+      const forged = [
+        { ...applied.episode },
+        { seq: 1, type: 'retract' as const, key: KEY, at: NOW + 1, targetSeq: 7, reason: 'x' },
+      ];
+      await expect(store.replaceLog(forged)).rejects.toThrow(InvalidArgumentError);
+      expect(await store.episodes()).toHaveLength(1);
     });
 
     test('unknown kinds fail loud with the registry names', async () => {
