@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   CANONICAL_SIGNALS,
   InvalidArgumentError,
@@ -41,7 +41,13 @@ export const CONFIG_LAYOUT_VERSION = 1;
 export interface MedhaConfigV1 {
   readonly layoutVersion: 1;
   readonly backend: Backend;
-  /** The absolute store path: the db file (sqlite), the document file (file), null (memory). */
+  /**
+   * The absolute store path in memory: the db file (sqlite), the document file (file), null
+   * (memory). On disk in config.json it is stored relative to `home` whenever possible (so a
+   * committed config.json — e.g. sharing registries across a team — resolves correctly regardless
+   * of where each clone checks the project out); `readConfig`/`writeConfig` do that conversion, so
+   * every other consumer of this field only ever sees the resolved absolute path.
+   */
   readonly path: string | null;
   /** The effective registries — config.json is the SINGLE SOURCE OF TRUTH (spec decision). */
   readonly registries: StoreRegistries;
@@ -277,6 +283,23 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
   return resolveRegistries(hostRegistries);
 }
 
+/**
+ * The form a store path takes inside config.json: relative to `home` with forward slashes (so the
+ * file reads the same and resolves correctly on any OS), or the absolute path unchanged when it
+ * cannot be made relative (a different drive on Windows — `relative` itself falls back to the
+ * absolute form there, so this never throws or produces a bogus path).
+ */
+function toStoredPath(home: string, absolute: string): string {
+  const rel = relative(home, absolute);
+  return isAbsolute(rel) ? rel : rel.split(sep).join('/');
+}
+
+/** The inverse of `toStoredPath`. A stored value that is already absolute is used as-is, so a
+ * config.json written before this existed keeps working unchanged. */
+function resolveStoredPath(home: string, stored: string): string {
+  return isAbsolute(stored) ? stored : resolve(home, stored.split('/').join(sep));
+}
+
 function isNameList(value: unknown): value is readonly string[] {
   return (
     Array.isArray(value) && value.every((entry) => typeof entry === 'string' && entry.trim() !== '')
@@ -339,7 +362,10 @@ export function readConfig(home: string): MedhaConfigV1 | null {
   return {
     layoutVersion: CONFIG_LAYOUT_VERSION,
     backend: candidate.backend as Backend,
-    path: candidate.path === undefined ? null : candidate.path,
+    path:
+      candidate.path === undefined || candidate.path === null
+        ? null
+        : resolveStoredPath(home, candidate.path),
     registries: registries as StoreRegistries,
     ...(candidate.namespaceScope === undefined ? {} : { namespaceScope: candidate.namespaceScope }),
   };
@@ -352,7 +378,13 @@ function describeThrowable(value: unknown): string {
 export function writeConfig(home: string, config: MedhaConfigV1): string {
   const path = configPathFor(home);
   mkdirSync(home, { recursive: true });
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  // config.path is absolute in memory (see the field's doc comment) but stored relative to `home`
+  // on disk, so a committed config.json resolves correctly from any clone location.
+  const onDisk: MedhaConfigV1 = {
+    ...config,
+    path: config.path === null ? null : toStoredPath(home, config.path),
+  };
+  writeFileSync(path, `${JSON.stringify(onDisk, null, 2)}\n`, 'utf8');
   return path;
 }
 

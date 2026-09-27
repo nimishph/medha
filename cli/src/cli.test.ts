@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Medha, type MedhaSnapshot, Sage } from '@cntxt-labs/medha';
-import type { EntityKey } from '@cntxt-labs/medha-core';
+import { type EntityKey, InvalidArgumentError } from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { runCli } from './cli.ts';
 import type { Environment } from './environment.ts';
-import { type MedhaConfigV1, storeForConfig } from './layout.ts';
+import { type MedhaConfigV1, readConfig as readConfigOrNull, storeForConfig } from './layout.ts';
 import { serveMcp } from './mcp.ts';
 import { VERSION } from './version.ts';
 
@@ -74,8 +74,19 @@ function fresh(): {
   };
 }
 
-function readConfig(home: string): Record<string, unknown> {
+/** Raw config.json bytes as written to disk — for asserting the on-disk representation itself
+ * (e.g. that a path was stored relative to `home`), as opposed to `readConfig`'s resolved view. */
+function readRawConfig(home: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as Record<string, unknown>;
+}
+
+/** `layout.ts`'s `readConfig`, asserting the home is already initialized (every caller here just ran `init`). */
+function readConfig(home: string): MedhaConfigV1 {
+  const config = readConfigOrNull(home);
+  if (config === null) {
+    throw new InvalidArgumentError('home', 'an initialized home', home);
+  }
+  return config;
 }
 
 describe('medha entrypoint', () => {
@@ -212,8 +223,36 @@ describe('medha init — backends and paths', () => {
     expect(await runCli(['init', '--store', 'file'], env)).toBe(0);
     expect(existsSync(join(home, 'state.jsonl'))).toBe(true);
     expect(readConfig(home).path).toBe(join(home, 'state.jsonl'));
+    expect(readRawConfig(home).path).toBe('state.jsonl');
     // .bak exists only after a second atomic write; a fresh init has exactly the main doc.
     expect(existsSync(join(home, 'state.jsonl.bak'))).toBe(false);
+  });
+
+  test('config.json is portable: a home copied to a new absolute location still opens', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init'], env)).toBe(0);
+    await new Medha({ store: storeForConfig(readConfig(join(root, '.medha'))) }).record(
+      { namespace: '', kind: 'rule', id: 'portable' },
+      'APPLY',
+      { now: NOW },
+      { ensure: true },
+    );
+
+    const moved = join(
+      root,
+      '..',
+      `${basename(root)}-moved-${Math.random().toString(36).slice(2)}`,
+    );
+    cpSync(root, moved, { recursive: true });
+    cleanups = [...cleanups, moved];
+
+    const movedEnv: Environment = { ...env, cwd: moved };
+    expect(await runCli(['status'], movedEnv)).toBe(0);
+    expect(await runCli(['show', '--id', 'portable'], movedEnv)).toBe(0);
+
+    const movedConfig = readConfig(join(moved, '.medha'));
+    expect(movedConfig.path).toBe(join(moved, '.medha', 'store.sqlite'));
+    expect(existsSync(movedConfig.path as string)).toBe(true);
   });
 
   test('<command> --help prints usage and never runs the command', async () => {
@@ -303,7 +342,7 @@ describe('medha init — idempotency', () => {
     writeFileSync(second, JSON.stringify({ kinds: ['gadget'] }));
     expect(await runCli(['init', '--config', second, '--recreate'], env)).toBe(0);
 
-    const registries = readConfig(home).registries as { kinds: string[] };
+    const registries = readRawConfig(home).registries as { kinds: string[] };
     expect(registries.kinds).toContain('gadget');
     expect(registries.kinds).not.toContain('widget');
   });
@@ -352,7 +391,7 @@ describe('medha init — registry validation', () => {
       }),
     );
     expect(await runCli(['init', '--config', cfg], env)).toBe(0);
-    const registries = readConfig(home).registries as {
+    const registries = readRawConfig(home).registries as {
       kinds: string[];
       signalSpecs: { name: string }[];
       anchorKinds: string[];
@@ -404,7 +443,7 @@ const SEED_NOW = NOW + 1000;
 
 /** Seed a configured home with known entities and return the store file path. */
 async function seedHome(env: Environment): Promise<void> {
-  const config = readConfig(join(env.cwd, '.medha')) as unknown as MedhaConfigV1;
+  const config = readConfig(join(env.cwd, '.medha'));
   const store = storeForConfig(config);
   const engine = new Medha({ store });
   try {
