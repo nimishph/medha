@@ -80,12 +80,77 @@ try {
     status.code === 0 && status.out.includes('preflight:  ok'),
     status.out + status.err,
   );
+  const list = await run(['list', '--json']);
+  check(
+    'it lists entities through the launcher',
+    list.code === 0 && list.out.includes('"page"'),
+    list.out + list.err,
+  );
+  const drift = await run(['drift']);
+  check(
+    'it checks drift through the launcher',
+    drift.code === 0 && drift.out.includes('drift'),
+    drift.out + drift.err,
+  );
   const usage = await run(['frobnicate']);
   check(
     'a failing command exits non-zero through the launcher',
     usage.code !== 0,
     `exit ${usage.code}`,
   );
+
+  // MCP stdio streaming check through the npm launcher
+  const mcpServer = Bun.spawn({
+    cmd: ['node', launcher, 'mcp', 'serve'],
+    cwd: project,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const send = (message: unknown) => mcpServer.stdin.write(`${JSON.stringify(message)}\n`);
+  send({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'smoke-npm', version: '1.0' },
+    },
+  });
+  send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+  await mcpServer.stdin.flush();
+
+  const reader = mcpServer.stdout.getReader();
+  let seen = '';
+  const decoder = new TextDecoder();
+  while (!seen.includes('"id":2')) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    seen += decoder.decode(chunk.value);
+  }
+
+  check(
+    'serves MCP tools over stdio through launcher',
+    seen.includes('"name":"hints"') &&
+      seen.includes('"name":"list_entities"') &&
+      seen.includes('"name":"propose"'),
+    seen,
+  );
+
+  await mcpServer.stdin.end();
+  const exited = await Promise.race([mcpServer.exited, Bun.sleep(10_000).then(() => undefined)]);
+  check(
+    'MCP server exits cleanly when stdin closes through launcher',
+    exited === 0,
+    `exit ${exited}`,
+  );
+  if (exited === undefined) {
+    mcpServer.kill();
+    await mcpServer.exited;
+  }
 } finally {
   rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }

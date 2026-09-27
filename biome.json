@@ -2,7 +2,14 @@
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   "root": true,
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!examples", "!docs/spec/vectors"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!examples",
+      "!docs/spec/vectors",
+      "!**/.beads"
+    ]
   },
   "formatter": {
     "enabled": true,

@@ -102,17 +102,18 @@ jobs:
             exit 1
           fi
           publish() {
-            name="$(node -p "require('./$1/package.json').name")"
-            version="$(node -p "require('./$1/package.json').version")"
+            dir="./${1#./}"
+            name="$(node -p "require('${dir}/package.json').name")"
+            version="$(node -p "require('${dir}/package.json').version")"
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "${name}@${version} is already published, skipping"
             else
-              npm publish "$1" --access public --provenance --tag latest
+              npm publish "${dir}" --access public --provenance --tag latest
             fi
           }
           for folder in staged/*/; do publish "${folder%/}"; done
           cp README.md LICENSE SKILL.md cli/
-          publish cli
+          publish ./cli
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

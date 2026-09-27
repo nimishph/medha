@@ -7,7 +7,7 @@
  * Result: `<out>/medha-<version>-<platform>-<arch>/medha[.exe]`, `<out>/medha/medha[.exe]` and the same
  * program as an npm package in `<out>/npm/medha-<platform>-<arch>/`.
  */
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { PLATFORMS, platformPackage } from './platforms.ts';
@@ -83,7 +83,11 @@ const tarChild = Bun.spawn({
   stdout: 'inherit',
   stderr: 'inherit',
 });
-await tarChild.exited;
+const tarCode = await tarChild.exited;
+if (tarCode !== 0) {
+  process.stderr.write(`tar failed with exit code ${tarCode}\n`);
+  process.exit(tarCode ?? 1);
+}
 process.stdout.write(`Archived: ${join(out, archive)}\n`);
 
 // The same program as an npm package for this target, which the launcher package depends on.
@@ -99,7 +103,16 @@ const npmName = platformPackage(platform);
 const npmFolder = join(out, 'npm', npmName.split('/')[1] as string);
 rmSync(npmFolder, { recursive: true, force: true });
 mkdirSync(join(npmFolder, 'bin'), { recursive: true });
-cpSync(targetPath, join(npmFolder, 'bin', program));
+const npmBinPath = join(npmFolder, 'bin', program);
+cpSync(targetPath, npmBinPath);
+if (!isWin) {
+  try {
+    chmodSync(targetPath, 0o755);
+    chmodSync(npmBinPath, 0o755);
+  } catch (error) {
+    process.stderr.write(`warning: could not set executable permissions: ${error}\n`);
+  }
+}
 if (existsSync(join(baseRoot, 'LICENSE'))) {
   cpSync(join(baseRoot, 'LICENSE'), join(npmFolder, 'LICENSE'));
 }
