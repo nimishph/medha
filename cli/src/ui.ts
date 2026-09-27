@@ -717,6 +717,12 @@ export function generateDashboardHtml(data: {
   <script>
     let state = ${initialDataJson};
 
+    function escapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
     function switchTab(name) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
@@ -783,8 +789,8 @@ export function generateDashboardHtml(data: {
         const pct = Math.round(e.trustScore * 100);
         return \`
           <tr>
-            <td><span class="pill pill-\${e.status}">\${e.status}</span></td>
-            <td><span class="entity-id">\${keyLabel}</span></td>
+            <td><span class="pill pill-\${escapeHtml(e.status)}">\${escapeHtml(e.status)}</span></td>
+            <td><span class="entity-id">\${escapeHtml(keyLabel)}</span></td>
             <td>
               <div class="trust-meter">
                 <span style="font-family: var(--font-mono); font-size: 0.8rem; width: 42px;">\${e.trustScore.toFixed(3)}</span>
@@ -796,22 +802,27 @@ export function generateDashboardHtml(data: {
               \${e.temporal.isDrifting ? '⚠ ' + e.temporal.driftDelta.toFixed(3) : '✓ stable'}
             </td>
             <td style="font-size: 0.8rem; color: var(--text-muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              \${e.lastNote ? '"' + e.lastNote + '"' : '—'}
+              \${e.lastNote ? '"' + escapeHtml(e.lastNote) + '"' : '—'}
             </td>
             <td>
-              <button class="btn" style="padding: 4px 8px; font-size: 0.75rem;" onclick="inspectEntity('\${e.key.id}')">Inspect</button>
+              <button class="btn" style="padding: 4px 8px; font-size: 0.75rem;" data-inspect-id="\${escapeHtml(e.key.id)}">Inspect</button>
             </td>
           </tr>
         \`;
       }).join('');
     }
 
+    document.getElementById('entitiesTbody').addEventListener('click', (evt) => {
+      const btn = evt.target.closest('[data-inspect-id]');
+      if (btn) inspectEntity(btn.getAttribute('data-inspect-id'));
+    });
+
     function populateDecomposerSelect() {
       const sel = document.getElementById('decomposerSelect');
       const ents = state.entities || [];
       sel.innerHTML = ents.map(e => {
         const keyLabel = e.key.namespace ? \`\${e.key.namespace}/\${e.key.kind}/\${e.key.id}\` : \`\${e.key.kind}/\${e.key.id}\`;
-        return \`<option value="\${e.key.id}">\${keyLabel} (\${e.status}, T=\${e.trustScore.toFixed(3)})</option>\`;
+        return \`<option value="\${escapeHtml(e.key.id)}">\${escapeHtml(keyLabel)} (\${escapeHtml(e.status)}, T=\${e.trustScore.toFixed(3)})</option>\`;
       }).join('');
       updateDecomposer();
     }
@@ -931,9 +942,9 @@ export function generateDashboardHtml(data: {
           return \`
             <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
               <div>
-                <span class="entity-id" style="font-size: 0.88rem;">\${keyLabel}</span>
-                <span class="badge" style="margin-left: 8px;">\${item.admittedBy}</span>
-                \${item.hint.lastNote ? '<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">"' + item.hint.lastNote + '"</div>' : ''}
+                <span class="entity-id" style="font-size: 0.88rem;">\${escapeHtml(keyLabel)}</span>
+                <span class="badge" style="margin-left: 8px;">\${escapeHtml(item.admittedBy)}</span>
+                \${item.hint.lastNote ? '<div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">"' + escapeHtml(item.hint.lastNote) + '"</div>' : ''}
               </div>
               <div style="text-align: right; font-family: var(--font-mono); font-size: 0.82rem;">
                 <div style="color: #818cf8; font-weight: 700;">\${item.cost} tokens</div>
@@ -983,13 +994,13 @@ export function generateDashboardHtml(data: {
           <div class="timeline-item \${isRetracted ? 'retracted' : ''}">
             <div class="timeline-meta">
               <span class="badge" style="font-weight: 700;">#\${ep.seq}</span>
-              <span class="pill pill-active" style="padding: 2px 6px; font-size: 0.68rem;">\${ep.type}</span>
-              <span class="entity-id">\${keyLabel}</span>
+              <span class="pill pill-active" style="padding: 2px 6px; font-size: 0.68rem;">\${escapeHtml(ep.type)}</span>
+              <span class="entity-id">\${escapeHtml(keyLabel)}</span>
               <span>• \${timeStr}</span>
-              \${ep.author ? '<span class="badge" style="color: #93c5fd;">@' + ep.author + '</span>' : ''}
+              \${ep.author ? '<span class="badge" style="color: #93c5fd;">@' + escapeHtml(ep.author) + '</span>' : ''}
             </div>
-            \${ep.note ? '<div class="note-box">"' + ep.note + '"</div>' : ''}
-            \${isRetracted ? '<div style="color: var(--quarantined); font-size: 0.8rem;">Retracted sequence #' + ep.targetSeq + ' — Reason: ' + ep.reason + '</div>' : ''}
+            \${ep.note ? '<div class="note-box">"' + escapeHtml(ep.note) + '"</div>' : ''}
+            \${isRetracted ? '<div style="color: var(--quarantined); font-size: 0.8rem;">Retracted sequence #' + escapeHtml(String(ep.targetSeq)) + ' — Reason: ' + escapeHtml(ep.reason) + '</div>' : ''}
           </div>
         \`;
       }).join('');
@@ -1070,10 +1081,9 @@ export async function startUiServer(
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}:${requestedPort}`);
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+    // No CORS headers: the dashboard page and its /api/* calls are same-origin.
+    // This server is unauthenticated, so it must not opt out of same-origin
+    // protection — doing so would let any page open in the browser read the store.
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();

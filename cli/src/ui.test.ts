@@ -106,6 +106,53 @@ describe('medha ui dashboard & report', () => {
     expect(html).toContain('v0.2.0');
   });
 
+  test('generateDashboardHtml client script escapes untrusted note/author/id fields before innerHTML', () => {
+    // The note/author/id fields only reach the DOM via the embedded client-side
+    // script's innerHTML template strings (the raw JSON blob is not itself HTML).
+    // Guard the source so those interpolations stay routed through escapeHtml,
+    // and the id no longer breaks out of an inline onclick string literal.
+    const html = generateDashboardHtml({
+      status: {
+        asOf: NOW,
+        home: '/test/home',
+        backend: 'sqlite',
+        path: null,
+        byStatus: { active: 1, trusted: 0, probation: 0, quarantined: 0, retired: 0 },
+        drifting: 0,
+        preflight: {
+          asOf: NOW,
+          status: 'ok',
+          location: null,
+          episodeCount: 1,
+          entityCount: 1,
+          integrity: 'ok',
+          lastSweep: null,
+          registries: { kinds: 1, signals: 1, anchors: 1 },
+        },
+        params: { asOf: NOW, note: '', params: [] },
+      },
+      entities: [],
+      episodes: [],
+      version: '0.2.0',
+      home: '/test/home',
+    });
+
+    expect(html).toContain('function escapeHtml(value)');
+    // Inline onclick with an interpolated id (the XSS/breakout vector) must be gone.
+    expect(html).not.toContain("onclick=\"inspectEntity('");
+    expect(html).toContain('data-inspect-id="${escapeHtml(e.key.id)}"');
+    expect(html).toContain("addEventListener('click'");
+    // Every innerHTML template that carries a note/author/status/id must escape it.
+    expect(html).toContain('escapeHtml(e.lastNote)');
+    expect(html).toContain('escapeHtml(item.hint.lastNote)');
+    expect(html).toContain('escapeHtml(item.admittedBy)');
+    expect(html).toContain('escapeHtml(ep.note)');
+    expect(html).toContain('escapeHtml(ep.author)');
+    expect(html).toContain('escapeHtml(ep.reason)');
+    expect(html).toContain('escapeHtml(keyLabel)');
+    expect(html).toContain('escapeHtml(e.status)');
+  });
+
   test('embedded UI server handles HTTP endpoints and closes cleanly', async () => {
     // Use an ephemeral port 8499
     const testPort = 8499;
@@ -133,6 +180,11 @@ describe('medha ui dashboard & report', () => {
       expect(rootRes.status).toBe(200);
       const rootHtml = await rootRes.text();
       expect(rootHtml).toContain('Medha Evidential Memory Dashboard');
+      expect(rootRes.headers.get('access-control-allow-origin')).toBeNull();
+
+      // API responses must not opt out of same-origin protection either.
+      const apiCorsRes = await fetch(`${server.url}/api/status`);
+      expect(apiCorsRes.headers.get('access-control-allow-origin')).toBeNull();
 
       // 2. API Status
       const statusRes = await fetch(`${server.url}/api/status`);
