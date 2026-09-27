@@ -19,7 +19,7 @@ import {
   type SyncStatus,
   serializeSnapshot,
 } from '@cntxt-labs/medha-core';
-import { mergeEntityStates, mergeEpisodes } from './merge.ts';
+import { mergeEpisodes } from './merge.ts';
 
 export interface FileSyncOptions {
   readonly store: StorePort;
@@ -31,9 +31,21 @@ export class FileSyncAdapter implements SyncPort {
   readonly store: StorePort;
   readonly filePath: string;
 
+  /**
+   * Raw content of `filePath` as last observed by this instance (via pull()), or `null` if it
+   * was observed absent. `undefined` means this instance has never read the file, in which case
+   * push() has nothing to compare against and writes unconditionally (matching a bare push()
+   * with no prior pull/reconcile).
+   */
+  private lastObservedContent: string | null | undefined;
+
   constructor(options: FileSyncOptions) {
     this.store = options.store;
     this.filePath = resolve(options.filePath);
+  }
+
+  private readRawFile(): string | null {
+    return existsSync(this.filePath) ? readFileSync(this.filePath, 'utf8') : null;
   }
 
   async status(_context?: Context): Promise<SyncStatus> {
@@ -92,7 +104,9 @@ export class FileSyncAdapter implements SyncPort {
 
   async pull(_context?: Context): Promise<PullResult> {
     const localStates = await this.store.list();
-    if (!existsSync(this.filePath)) {
+    const rawFile = this.readRawFile();
+    if (rawFile === null) {
+      this.lastObservedContent = null;
       return {
         ok: true,
         updated: false,
@@ -102,8 +116,9 @@ export class FileSyncAdapter implements SyncPort {
     }
 
     try {
-      const raw = JSON.parse(readFileSync(this.filePath, 'utf8'));
+      const raw = JSON.parse(rawFile);
       const snapshot = migrateSnapshot(raw);
+      this.lastObservedContent = rawFile;
       const localEpisodes = await this.store.episodes();
 
       // If remote has raw episodes, merge them
@@ -122,15 +137,15 @@ export class FileSyncAdapter implements SyncPort {
         }
       }
 
-      // Merge entity states
-      const mergedStates = mergeEntityStates(localStates, snapshot.entities);
-      const updated = mergedStates.length !== localStates.length;
-
+      // Episodes already match (or the remote sent none): entity state is strictly a
+      // fold over the episode log, and StorePort exposes no path to write it directly.
+      // Nothing was, or could be, persisted here, so report that honestly instead of
+      // implying entities were merged.
       return {
         ok: true,
-        updated,
-        pulledCount: snapshot.entities.length,
-        localTotal: mergedStates.length,
+        updated: false,
+        pulledCount: 0,
+        localTotal: localStates.length,
       };
     } catch (err) {
       return {
@@ -145,6 +160,21 @@ export class FileSyncAdapter implements SyncPort {
 
   async push(context?: Context): Promise<PushResult> {
     try {
+      // Expected-previous-content guard (CAS), mirroring the git adapter's
+      // expected-old-value ref update: if this instance has read the file before
+      // (via pull()) and it has since changed on disk, refuse to blindly overwrite
+      // a concurrent writer's update.
+      if (this.lastObservedContent !== undefined) {
+        const currentRaw = this.readRawFile();
+        if (currentRaw !== this.lastObservedContent) {
+          return {
+            ok: false,
+            pushedCount: 0,
+            error: `Sync file diverged: ${this.filePath} changed since last pull. Pull again before pushing.`,
+          };
+        }
+      }
+
       const entities = await this.store.list();
       const episodes = await this.store.episodes();
       const asOf = context?.now ?? Date.now();
@@ -157,7 +187,9 @@ export class FileSyncAdapter implements SyncPort {
         episodes: episodes.length > 0 ? episodes : undefined,
       };
 
-      this.atomicWriteFile(this.filePath, serializeSnapshot(snapshot));
+      const serialized = serializeSnapshot(snapshot);
+      this.atomicWriteFile(this.filePath, serialized);
+      this.lastObservedContent = serialized;
       return {
         ok: true,
         pushedCount: entities.length,
