@@ -53,7 +53,10 @@ export function scopeStore(inner: StorePort, namespaces: readonly string[]): Sto
     open: (): Promise<OpenResult> => inner.open(),
     isOpen: () => inner.isOpen(),
     close: () => inner.close(),
-    append(episode: EpisodeInput): Promise<AppendResult> {
+    // `async` here is load-bearing, not style: it turns `check`'s synchronous throw into a
+    // rejected promise, so `store.get(x).catch(...)` behaves the same as every other StorePort
+    // method instead of throwing before a promise is even returned.
+    async append(episode: EpisodeInput): Promise<AppendResult> {
       check('append', episode.key);
       if (episode.type === 'baseline') check('append', episode.state.key);
       return inner.append(episode);
@@ -62,7 +65,7 @@ export function scopeStore(inner: StorePort, namespaces: readonly string[]): Sto
       const visible = (await inner.episodes(afterSeq)).filter((e) => inScope(e.key));
       return limit === undefined ? visible : visible.slice(0, limit);
     },
-    get(key: EntityKey): Promise<EntityState | undefined> {
+    async get(key: EntityKey): Promise<EntityState | undefined> {
       check('get', key);
       return inner.get(key);
     },

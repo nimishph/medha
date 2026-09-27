@@ -3,6 +3,7 @@ import type { Episode, EpisodeInput } from '@cntxt-labs/medha-core';
 import { REJECT_CONTEXT, REJECT_RULE } from '@cntxt-labs/medha-core';
 import { runStoreContractSuite, type StoreContractSetup } from '../contract-suite.ts';
 import { MemoryStore } from '../memory-store.ts';
+import { runScopeStoreContractSuite } from '../scope-contract-suite.ts';
 
 const HOST_SIGNAL = {
   name: 'ADOPTED',
@@ -65,6 +66,7 @@ const setup: StoreContractSetup = {
 };
 
 runStoreContractSuite(setup);
+runScopeStoreContractSuite(setup);
 
 describe('memory store — fold-equivalence (§7.1)', () => {
   test('recomputed fold equals the projection for a long mixed log', async () => {

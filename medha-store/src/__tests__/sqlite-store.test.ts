@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { REJECT_CONTEXT, REJECT_RULE } from '@cntxt-labs/medha-core';
 import { runStoreContractSuite, type StoreContractSetup } from '../contract-suite.ts';
+import { runScopeStoreContractSuite } from '../scope-contract-suite.ts';
 import { SQLiteStore } from '../sqlite-store.ts';
 
 const HOST_SIGNAL = {
@@ -100,6 +101,7 @@ const setup: StoreContractSetup = {
 };
 
 runStoreContractSuite(setup);
+runScopeStoreContractSuite(setup);
 
 describe('sqlite store — volume backend (spec §7.1)', () => {
   test('a closed and reopened database re-folds the log into the projection', async () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { REJECT_CONTEXT, REJECT_RULE, type StorePort } from '@cntxt-labs/medha-core';
 import { runStoreContractSuite, type StoreContractSetup } from '../contract-suite.ts';
 import { FilePolicyStore } from '../file-store.ts';
+import { runScopeStoreContractSuite } from '../scope-contract-suite.ts';
 
 const HOST_SIGNAL = {
   name: 'ADOPTED',
@@ -75,6 +76,7 @@ const setup: StoreContractSetup = {
 };
 
 runStoreContractSuite(setup);
+runScopeStoreContractSuite(setup);
 
 describe('file store — atomic writes, backup fallback, layout (spec §7.1)', () => {
   test('each append commits atomically: main rolls forward, backup holds the previous doc, no temp lingers', async () => {
