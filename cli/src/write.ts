@@ -330,7 +330,7 @@ export async function runRemoveEpisode(
     if (!Number.isInteger(seq) || seq < 0) {
       throw new InvalidArgumentError('--seq', 'a non-negative integer', options.seq);
     }
-    const outcome = await opened.engine.removeEpisode(seq);
+    const outcome = await opened.adminEngine.removeEpisode(seq);
     return {
       home: opened.home,
       seq,
@@ -338,7 +338,7 @@ export async function runRemoveEpisode(
       remainingCount: outcome.remainingCount,
     };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 

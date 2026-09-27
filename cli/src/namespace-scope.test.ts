@@ -240,4 +240,28 @@ describe('a namespace-scoped engine home', () => {
     expect(outcome.entityCount).toBe(2);
     expect(outcome.episodeCount).toBe(2);
   });
+
+  test('remove-episode works on a namespace-scoped home (uses adminEngine, not the scoped engine)', async () => {
+    const { env, out } = fresh();
+    await runCli(['init', '--namespace', 'proj-a'], env);
+    const opened = openHome(env.cwd);
+    await opened.engine.record(
+      { namespace: 'proj-a', kind: 'rule', id: 'mine' },
+      'APPLY',
+      { now: NOW },
+      { ensure: true },
+    );
+    await opened.engine.close();
+
+    const before = out().length;
+    // scopeStore.replaceLog() unconditionally throws for a scoped store — removeEpisode() must
+    // route through adminEngine (raw store) or this always fails on a namespaced home.
+    expect(await runCli(['remove-episode', '--seq', '0', '--json'], env)).toBe(0);
+    const outcome = JSON.parse(out().slice(before)) as {
+      removed: boolean;
+      remainingCount: number;
+    };
+    expect(outcome.removed).toBe(true);
+    expect(outcome.remainingCount).toBe(0);
+  });
 });
