@@ -138,6 +138,8 @@ export interface PreflightReport {
   readonly episodeCount: number;
   readonly entityCount: number;
   readonly integrity: 'ok' | 'fold-mismatch';
+  /** Seqs of retract episodes whose targetSeq names no episode this log holds — see findDanglingRetractions. */
+  readonly danglingRetractions: readonly number[];
   readonly lastSweep: number | null;
   readonly registries: {
     readonly kinds: number;

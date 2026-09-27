@@ -437,6 +437,24 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
  * be exactly contiguous from 0, every episode must validate, and every retraction must name an
  * episode this log actually holds. Throws the typed error naming the first break.
  */
+/**
+ * Non-throwing diagnostic scan for retractions whose `targetSeq` names no episode this log holds
+ * (§9 `maintain preflight`). `append()`/`replaceLog()` already refuse to *create* one of these, but
+ * a log loaded from disk is validated one episode at a time (no full-log context to check
+ * against), so an already-corrupt log — written before that guard existed, or by a bypass — opens
+ * and folds silently. This surfaces it as a warning instead of failing to open.
+ */
+export function findDanglingRetractions(episodes: readonly Episode[]): readonly number[] {
+  const validSeqs = new Set(episodes.map((episode) => episode.seq));
+  const dangling: number[] = [];
+  for (const episode of episodes) {
+    if (episode.type === 'retract' && !validSeqs.has(episode.targetSeq)) {
+      dangling.push(episode.seq);
+    }
+  }
+  return dangling;
+}
+
 export function validateLog(episodes: readonly Episode[], validation: EpisodeValidation): void {
   // The whole log is in hand, so retractions can be checked for a resolvable target here — the one
   // place a positional `targetSeq` can be verified. Callers rewriting the log (compaction, resequence,

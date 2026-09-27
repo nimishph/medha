@@ -27,6 +27,7 @@ import {
   entityKeyString,
   episodeToInput,
   evaluateGates,
+  findDanglingRetractions,
   foldDecisionTree,
   foldDefinitions,
   foldEpisode,
@@ -687,6 +688,7 @@ export class Medha {
       episodeCount: episodes.length,
       entityCount: list.length,
       integrity: statesEquivalent(list, rebuild) ? 'ok' : 'fold-mismatch',
+      danglingRetractions: findDanglingRetractions(episodes),
       lastSweep,
       registries: {
         kinds: this.store.registries.kinds.length,

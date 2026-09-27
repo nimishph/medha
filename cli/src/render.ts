@@ -313,6 +313,11 @@ export function renderMaintainPreflight(report: MaintainPreflightReport): string
       );
     }
   }
+  if (p.danglingRetractions.length > 0) {
+    lines.push(
+      `  warning:    ${p.danglingRetractions.length} dangling retraction(s) at seq ${p.danglingRetractions.join(', ')} — targetSeq names no episode in this log. A future episode reaching that seq would be silently masked.`,
+    );
+  }
   return `${lines.join('\n')}\n`;
 }
 

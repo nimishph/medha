@@ -340,6 +340,46 @@ describe('maintenance plane — preflight (§9 maintain preflight)', () => {
     expect(report.episodeCount).toBe(0);
     expect(report.entityCount).toBe(0);
   });
+
+  test('reports a healthy store as having no dangling retractions', async () => {
+    const { medha } = makeEngine();
+    await applyN(medha, key('clean'), 3, NOW - 1 * DAY);
+    const report = await medha.preflight({ now: NOW });
+    expect(report.danglingRetractions).toEqual([]);
+  });
+
+  test('warns (does not fail to open) on a legacy log holding a dangling retraction', async () => {
+    // append()/replaceLog() already refuse to *create* a retraction whose targetSeq resolves to
+    // no episode; open() cannot check that per-episode, so a log written before that guard
+    // existed still loads and folds. preflight() must surface it as a warning, not throw.
+    const k = key('legacy');
+    const store = new MemoryStore({
+      registries: { kinds: [HOST_KIND], signalSpecs: [], anchorKinds: ['week'] },
+      initialEpisodes: [
+        {
+          type: 'signal',
+          seq: 0,
+          key: k,
+          at: NOW - 1 * DAY,
+          ensure: true,
+          spec: { name: 'APPLY', value: 1, countsAsTrial: true, countsAsSuccess: true },
+        },
+        {
+          type: 'retract',
+          seq: 1,
+          key: k,
+          at: NOW - 1 * DAY + 1,
+          targetSeq: 99,
+          reason: 'dangling — targets a seq this log never held',
+        },
+      ],
+    });
+    const medha = new Medha({ store });
+
+    const report = await medha.preflight({ now: NOW });
+    expect(report.status).toBe('ok');
+    expect(report.danglingRetractions).toEqual([1]);
+  });
 });
 
 describe('maintenance plane — backup / restore (§6.4, §9)', () => {

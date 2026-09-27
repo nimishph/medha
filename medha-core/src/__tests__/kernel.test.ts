@@ -7,6 +7,7 @@ import { type EntityState, freshState } from '../entity.ts';
 import {
   type Episode,
   type EpisodeValidation,
+  findDanglingRetractions,
   foldDecisionTree,
   foldDefinitions,
   foldEpisode,
@@ -464,6 +465,69 @@ describe('registry integrity', () => {
     states = foldLog([ep0, ep1, ep2, ep3]);
     expect(states[0]?.evidence.k).toBe(1);
     expect(states[0]?.evidence.n).toBe(1);
+  });
+});
+
+describe('findDanglingRetractions — diagnostic scan for retractions with no resolvable target', () => {
+  const ep0: Episode = {
+    seq: 0,
+    key: KEY,
+    at: START,
+    type: 'signal',
+    spec: APPLY,
+    ensure: true,
+  };
+  const ep1: Episode = {
+    seq: 1,
+    key: KEY,
+    at: START + 1000,
+    type: 'signal',
+    spec: APPLY,
+    ensure: true,
+  };
+
+  test('reports no dangling retractions for a clean log', () => {
+    const retract: Episode = {
+      seq: 2,
+      key: KEY,
+      at: START + 2000,
+      type: 'retract',
+      targetSeq: 0,
+      reason: 'bad episode',
+    };
+    expect(findDanglingRetractions([ep0, ep1, retract])).toEqual([]);
+  });
+
+  test('flags a retraction naming a seq the log does not hold', () => {
+    const dangling: Episode = {
+      seq: 2,
+      key: KEY,
+      at: START + 2000,
+      type: 'retract',
+      targetSeq: 99,
+      reason: 'targets a seq beyond the log',
+    };
+    expect(findDanglingRetractions([ep0, ep1, dangling])).toEqual([2]);
+  });
+
+  test('flags multiple dangling retractions independently', () => {
+    const dangling1: Episode = {
+      seq: 2,
+      key: KEY,
+      at: START + 2000,
+      type: 'retract',
+      targetSeq: 50,
+      reason: 'nonexistent target A',
+    };
+    const dangling2: Episode = {
+      seq: 3,
+      key: KEY,
+      at: START + 3000,
+      type: 'retract',
+      targetSeq: 51,
+      reason: 'nonexistent target B',
+    };
+    expect(findDanglingRetractions([ep0, ep1, dangling1, dangling2])).toEqual([2, 3]);
   });
 });
 
