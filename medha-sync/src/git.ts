@@ -399,20 +399,24 @@ export class GitRefSyncAdapter implements SyncPort {
     }
 
     // Merge episodes if available
+    let updated = false;
+    let pulledCount = 0;
     if (snapshot.episodes && snapshot.episodes.length > 0) {
       const localEpisodes = await this.store.episodes();
       const mergedEpisodes = mergeEpisodes(localEpisodes, snapshot.episodes);
       if (mergedEpisodes.length !== localEpisodes.length) {
         await this.store.replaceLog(mergedEpisodes);
         await this.store.rebuild();
+        updated = true;
+        pulledCount = mergedEpisodes.length - localEpisodes.length;
       }
     }
 
     const updatedStates = await this.store.list();
     return {
       ok: true,
-      updated: true,
-      pulledCount: snapshot.entities.length,
+      updated,
+      pulledCount,
       localTotal: updatedStates.length,
     };
   }

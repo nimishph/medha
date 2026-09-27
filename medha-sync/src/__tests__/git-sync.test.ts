@@ -106,6 +106,37 @@ describe('GitRefSyncAdapter', () => {
     expect(listB).toHaveLength(1);
     expect(listB[0]?.key.id).toBe('tool-git-a');
   });
+  it('pull() reports updated:false and pulledCount:0 when nothing changed', async () => {
+    // 1. Store A writes to git ref
+    const storeA = createTestStore();
+    await storeA.open();
+    await storeA.append({
+      key: { namespace: '', kind: 'tool', id: 'tool-noop' },
+      at: 1000,
+      type: 'signal',
+      spec: { name: 'APPLY', value: 1.0, countsAsTrial: true, countsAsSuccess: true },
+      ensure: true,
+    });
+
+    const adapterA = new GitRefSyncAdapter({ store: storeA, rootDir: tempRepo });
+    await adapterA.push({ now: 1000 });
+
+    // 2. Store B pulls it in fully once...
+    const storeB = createTestStore();
+    await storeB.open();
+    const adapterB = new GitRefSyncAdapter({ store: storeB, rootDir: tempRepo });
+    const firstPull = await adapterB.pull({ now: 2000 });
+    expect(firstPull.ok).toBe(true);
+    expect(firstPull.updated).toBe(true);
+
+    // ...then pulls again against the same, now-already-synced ref: no episode is
+    // new, so nothing should be merged/rebuilt and this must be reported honestly.
+    const secondPull = await adapterB.pull({ now: 3000 });
+    expect(secondPull.ok).toBe(true);
+    expect(secondPull.updated).toBe(false);
+    expect(secondPull.pulledCount).toBe(0);
+  });
+
   it('hard-deprecates DEFAULT_SAGE_REF and emits warning when used', async () => {
     const store = createTestStore();
     await store.open();
