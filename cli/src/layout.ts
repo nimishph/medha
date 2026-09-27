@@ -45,6 +45,15 @@ export interface MedhaConfigV1 {
   readonly path: string | null;
   /** The effective registries — config.json is the SINGLE SOURCE OF TRUTH (spec decision). */
   readonly registries: StoreRegistries;
+  /**
+   * When set, the *engine* this home builds (`openHome().engine`, and therefore every read/write
+   * CLI command and the MCP server) is restricted to these namespaces via `scopeStore` — for a
+   * store shared by more than one project/tenant. Host/admin surfaces (`sync`, `maintain`,
+   * `report`, `ui`) use `openHome().adminEngine` / `openHome().store` instead, which always see
+   * the whole store: holding this home's config already means holding the store, and a `--namespace`
+   * config is a boundary for agent-facing operations, not a partition invisible to the operator.
+   */
+  readonly namespaceScope?: readonly string[];
 }
 
 /** `home` (from `--home`) overrides the default `<dir>/.medha`; relative paths resolve against `dir`. */
@@ -91,6 +100,7 @@ export function resolveStorePath(backend: Backend, home: string, explicit?: stri
  * read-plane command (list/show/…) reopens the home through this, so a configured home is always
  * read with the same backend, files, and registries it was written with.
  */
+/** The raw, unscoped store a config.json commits to — see `namespaceScope` on `MedhaConfigV1`. */
 export function storeForConfig(config: MedhaConfigV1): StorePort {
   switch (config.backend) {
     case 'sqlite':
@@ -289,6 +299,9 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     throw new ConfigFileError(path, 'expected a JSON object');
   }
   const candidate = parsed as Partial<MedhaConfigV1>;
+  if (candidate.namespaceScope !== undefined && !isNameList(candidate.namespaceScope)) {
+    throw new ConfigFileError(path, 'namespaceScope must be an array of non-empty strings');
+  }
   if (candidate.layoutVersion !== CONFIG_LAYOUT_VERSION) {
     throw new ConfigFileError(path, `unsupported layoutVersion ${String(candidate.layoutVersion)}`);
   }
@@ -328,6 +341,7 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     backend: candidate.backend as Backend,
     path: candidate.path === undefined ? null : candidate.path,
     registries: registries as StoreRegistries,
+    ...(candidate.namespaceScope === undefined ? {} : { namespaceScope: candidate.namespaceScope }),
   };
 }
 

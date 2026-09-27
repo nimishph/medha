@@ -97,6 +97,7 @@ export const initCommand = defineCommand({
       ...(args.path === undefined ? {} : { path: args.path }),
       ...(args.config === undefined ? {} : { config: args.config }),
       ...(args.backup === undefined ? {} : { backup: args.backup }),
+      ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
       recreate: args.recreate === true,
     };
     const report = await runInit(options, environment);

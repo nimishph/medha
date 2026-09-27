@@ -29,6 +29,13 @@ export const initCommandArgs: ArgsDef = {
       'registries.json defining kinds / signalSpecs / anchorKinds (additive over built-ins).',
   },
   backup: { type: 'string', description: 'Also write the bootstrap MedhaSnapshot to this path.' },
+  namespace: {
+    type: 'string',
+    description:
+      'Restrict this home to one or more namespaces (comma-separated) via scopeStore, for a ' +
+      'store shared by more than one project. Maintenance commands (sync/maintain/report/ui) ' +
+      'still see the whole store. Default: unrestricted.',
+  },
   recreate: {
     type: 'boolean',
     description: 'Wipe the engine store and re-initialize.',

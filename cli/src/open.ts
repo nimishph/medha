@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { basename, join, resolve } from 'node:path';
 import { Medha, type MedhaWeightUpdater, UpdaterRegistry } from '@cntxt-labs/medha';
 import type { StorePort } from '@cntxt-labs/medha-core';
+import { scopeStore } from '@cntxt-labs/medha-store';
 import { HomeNotInitializedError } from './errors.ts';
 import { homeFor, type MedhaConfigV1, readConfig, storeForConfig } from './layout.ts';
 
@@ -19,7 +20,18 @@ const require = createRequire(import.meta.url);
  */
 
 export interface OpenedHome {
+  /**
+   * Built over the scoped store when `config.namespaceScope` is set — every read/write plane
+   * command and the MCP server go through this, so scoping is inherited automatically.
+   */
   readonly engine: Medha;
+  /**
+   * Always built over the raw, unscoped store — identical to `engine` when the home has no
+   * `namespaceScope`. `sync`, `maintain`, `report` and `ui` use this: they are host/admin surfaces
+   * over the whole store a home's config already grants access to, not per-project agent surfaces.
+   */
+  readonly adminEngine: Medha;
+  /** The raw, unscoped store. `sync` reads/writes it directly (whole-log operations). */
   readonly store: StorePort;
   readonly config: MedhaConfigV1;
   readonly home: string;
@@ -81,6 +93,10 @@ export function openHome(dir: string, homeOverride?: string): OpenedHome {
   const store = storeForConfig(config);
   const projectUpdaters = loadProjectUpdaters(home);
   const updaters = new UpdaterRegistry({ project: projectUpdaters });
-  const engine = new Medha({ store, updaters });
-  return { engine, store, config, home };
+  const adminEngine = new Medha({ store, updaters });
+  const engine =
+    config.namespaceScope !== undefined && config.namespaceScope.length > 0
+      ? new Medha({ store: scopeStore(store, config.namespaceScope), updaters })
+      : adminEngine;
+  return { engine, adminEngine, store, config, home };
 }

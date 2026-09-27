@@ -36,7 +36,7 @@ export async function runMaintainPreflight(
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
-    const preflight = await opened.engine.preflight({ now });
+    const preflight = await opened.adminEngine.preflight({ now });
     if (preflight.status === 'corrupt') {
       environment.exitCode = 1;
     }
@@ -59,7 +59,7 @@ export async function runMaintainPreflight(
       ...(unregisteredKinds.length > 0 ? { unregisteredKinds } : {}),
     };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 
@@ -80,7 +80,7 @@ export async function runMaintainCompact(
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
-    const report = await opened.engine.compact(
+    const report = await opened.adminEngine.compact(
       { now },
       options.olderThan === undefined
         ? {}
@@ -88,7 +88,7 @@ export async function runMaintainCompact(
     );
     return { home: opened.home, asOf: now, report };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 
@@ -113,11 +113,11 @@ export async function runMaintainBackup(
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
-    const { snapshot } = await opened.engine.backup({ now });
+    const { snapshot } = await opened.adminEngine.backup({ now });
     writeSnapshot(options.path, snapshot);
     return { home: opened.home, asOf: now, path: options.path, snapshot };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 
@@ -142,11 +142,11 @@ export async function runMaintainRestore(
   const snapshot = readSnapshotFile(options.path);
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
-    const { restored } = await opened.engine.restore(snapshot);
+    const { restored } = await opened.adminEngine.restore(snapshot);
     const now = environment.now();
     return { home: opened.home, asOf: now, path: options.path, restored };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 

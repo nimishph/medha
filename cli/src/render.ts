@@ -58,6 +58,11 @@ export function renderInit(report: InitReport): string {
     `  preflight:  ${p.status} — ${p.episodeCount} episodes, ${p.entityCount} entities, integrity ${p.integrity}`,
     `  last sweep: ${lastSweep}`,
     ...(report.backup === null ? [] : [`  backup:     ${report.backup}`]),
+    ...(report.namespaceScope === null
+      ? []
+      : [
+          `  namespaces: ${report.namespaceScope.join(', ')} (engine restricted; maintenance sees all)`,
+        ]),
   ];
   return `${lines.join('\n')}\n`;
 }

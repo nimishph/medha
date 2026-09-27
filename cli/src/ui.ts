@@ -1029,8 +1029,8 @@ async function collectDashboardData(
   readonly episodes: readonly Episode[];
 }> {
   const [preflight, hints, episodes] = await Promise.all([
-    opened.engine.preflight({ now }),
-    pageAll(opened.engine, now),
+    opened.adminEngine.preflight({ now }),
+    pageAll(opened.adminEngine, now),
     opened.store.episodes(),
   ]);
 
@@ -1126,7 +1126,7 @@ export async function startUiServer(
 
       // 4. API: Entities
       if (url.pathname === '/api/entities') {
-        const hints = await pageAll(opened.engine, environment.now());
+        const hints = await pageAll(opened.adminEngine, environment.now());
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(toJson(hints));
         return;
@@ -1155,7 +1155,7 @@ export async function startUiServer(
           kind: parsed.kind ?? 'rule',
           id: parsed.id ?? '',
         };
-        const delta = await opened.engine.simulate(key, parsed.signal ?? 'APPLY', {
+        const delta = await opened.adminEngine.simulate(key, parsed.signal ?? 'APPLY', {
           now: environment.now(),
         });
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1174,7 +1174,7 @@ export async function startUiServer(
           explorationRatio?: number;
           minTrust?: number;
         };
-        const outcome = await opened.engine.pack(
+        const outcome = await opened.adminEngine.pack(
           {
             budget: parsed.budget ?? 1500,
             kind: parsed.kind ?? 'rule',
@@ -1217,7 +1217,7 @@ export async function startUiServer(
         host,
         close: async () => {
           await new Promise<void>((res) => server.close(() => res()));
-          await opened.engine.close();
+          await opened.adminEngine.close();
         },
       });
     });

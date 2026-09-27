@@ -29,8 +29,8 @@ export async function runReport(
     const now = environment.now();
 
     const [preflight, hints, episodes] = await Promise.all([
-      opened.engine.preflight({ now }),
-      pageAll(opened.engine, now),
+      opened.adminEngine.preflight({ now }),
+      pageAll(opened.adminEngine, now),
       opened.store.episodes(),
     ]);
 
@@ -70,7 +70,7 @@ export async function runReport(
       episodeCount: episodes.length,
     };
   } finally {
-    await opened.engine.close();
+    await opened.adminEngine.close();
   }
 }
 

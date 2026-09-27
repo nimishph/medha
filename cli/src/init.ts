@@ -49,6 +49,8 @@ export interface InitOptions {
   readonly config?: string;
   readonly backup?: string;
   readonly recreate: boolean;
+  /** Comma-separated namespaces; see `MedhaConfigV1.namespaceScope`. */
+  readonly namespace?: string;
 }
 
 export interface InitReport {
@@ -65,6 +67,25 @@ export interface InitReport {
     readonly diff: RegistryDiff;
   } | null;
   readonly backup: string | null;
+  /** Namespaces this home's engine is restricted to, or null when unrestricted. */
+  readonly namespaceScope: readonly string[] | null;
+}
+
+/** Parse `--namespace`: a comma-separated, deduplicated, non-empty namespace list, or undefined. */
+export function parseNamespaceScope(value: string | undefined): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  const names = [
+    ...new Set(
+      value
+        .split(',')
+        .map((n) => n.trim())
+        .filter((n) => n !== ''),
+    ),
+  ];
+  if (names.length === 0) {
+    throw new InvalidArgumentError('--namespace', 'at least one non-empty namespace', value);
+  }
+  return names;
 }
 
 export function normalizeBackend(value: string): Backend {
@@ -76,6 +97,7 @@ export function normalizeBackend(value: string): Backend {
 
 export async function runInit(options: InitOptions, environment: Environment): Promise<InitReport> {
   const backend = normalizeBackend(options.backend);
+  const namespaceScope = parseNamespaceScope(options.namespace);
   const home = homeFor(options.dir, options.home);
   const storePath = resolveStorePath(backend, home, options.path);
   const now = environment.now();
@@ -116,6 +138,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
       preflight,
       registryDrift: null,
       backup: options.backup ?? null,
+      namespaceScope: namespaceScope ?? null,
     };
   }
 
@@ -155,6 +178,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
     backend,
     path: forcedStorePath,
     registries: requested,
+    ...(namespaceScope === undefined ? {} : { namespaceScope }),
   };
   const writtenPath = writeConfig(home, config);
 
@@ -176,6 +200,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
     preflight,
     registryDrift,
     backup: options.backup ?? null,
+    namespaceScope: namespaceScope ?? null,
   };
 }
 
