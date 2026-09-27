@@ -362,6 +362,76 @@ export function writeSnapshot(path: string, snapshot: unknown): void {
   writeFileSync(location, `${JSON.stringify({ snapshot }, null, 2)}\n`, 'utf8');
 }
 
+const GITIGNORE_HEADER = `# Written by \`medha init\`. Safe to edit or delete.
+#
+# config.json is NOT listed here: it is a small, human-authored registry definition (kinds,
+# signals, thresholds), meant to be committed like any other project config file.
+#
+# Everything below is either local-only mechanics or data that has its own sync channel
+# (\`medha sync\`, over a dedicated git ref or a snapshot file) — tracking it here too would
+# duplicate that channel and produce merge conflicts an ordinary git merge cannot resolve.
+`;
+
+/** `.medha/.gitignore`: the store's data (synced by \`medha sync\`, not git) plus local-only artifacts. */
+export function writeGitignore(home: string, backend: Backend, storeFileName: string): string {
+  const path = join(home, '.gitignore');
+  const lines =
+    backend === 'sqlite'
+      ? [
+          `# The store itself: medha sync moves this data, not ordinary commits.`,
+          storeFileName,
+          '',
+          `# Local-only: SQLite's WAL-mode journal, regenerated and meaningless without the store above.`,
+          `${storeFileName}-wal`,
+          `${storeFileName}-shm`,
+          `${storeFileName}-journal`,
+        ]
+      : [
+          `# The store itself: medha sync moves this data, not ordinary commits.`,
+          storeFileName,
+          '',
+          `# Local-only: the atomic-write backup and in-flight temp file.`,
+          `${storeFileName}.bak`,
+          `${storeFileName}.tmp`,
+        ];
+  writeFileSync(path, `${GITIGNORE_HEADER}\n${lines.join('\n')}\n`, 'utf8');
+  return path;
+}
+
+const README_TEMPLATE = (backend: Backend): string => `# .medha/
+
+This directory is a [Medha](https://github.com/nimishph/medha) evidential-memory store, created
+by \`medha init\`. It records what happened to your rules, recipes, and tools, and returns trust
+hints — it never decides anything for you.
+
+## What's here
+
+- **\`config.json\`** — the single source of truth: backend, store path, and the registries
+  (kinds, signals, thresholds). Meant to be committed; it's small and human-reviewable.
+- **the store itself** (\`${backend === 'sqlite' ? 'store.sqlite' : 'state.jsonl'}\`) — the
+  append-only episode log Medha folds into trust. Gitignored by default: share it with a team via
+  \`medha sync\` (a dedicated git ref or a snapshot file), not by committing it directly. If you'd
+  rather commit it as a simple, manual sync, delete or edit \`.gitignore\`.
+
+## Useful commands
+
+\`\`\`sh
+medha list                                # what Medha knows, ranked by trust
+medha maintain preflight                  # verify store integrity and registry match
+medha maintain backup snapshot.json       # atomic, portable snapshot
+medha sync status                         # compare against the shared ref/file
+\`\`\`
+
+Run \`medha --help\` for the full command surface.
+`;
+
+/** `.medha/README.md`: a static explainer so whoever finds this directory knows what it is. */
+export function writeReadme(home: string, backend: Backend): string {
+  const path = join(home, 'README.md');
+  writeFileSync(path, README_TEMPLATE(backend), 'utf8');
+  return path;
+}
+
 export function removeStoreArtifacts(backend: Backend, storePath: string): void {
   if (backend === 'sqlite') {
     for (const artifact of [storePath, `${storePath}-wal`, `${storePath}-shm`]) {

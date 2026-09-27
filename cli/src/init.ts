@@ -29,6 +29,8 @@ import {
   removeStoreArtifacts,
   resolveStorePath,
   writeConfig,
+  writeGitignore,
+  writeReadme,
   writeSnapshot,
 } from './layout.ts';
 
@@ -69,6 +71,9 @@ export interface InitReport {
   readonly backup: string | null;
   /** Namespaces this home's engine is restricted to, or null when unrestricted. */
   readonly namespaceScope: readonly string[] | null;
+  /** null only for the ephemeral memory backend, which has no home directory to scaffold. */
+  readonly gitignore: string | null;
+  readonly readme: string | null;
 }
 
 /** Parse `--namespace`: a comma-separated, deduplicated, non-empty namespace list, or undefined. */
@@ -139,6 +144,8 @@ export async function runInit(options: InitOptions, environment: Environment): P
       registryDrift: null,
       backup: options.backup ?? null,
       namespaceScope: namespaceScope ?? null,
+      gitignore: null,
+      readme: null,
     };
   }
 
@@ -181,6 +188,8 @@ export async function runInit(options: InitOptions, environment: Environment): P
     ...(namespaceScope === undefined ? {} : { namespaceScope }),
   };
   const writtenPath = writeConfig(home, config);
+  const gitignorePath = writeGitignore(home, backend, basename(forcedStorePath));
+  const readmePath = writeReadme(home, backend);
 
   const stamp = readConfig(home) as MedhaConfigV1;
   const registryDrift = registryEquals(stamp.registries, store.registries)
@@ -201,6 +210,8 @@ export async function runInit(options: InitOptions, environment: Environment): P
     registryDrift,
     backup: options.backup ?? null,
     namespaceScope: namespaceScope ?? null,
+    gitignore: gitignorePath,
+    readme: readmePath,
   };
 }
 

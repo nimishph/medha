@@ -63,6 +63,8 @@ export function renderInit(report: InitReport): string {
       : [
           `  namespaces: ${report.namespaceScope.join(', ')} (engine restricted; maintenance sees all)`,
         ]),
+    ...(report.gitignore === null ? [] : [`  gitignore:  ${report.gitignore}`]),
+    ...(report.readme === null ? [] : [`  readme:     ${report.readme}`]),
   ];
   return `${lines.join('\n')}\n`;
 }

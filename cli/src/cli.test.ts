@@ -157,6 +157,55 @@ describe('medha init — default sqlite backend', () => {
   });
 });
 
+describe('medha init — .gitignore and README scaffolding', () => {
+  test('sqlite: gitignores the store + WAL/SHM, keeps config.json trackable', async () => {
+    const { env, home, out } = fresh();
+    expect(await runCli(['init'], env)).toBe(0);
+
+    const gitignorePath = join(home, '.gitignore');
+    expect(existsSync(gitignorePath)).toBe(true);
+    const gitignore = readFileSync(gitignorePath, 'utf8');
+    const patterns = gitignore.split('\n').filter((line) => line !== '' && !line.startsWith('#'));
+    expect(patterns).not.toContain('config.json');
+    expect(gitignore).toContain('store.sqlite\n');
+    expect(gitignore).toContain('store.sqlite-wal');
+    expect(gitignore).toContain('store.sqlite-shm');
+
+    const readmePath = join(home, 'README.md');
+    expect(existsSync(readmePath)).toBe(true);
+    expect(readFileSync(readmePath, 'utf8')).toContain('config.json');
+
+    expect(out()).toContain(`gitignore:  ${gitignorePath}`);
+    expect(out()).toContain(`readme:     ${readmePath}`);
+  });
+
+  test('file backend: gitignores the document + backup/temp, not config.json', async () => {
+    const { env, home } = fresh();
+    expect(await runCli(['init', '--store', 'file'], env)).toBe(0);
+    const gitignore = readFileSync(join(home, '.gitignore'), 'utf8');
+    const patterns = gitignore.split('\n').filter((line) => line !== '' && !line.startsWith('#'));
+    expect(patterns).not.toContain('config.json');
+    expect(gitignore).toContain('state.jsonl\n');
+    expect(gitignore).toContain('state.jsonl.bak');
+    expect(gitignore).toContain('state.jsonl.tmp');
+  });
+
+  test('the memory backend has no home directory, so nothing is scaffolded', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['init', '--store', 'memory'], env)).toBe(0);
+    expect(out()).not.toContain('gitignore:');
+    expect(out()).not.toContain('readme:');
+  });
+
+  test('--recreate rewrites both files rather than leaving stale ones', async () => {
+    const { env, home } = fresh();
+    await runCli(['init'], env);
+    writeFileSync(join(home, '.gitignore'), 'stale\n', 'utf8');
+    expect(await runCli(['init', '--recreate'], env)).toBe(0);
+    expect(readFileSync(join(home, '.gitignore'), 'utf8')).not.toBe('stale\n');
+  });
+});
+
 describe('medha init — backends and paths', () => {
   test('file backend writes the state.jsonl document file', async () => {
     const { env, home } = fresh();

@@ -198,7 +198,11 @@ medha maintain backup snapshot.json       # atomic, portable snapshot
 medha maintain restore snapshot.json
 ```
 
-Everything lives under `.medha/`. Add it to `.gitignore`, or commit it on purpose to share the evidence.
+Everything lives under `.medha/`. `medha init` scaffolds a `.medha/.gitignore` and a
+`.medha/README.md` for you: `config.json` (the registries) is meant to be committed, while the
+store data itself is gitignored by default — share it with `medha sync` instead, since it has its
+own conflict-resolving merge, not git's. Delete or edit `.medha/.gitignore` if you'd rather commit
+the store file directly as a simpler, manual sync.
 
 ## Author & Attribution
 
