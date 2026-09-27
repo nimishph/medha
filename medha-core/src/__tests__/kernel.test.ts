@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { anchorSetFor, distinctAnchorValues, durabilityFactor, weekEpoch } from '../durability.ts';
 import { emaStep } from '../ema.ts';
 import { type EntityState, freshState } from '../entity.ts';
-import { type Episode, foldLog } from '../episode.ts';
+import type { EntityDefinition } from '../definition.ts';
+import { type Episode, foldDefinitions, foldEpisode, foldLog } from '../episode.ts';
 import { InvariantViolationError, UnknownKindError, UnknownSignalError } from '../errors.ts';
 import { applySignal, reportGuard, weekAnchor } from '../fold.ts';
 import { guardFactor } from '../guard.ts';
@@ -623,5 +624,55 @@ describe('TASK-EXT-02: Per-Kind Trust Configuration & Value-Weighted Evidence', 
       ephemeralKindSpec.recency,
     );
     expect(deepFutureDecayed).toBe(0.1);
+  });
+});
+
+describe('medha-arj.1: EntityDefinition + define episode', () => {
+  const DEF: EntityDefinition = { title: 'Retry on timeout', tags: ['network'], rationale: 'x' };
+
+  test('define is a no-op in foldEpisode: stripping define episodes leaves EntityState unchanged', () => {
+    const ep0: Episode = { seq: 0, key: KEY, at: START, type: 'define', definition: DEF };
+    const ep1: Episode = {
+      seq: 1,
+      key: KEY,
+      at: START + 1000,
+      type: 'signal',
+      spec: APPLY,
+      ensure: true,
+    };
+    const ep2: Episode = { seq: 2, key: KEY, at: START + 2000, type: 'define', definition: DEF };
+
+    const withDefines = foldLog([ep0, ep1, ep2]);
+    const stripped = foldLog([{ ...ep1, seq: 0 }]);
+    expect(withDefines).toEqual(stripped);
+  });
+
+  test('define never creates an entity on its own, even with no prior state', () => {
+    const ep0: Episode = { seq: 0, key: KEY, at: START, type: 'define', definition: DEF };
+    expect(foldEpisode(undefined, ep0)).toBeUndefined();
+  });
+
+  test('foldDefinitions is latest-write-wins per key by seq order', () => {
+    const other = { namespace: 'n', kind: 'rule', id: 'other' };
+    const first: EntityDefinition = { title: 'first', rationale: 'r1' };
+    const second: EntityDefinition = { title: 'second', rationale: 'r2' };
+    const episodes: Episode[] = [
+      { seq: 0, key: KEY, at: START, type: 'define', definition: first },
+      { seq: 1, key: other, at: START + 1, type: 'define', definition: second },
+      {
+        seq: 2,
+        key: KEY,
+        at: START + 2000,
+        type: 'signal',
+        spec: APPLY,
+        ensure: true,
+      },
+      { seq: 3, key: KEY, at: START + 3000, type: 'define', definition: second },
+    ];
+
+    const defs = foldDefinitions(episodes);
+    expect(defs.get('n\u0000rule\u0000r1')).toEqual(second);
+    expect(defs.get('n\u0000rule\u0000other')).toEqual(second);
+    expect(defs.size).toBe(2);
   });
 });

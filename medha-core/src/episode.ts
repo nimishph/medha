@@ -1,4 +1,5 @@
 import type { Anchor } from './durability.ts';
+import { type EntityDefinition, validateEntityDefinition } from './definition.ts';
 import { type EntityKey, type EntityState, freshState } from './entity.ts';
 import { assertNever, InvalidArgumentError } from './errors.ts';
 import {
@@ -124,6 +125,16 @@ export interface RetractEpisode extends BaseEpisode {
   readonly reason: string;
 }
 
+/**
+ * A host-authored definition for the entity (medha-arj): title/tags/rationale. Never evidential —
+ * `foldEpisode` treats this as a no-op, so a definition can never change `EntityState`. Read with
+ * `foldDefinitions`, a separate fold entirely.
+ */
+export interface DefineEpisode extends BaseEpisode {
+  readonly type: 'define';
+  readonly definition: EntityDefinition;
+}
+
 export type Episode =
   | SignalEpisode
   | GuardEpisode
@@ -131,7 +142,8 @@ export type Episode =
   | ProposalEpisode
   | SweepEpisode
   | BaselineEpisode
-  | RetractEpisode;
+  | RetractEpisode
+  | DefineEpisode;
 
 /** An episode the host submits: everything but the store-assigned `seq`. */
 export type EpisodeInput =
@@ -141,7 +153,8 @@ export type EpisodeInput =
   | Omit<ProposalEpisode, 'seq'>
   | Omit<SweepEpisode, 'seq'>
   | Omit<BaselineEpisode, 'seq'>
-  | Omit<RetractEpisode, 'seq'>;
+  | Omit<RetractEpisode, 'seq'>
+  | Omit<DefineEpisode, 'seq'>;
 
 /** Deterministic map key for an entity. The separator is NUL (illegal in ids). */
 export function entityKeyString(key: EntityKey): string {
@@ -152,6 +165,15 @@ export function entityKeyString(key: EntityKey): string {
 export interface EpisodeValidation {
   readonly kinds: KindRegistry;
   readonly signals: SignalRegistry;
+  /**
+   * How many episodes the target log holds, when the caller knows. A `retract` is only meaningful
+   * against an episode that exists, and `targetSeq` is a positional index into a log that gets
+   * renumbered by compaction, resequencing and merge — so a retraction whose target resolves now
+   * can silently come to name a different episode later, or a real one it never named. Passing the
+   * length is what lets the check happen; omitting it (the per-episode open-time replay, which has
+   * no whole-log view) skips the check rather than guessing.
+   */
+  readonly logLength?: number;
 }
 
 /**
@@ -316,6 +338,18 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       if (typeof input.reason !== 'string' || input.reason.trim() === '') {
         throw new InvalidArgumentError('episode.reason', 'a non-empty string', input.reason);
       }
+      // A retraction that names no episode is not inert: it is an armed pointer into a log that
+      // keeps growing, and the moment the log passes targetSeq it masks an unrelated episode.
+      if (validation.logLength !== undefined && input.targetSeq >= validation.logLength) {
+        throw new InvalidArgumentError(
+          'episode.targetSeq',
+          `an existing episode sequence (the log holds ${validation.logLength})`,
+          input.targetSeq,
+        );
+      }
+      break;
+    case 'define':
+      validateEntityDefinition(input.definition);
       break;
     default:
       assertNever(input, 'episode input type');
@@ -323,10 +357,15 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
 }
 
 /**
- * Validate a whole log before it replaces the store's (compaction / restore): seqs must be exactly
- * contiguous from 0 and every episode must validate. Throws the typed error naming the first break.
+ * Validate a whole log before it replaces the store's (compaction / restore / sync merge): seqs must
+ * be exactly contiguous from 0, every episode must validate, and every retraction must name an
+ * episode this log actually holds. Throws the typed error naming the first break.
  */
 export function validateLog(episodes: readonly Episode[], validation: EpisodeValidation): void {
+  // The whole log is in hand, so retractions can be checked for a resolvable target here — the one
+  // place a positional `targetSeq` can be verified. Callers rewriting the log (compaction, resequence,
+  // merge) are exactly how one goes stale.
+  const withLength: EpisodeValidation = { ...validation, logLength: episodes.length };
   for (let i = 0; i < episodes.length; i++) {
     const episode = episodes[i];
     if (episode === undefined) {
@@ -339,7 +378,7 @@ export function validateLog(episodes: readonly Episode[], validation: EpisodeVal
         episode.seq,
       );
     }
-    validateEpisodeInput(episodeToInput(episode), validation);
+    validateEpisodeInput(episodeToInput(episode), withLength);
   }
 }
 
@@ -359,6 +398,8 @@ export function assignSeq(input: EpisodeInput, seq: number): Episode {
     case 'baseline':
       return { ...input, seq };
     case 'retract':
+      return { ...input, seq };
+    case 'define':
       return { ...input, seq };
     default:
       return assertNever(input, 'episode input type');
@@ -512,15 +553,41 @@ export function foldEpisode(
     }
     case 'retract':
       return prev;
+    case 'define':
+      // Non-evidential by design (medha-arj.1): a definition never changes EntityState.
+      return prev;
     default:
       return assertNever(episode, 'episode type');
   }
 }
 
-/** Rebuild every entity state from a log, in seq order. Deterministic. */
+/**
+ * Fold `define` episodes into the latest definition per entity, entirely separate from
+ * `foldEpisode`'s trust fold (medha-arj.1). Latest-write-wins by seq order; every other episode
+ * type is ignored.
+ */
+export function foldDefinitions(episodes: readonly Episode[]): Map<string, EntityDefinition> {
+  const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
+  const byKey = new Map<string, EntityDefinition>();
+  for (const episode of ordered) {
+    if (episode.type !== 'define') continue;
+    byKey.set(entityKeyString(episode.key), episode.definition);
+  }
+  return byKey;
+}
+
+/**
+ * Rebuild every entity state from a log, in seq order. Deterministic.
+ *
+ * `alsoRetracted` masks extra seqs as if a retraction naming them were present, for callers folding
+ * a *slice* of a log whose retractions live outside it (compaction folds the aged prefix, but a
+ * later retraction can still name an episode inside that prefix). It changes nothing about how a
+ * retract episode is read — a retract masks its target and nothing else.
+ */
 export function foldLog(
   episodes: readonly Episode[],
   options?: FoldEpisodeOptions | KindRegistry,
+  alsoRetracted?: Iterable<number>,
 ): EntityState[] {
   const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
   const retracted = new Set<number>();
@@ -529,6 +596,7 @@ export function foldLog(
       retracted.add(ep.targetSeq);
     }
   }
+  for (const seq of alsoRetracted ?? []) retracted.add(seq);
   const byKey = new Map<string, EntityState>();
   for (const episode of ordered) {
     if (retracted.has(episode.seq)) continue;

@@ -1,4 +1,5 @@
 export * from './context.ts';
+export * from './definition.ts';
 export * from './durability.ts';
 export * from './ema.ts';
 export * from './entity.ts';
@@ -10,6 +11,7 @@ export * from './hint.ts';
 export * from './kinds.ts';
 export * from './limits.ts';
 export * from './miner-port.ts';
+export * from './migrations.ts';
 export * from './packer.ts';
 export * from './recency.ts';
 export * from './rng.ts';

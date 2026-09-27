@@ -95,6 +95,12 @@ function contentKey(episode: Episode | EpisodeInput, retractTarget: string): str
       parts.push(episode.reason);
       break;
     }
+    case 'define': {
+      parts.push(episode.definition.title);
+      parts.push(episode.definition.rationale);
+      parts.push([...(episode.definition.tags ?? [])].sort().join(','));
+      break;
+    }
   }
 
   return parts.join('\u0000');
