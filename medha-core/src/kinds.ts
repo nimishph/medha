@@ -1,3 +1,4 @@
+import type { Decision } from './decision.ts';
 import { InvalidArgumentError, UnknownKindError } from './errors.ts';
 
 /**
@@ -37,6 +38,16 @@ export interface KindRecency {
 
 export type EvidenceWeightingMode = 'count' | 'signal-value';
 
+/**
+ * Governs who may grant a decision-tree branch of a given type (medha-arj.4). `'apply'` is
+ * shorthand for `['apply']`. Absent means every decision type is agent-editable (code-review
+ * governance); listing a type here makes it human-gated (tool-gate governance) — both governance
+ * modes ride the same `DecisionEpisode` type.
+ */
+export interface KindDecisionPolicy {
+  readonly requireHumanFor?: readonly Decision['type'][] | 'apply';
+}
+
 export interface KindSpec {
   readonly name: string;
   readonly description?: string;
@@ -44,7 +55,10 @@ export interface KindSpec {
   readonly recency?: KindRecency;
   readonly evidenceWeighting?: EvidenceWeightingMode;
   readonly signalLimits?: KindSignalLimits;
+  readonly decisionPolicy?: KindDecisionPolicy;
 }
+
+const DECISION_TYPES = ['apply', 'ignore', 'probability'] as const;
 
 export class KindRegistry {
   private readonly specs = new Map<string, KindSpec>();
@@ -73,7 +87,8 @@ export class KindRegistry {
       throw new InvalidArgumentError('kind spec', 'a KindSpec object or string', nameOrSpec);
     }
 
-    const { name, thresholds, recency, evidenceWeighting, signalLimits } = nameOrSpec;
+    const { name, thresholds, recency, evidenceWeighting, signalLimits, decisionPolicy } =
+      nameOrSpec;
     if (typeof name !== 'string' || name.trim() === '') {
       throw new InvalidArgumentError('kind spec.name', 'a non-empty string', name);
     }
@@ -148,6 +163,31 @@ export class KindRegistry {
             field === 'minIntervalMs' ? 'a non-negative number' : 'a positive integer',
             val,
           );
+        }
+      }
+    }
+
+    if (decisionPolicy !== undefined) {
+      if (typeof decisionPolicy !== 'object' || decisionPolicy === null) {
+        throw new InvalidArgumentError('kind spec.decisionPolicy', 'an object', decisionPolicy);
+      }
+      const { requireHumanFor } = decisionPolicy;
+      if (requireHumanFor !== undefined && requireHumanFor !== 'apply') {
+        if (!Array.isArray(requireHumanFor)) {
+          throw new InvalidArgumentError(
+            'decisionPolicy.requireHumanFor',
+            "'apply' or an array of Decision types",
+            requireHumanFor,
+          );
+        }
+        for (const type of requireHumanFor) {
+          if (!DECISION_TYPES.includes(type)) {
+            throw new InvalidArgumentError(
+              'decisionPolicy.requireHumanFor[]',
+              "'apply' | 'ignore' | 'probability'",
+              type,
+            );
+          }
         }
       }
     }

@@ -65,7 +65,7 @@ export class MemoryStore implements StorePort {
     this.opened = true;
     if (!this.loaded) {
       this.loaded = true;
-      const kinds = kindRegistryFor(this.baseRegistries.kinds);
+      const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
       const signals = signalRegistryFor(this.baseRegistries.signalSpecs);
       const validation = { kinds, signals };
 
@@ -99,9 +99,9 @@ export class MemoryStore implements StorePort {
         `Cannot append to corrupt store: log is unrecoverable from seq ${this.corruptAt}`,
       );
     }
-    const kinds = kindRegistryFor(this.baseRegistries.kinds);
+    const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
     const signals = signalRegistryFor(this.baseRegistries.signalSpecs);
-    validateEpisodeInput(episodeInput, { kinds, signals });
+    validateEpisodeInput(episodeInput, { kinds, signals, logLength: this.log.length });
     const episode = assignSeq(episodeInput, this.nextSeq);
     const state = this.accept(episode);
     return { episode, state };
@@ -146,7 +146,7 @@ export class MemoryStore implements StorePort {
         `Cannot replace the log of a corrupt store: unrecoverable from seq ${this.corruptAt}`,
       );
     }
-    const kinds = kindRegistryFor(this.baseRegistries.kinds);
+    const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
     const signals = signalRegistryFor(this.baseRegistries.signalSpecs);
     validateLog(episodes, { kinds, signals });
     const replaced = { from: 0, to: this.log.length - 1 };

@@ -1,4 +1,5 @@
 export * from './context.ts';
+export * from './decision.ts';
 export * from './definition.ts';
 export * from './durability.ts';
 export * from './ema.ts';

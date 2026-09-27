@@ -1,10 +1,19 @@
-import type { Anchor } from './durability.ts';
+import {
+  type Decision,
+  type DecisionCase,
+  freshCaseEma,
+  isHumanAuthor,
+  validateDecision,
+} from './decision.ts';
 import { type EntityDefinition, validateEntityDefinition } from './definition.ts';
+import type { Anchor } from './durability.ts';
+import { emaStep } from './ema.ts';
 import { type EntityKey, type EntityState, freshState } from './entity.ts';
-import { assertNever, InvalidArgumentError } from './errors.ts';
+import { assertNever, InvalidArgumentError, PermissionDeniedError } from './errors.ts';
 import {
   applySignal,
   type GuardReport,
+  mapEvidence,
   type Override,
   overrideStatus,
   reportGuard,
@@ -62,6 +71,12 @@ export interface SignalEpisode extends BaseEpisode {
    * asymmetric) are real without ever breaking fold-equivalence.
    */
   readonly weight?: number;
+  /**
+   * Ties this signal to one decision-tree branch (medha-arj.3): its evidence/EMA accrues into
+   * that `DecisionCase` via `foldDecisionTree`, isolated from `EntityState.evidence`. Absent (the
+   * default) behaves exactly as before — fully backward compatible.
+   */
+  readonly caseId?: string | undefined;
 }
 
 export interface GuardEpisode extends BaseEpisode {
@@ -135,6 +150,20 @@ export interface DefineEpisode extends BaseEpisode {
   readonly definition: EntityDefinition;
 }
 
+/**
+ * Grows or edits one branch of the entity's decision tree (medha-arj.2): non-evidential, like
+ * `define` — `foldEpisode` treats it as a no-op, and it is read instead by `foldDecisionTree`.
+ * `caseId` names the branch: pass a fresh one from `newDecisionCaseId` to create a branch, or an
+ * existing one to edit it (latest-write-wins by seq).
+ */
+export interface DecisionEpisode extends BaseEpisode {
+  readonly type: 'decision';
+  readonly caseId: string;
+  readonly parentId?: string | undefined;
+  readonly condition: string;
+  readonly decision: Decision;
+}
+
 export type Episode =
   | SignalEpisode
   | GuardEpisode
@@ -143,7 +172,8 @@ export type Episode =
   | SweepEpisode
   | BaselineEpisode
   | RetractEpisode
-  | DefineEpisode;
+  | DefineEpisode
+  | DecisionEpisode;
 
 /** An episode the host submits: everything but the store-assigned `seq`. */
 export type EpisodeInput =
@@ -154,7 +184,8 @@ export type EpisodeInput =
   | Omit<SweepEpisode, 'seq'>
   | Omit<BaselineEpisode, 'seq'>
   | Omit<RetractEpisode, 'seq'>
-  | Omit<DefineEpisode, 'seq'>;
+  | Omit<DefineEpisode, 'seq'>
+  | Omit<DecisionEpisode, 'seq'>;
 
 /** Deterministic map key for an entity. The separator is NUL (illegal in ids). */
 export function entityKeyString(key: EntityKey): string {
@@ -234,6 +265,12 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
         (typeof input.note !== 'string' || input.note.trim() === '')
       ) {
         throw new InvalidArgumentError('episode.note', 'a non-empty string', input.note);
+      }
+      if (
+        input.caseId !== undefined &&
+        (typeof input.caseId !== 'string' || input.caseId.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.caseId', 'a non-empty string', input.caseId);
       }
       break;
     }
@@ -351,6 +388,44 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
     case 'define':
       validateEntityDefinition(input.definition);
       break;
+    case 'decision': {
+      if (typeof input.caseId !== 'string' || input.caseId.trim() === '') {
+        throw new InvalidArgumentError('episode.caseId', 'a non-empty string', input.caseId);
+      }
+      if (typeof input.condition !== 'string' || input.condition.trim() === '') {
+        throw new InvalidArgumentError('episode.condition', 'a non-empty string', input.condition);
+      }
+      if (
+        input.parentId !== undefined &&
+        (typeof input.parentId !== 'string' || input.parentId.trim() === '')
+      ) {
+        throw new InvalidArgumentError('episode.parentId', 'a non-empty string', input.parentId);
+      }
+      validateDecision(input.decision);
+
+      const kindSpec = validation.kinds.get(input.key.kind);
+      const requireHumanFor = kindSpec?.decisionPolicy?.requireHumanFor;
+      if (requireHumanFor !== undefined) {
+        const gated =
+          requireHumanFor === 'apply'
+            ? input.decision.type === 'apply'
+            : requireHumanFor.includes(input.decision.type);
+        if (gated && !isHumanAuthor(input.author)) {
+          throw new PermissionDeniedError(
+            `decision:${input.decision.type}`,
+            `kind '${input.key.kind}' requires a human-tagged author (author: 'human:<id>') for a '${input.decision.type}' branch`,
+            {
+              context: {
+                kind: input.key.kind,
+                decisionType: input.decision.type,
+                author: input.author,
+              },
+            },
+          );
+        }
+      }
+      break;
+    }
     default:
       assertNever(input, 'episode input type');
   }
@@ -400,6 +475,8 @@ export function assignSeq(input: EpisodeInput, seq: number): Episode {
     case 'retract':
       return { ...input, seq };
     case 'define':
+      return { ...input, seq };
+    case 'decision':
       return { ...input, seq };
     default:
       return assertNever(input, 'episode input type');
@@ -556,6 +633,11 @@ export function foldEpisode(
     case 'define':
       // Non-evidential by design (medha-arj.1): a definition never changes EntityState.
       return prev;
+    case 'decision':
+      // Non-evidential by design (medha-arj.2): growing/editing a branch never changes
+      // EntityState. A tagged signal episode still folds into EntityState exactly as it would
+      // without a caseId — foldDecisionTree separately captures it for the branch.
+      return prev;
     default:
       return assertNever(episode, 'episode type');
   }
@@ -574,6 +656,87 @@ export function foldDefinitions(episodes: readonly Episode[]): Map<string, Entit
     byKey.set(entityKeyString(episode.key), episode.definition);
   }
   return byKey;
+}
+
+const CASE_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
+
+/** FNV-1a over a string, folded into 32 bits — used only to salt `newDecisionCaseId`. */
+function fnv1a32(input: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * A fresh decision-case id (medha-arj.2): `<entity-id>-dec-<5-char-alnum>`.
+ * `entityKeyString(key)` is folded into every character so two hosts minting an id for two
+ * *different* entities never collide even if their `random` happens to draw the same sequence
+ * (e.g. both reseed from a shared clock); `random` supplies the entropy so the same entity's ids
+ * don't collide across repeated calls. Defaults to `Math.random` — pass a seeded RNG for
+ * determinism in tests.
+ */
+export function newDecisionCaseId(key: EntityKey, random: () => number = Math.random): string {
+  const salt = fnv1a32(entityKeyString(key));
+  let suffix = '';
+  for (let i = 0; i < 5; i++) {
+    const draw = Math.floor(random() * 0x100000000) >>> 0;
+    const mixed = (draw ^ ((salt + i * 0x9e3779b9) >>> 0)) >>> 0;
+    suffix += CASE_ID_ALPHABET[mixed % CASE_ID_ALPHABET.length];
+  }
+  return `${key.id}-dec-${suffix}`;
+}
+
+/**
+ * Build the decision-case forest for one entity key from the log (medha-arj.2), entirely separate
+ * from `foldEpisode`'s trust fold: `decision` episodes create or edit a branch (latest-write-wins
+ * per `caseId` by seq), and a `signal` episode carrying a matching `caseId` (medha-arj.3) rolls its
+ * evidence/EMA into that branch alone — it also still folds into `EntityState` exactly as it would
+ * without a `caseId` (see `foldEpisode`'s `'signal'` case), so a branch's trust is additional
+ * information, not a replacement for the entity's aggregate.
+ */
+export function foldDecisionTree(
+  episodes: readonly Episode[],
+  key: EntityKey,
+  kindSpec?: KindSpec,
+): DecisionCase[] {
+  const target = entityKeyString(key);
+  const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
+  const byId = new Map<string, DecisionCase>();
+  for (const episode of ordered) {
+    if (entityKeyString(episode.key) !== target) continue;
+    if (episode.type === 'decision') {
+      const prevCase = byId.get(episode.caseId);
+      byId.set(episode.caseId, {
+        id: episode.caseId,
+        ...(episode.parentId === undefined ? {} : { parentId: episode.parentId }),
+        condition: episode.condition,
+        decision: episode.decision,
+        evidence: prevCase?.evidence ?? { k: 0, n: 0, contextRejects: 0 },
+        ema: prevCase?.ema ?? freshCaseEma(episode.at),
+      });
+      continue;
+    }
+    if (episode.type === 'signal' && episode.caseId !== undefined) {
+      const prevCase = byId.get(episode.caseId);
+      // A signal can only tag an existing branch; one naming an unknown case is silently ignored
+      // here (it still folds into EntityState as usual) rather than fabricating a branch with no
+      // condition/decision of its own.
+      if (prevCase === undefined) continue;
+      byId.set(episode.caseId, {
+        ...prevCase,
+        evidence: mapEvidence(prevCase.evidence, episode.spec, kindSpec),
+        ema: {
+          mu: emaStep(prevCase.ema.mu, episode.spec.value),
+          theta0: prevCase.ema.theta0,
+          updatedAt: episode.at,
+        },
+      });
+    }
+  }
+  return [...byId.values()];
 }
 
 /**

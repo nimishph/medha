@@ -78,7 +78,9 @@ export class SQLiteStore implements StorePort {
     this.opened = true;
     // Every open re-establishes the connection (close() releases it); the ingestion loop below
     // runs once per stored configuration so a reopen never double-folds the log.
-    mkdirSync(dirname(this.path), { recursive: true });
+    if (this.path !== ':memory:') {
+      mkdirSync(dirname(this.path), { recursive: true });
+    }
     const db = new Database(this.path, { create: true });
     this.db = db;
     db.run('PRAGMA journal_mode = WAL');
@@ -99,7 +101,7 @@ export class SQLiteStore implements StorePort {
       const rows = db
         .query<{ seq: number; json: string }, []>('SELECT seq, json FROM episodes ORDER BY seq')
         .all();
-      const kinds = kindRegistryFor(this.effective.kinds);
+      const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
       const signals = signalRegistryFor(this.effective.signalSpecs);
       for (const row of rows) {
         let episode: Episode;
@@ -152,9 +154,9 @@ export class SQLiteStore implements StorePort {
         `Cannot append to corrupt store: log is unrecoverable from seq ${this.corruptAt}`,
       );
     }
-    const kinds = kindRegistryFor(this.effective.kinds);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     const signals = signalRegistryFor(this.effective.signalSpecs);
-    validateEpisodeInput(episodeInput, { kinds, signals });
+    validateEpisodeInput(episodeInput, { kinds, signals, logLength: this.log.length });
     const episode = assignSeq(episodeInput, this.nextSeq);
     db.transaction(() => {
       db.query('INSERT INTO episodes (seq, json) VALUES (?, ?)').run(
@@ -207,7 +209,7 @@ export class SQLiteStore implements StorePort {
       );
     }
     const db = this.requireDb();
-    const kinds = kindRegistryFor(this.effective.kinds);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     const signals = signalRegistryFor(this.effective.signalSpecs);
     validateLog(episodes, { kinds, signals });
     const replaced = { from: 0, to: this.log.length - 1 };

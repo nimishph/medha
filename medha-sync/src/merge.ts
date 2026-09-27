@@ -101,6 +101,14 @@ function contentKey(episode: Episode | EpisodeInput, retractTarget: string): str
       parts.push([...(episode.definition.tags ?? [])].sort().join(','));
       break;
     }
+    case 'decision': {
+      parts.push(episode.caseId);
+      parts.push(episode.parentId ?? '');
+      parts.push(episode.condition);
+      parts.push(episode.decision.type);
+      if (episode.decision.type === 'probability') parts.push(String(episode.decision.value));
+      break;
+    }
   }
 
   return parts.join('\u0000');

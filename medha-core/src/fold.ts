@@ -1,7 +1,7 @@
 import type { Anchor } from './durability.ts';
 import { weekEpoch } from './durability.ts';
 import { emaStep } from './ema.ts';
-import type { EntityState, LifecycleStatus, Override } from './entity.ts';
+import type { EntityState, Evidence, LifecycleStatus, Override } from './entity.ts';
 import { InvalidArgumentError } from './errors.ts';
 import type { GuardState } from './guard.ts';
 import type { KindSpec } from './kinds.ts';
@@ -32,28 +32,25 @@ export interface FoldResult {
   readonly status: LifecycleStatus;
 }
 
-function mapEvidence(
-  state: EntityState,
-  spec: SignalSpec,
-  kindSpec?: KindSpec,
-): EntityState['evidence'] {
+/**
+ * Fold one signal's outcome into `Evidence` counters. Exported (as opposed to reading through a
+ * full `EntityState`) so callers scoring a smaller evidence-bearing unit — a decision-tree branch
+ * (medha-arj.3), for instance — can reuse the exact same accrual rule without faking an entity.
+ */
+export function mapEvidence(evidence: Evidence, spec: SignalSpec, kindSpec?: KindSpec): Evidence {
   if (kindSpec?.evidenceWeighting === 'signal-value') {
     const trialWeight = spec.countsAsTrial ? Math.abs(spec.value) : 0;
     const successWeight = spec.countsAsSuccess ? Math.max(0, spec.value) : 0;
-    const k = round6(state.evidence.k + successWeight);
-    const n = round6(state.evidence.n + trialWeight);
+    const k = round6(evidence.k + successWeight);
+    const n = round6(evidence.n + trialWeight);
     const contextRejects =
-      spec.name === 'REJECT_CONTEXT'
-        ? state.evidence.contextRejects + 1
-        : state.evidence.contextRejects;
+      spec.name === 'REJECT_CONTEXT' ? evidence.contextRejects + 1 : evidence.contextRejects;
     return { k, n, contextRejects };
   }
-  const k = spec.countsAsSuccess ? state.evidence.k + 1 : state.evidence.k;
-  const n = spec.countsAsTrial ? state.evidence.n + 1 : state.evidence.n;
+  const k = spec.countsAsSuccess ? evidence.k + 1 : evidence.k;
+  const n = spec.countsAsTrial ? evidence.n + 1 : evidence.n;
   const contextRejects =
-    spec.name === 'REJECT_CONTEXT'
-      ? state.evidence.contextRejects + 1
-      : state.evidence.contextRejects;
+    spec.name === 'REJECT_CONTEXT' ? evidence.contextRejects + 1 : evidence.contextRejects;
   return { k, n, contextRejects };
 }
 
@@ -92,7 +89,7 @@ export function applySignal(
 ): FoldResult {
   const next: EntityState = {
     ...state,
-    evidence: mapEvidence(state, applied.spec, context.kindSpec),
+    evidence: mapEvidence(state.evidence, applied.spec, context.kindSpec),
     ema: {
       mu: emaStep(state.ema.mu, applied.spec.value),
       theta0: state.ema.theta0,

@@ -177,9 +177,9 @@ export class FilePolicyStore implements StorePort {
         `Cannot append to corrupt store: log is unrecoverable from seq ${this.corruptAt}`,
       );
     }
-    const kinds = kindRegistryFor(this.effective.kinds);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     const signals = signalRegistryFor(this.effective.signalSpecs);
-    validateEpisodeInput(episodeInput, { kinds, signals });
+    validateEpisodeInput(episodeInput, { kinds, signals, logLength: this.log.length });
     const episode = assignSeq(episodeInput, this.nextSeq);
     const state = this.accept(episode);
     this.persist();
@@ -196,7 +196,7 @@ export class FilePolicyStore implements StorePort {
         `Cannot replace the log of a corrupt store: unrecoverable from seq ${this.corruptAt}`,
       );
     }
-    const kinds = kindRegistryFor(this.effective.kinds);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     const signals = signalRegistryFor(this.effective.signalSpecs);
     validateLog(episodes, { kinds, signals });
     const replaced = { from: 0, to: this.log.length - 1 };
@@ -250,7 +250,7 @@ export class FilePolicyStore implements StorePort {
 
   /** Fold a loaded document's episodes into the live projection; returns the first bad seq or null. */
   private foldDocument(doc: StoreDocumentV1, alreadyCorrupt: boolean): number | null {
-    const kinds = kindRegistryFor(this.effective.kinds);
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
     const signals = signalRegistryFor(this.effective.signalSpecs);
     const ordered = [...doc.episodes].sort((a, b) => a.seq - b.seq);
     for (const episode of ordered) {

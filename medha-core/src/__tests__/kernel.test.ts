@@ -1,15 +1,32 @@
 import { describe, expect, test } from 'bun:test';
+import { caseStatus, caseTrust } from '../decision.ts';
+import type { EntityDefinition } from '../definition.ts';
 import { anchorSetFor, distinctAnchorValues, durabilityFactor, weekEpoch } from '../durability.ts';
 import { emaStep } from '../ema.ts';
 import { type EntityState, freshState } from '../entity.ts';
-import type { EntityDefinition } from '../definition.ts';
-import { type Episode, foldDefinitions, foldEpisode, foldLog } from '../episode.ts';
-import { InvariantViolationError, UnknownKindError, UnknownSignalError } from '../errors.ts';
+import {
+  type Episode,
+  type EpisodeValidation,
+  foldDecisionTree,
+  foldDefinitions,
+  foldEpisode,
+  foldLog,
+  newDecisionCaseId,
+  validateEpisodeInput,
+} from '../episode.ts';
+import {
+  InvalidArgumentError,
+  InvariantViolationError,
+  PermissionDeniedError,
+  UnknownKindError,
+  UnknownSignalError,
+} from '../errors.ts';
 import { applySignal, reportGuard, weekAnchor } from '../fold.ts';
 import { guardFactor } from '../guard.ts';
 import { buildHint } from '../hint.ts';
 import { KindRegistry } from '../kinds.ts';
 import { recencyDecay } from '../recency.ts';
+import { mulberry32 } from '../rng.ts';
 import {
   APPLY,
   CANONICAL_SIGNALS,
@@ -674,5 +691,250 @@ describe('medha-arj.1: EntityDefinition + define episode', () => {
     expect(defs.get('n\u0000rule\u0000r1')).toEqual(second);
     expect(defs.get('n\u0000rule\u0000other')).toEqual(second);
     expect(defs.size).toBe(2);
+  });
+});
+
+describe('medha-arj.2: DecisionCase/DecisionEpisode + newDecisionCaseId + foldDecisionTree', () => {
+  test('newDecisionCaseId format: <entity-id>-dec-<5-char-alnum>', () => {
+    const id = newDecisionCaseId(KEY, mulberry32(1));
+    expect(id).toMatch(/^r1-dec-[0-9a-z]{5}$/);
+  });
+
+  test('same key + different random draws never collide within a reasonable sample', () => {
+    const ids = new Set<string>();
+    for (let seed = 0; seed < 500; seed++) {
+      ids.add(newDecisionCaseId(KEY, mulberry32(seed)));
+    }
+    expect(ids.size).toBe(500);
+  });
+
+  test('different keys with the same random draw differ', () => {
+    const other = { namespace: 'n', kind: 'rule', id: 'r2' };
+    expect(newDecisionCaseId(KEY, mulberry32(7))).not.toBe(newDecisionCaseId(other, mulberry32(7)));
+  });
+
+  test('decision is a no-op in foldEpisode: stripping decision episodes leaves EntityState unchanged', () => {
+    const caseId = newDecisionCaseId(KEY, mulberry32(1));
+    const ep0: Episode = {
+      seq: 0,
+      key: KEY,
+      at: START,
+      type: 'decision',
+      caseId,
+      condition: 'touched more than 10 times',
+      decision: { type: 'apply' },
+    };
+    const ep1: Episode = {
+      seq: 1,
+      key: KEY,
+      at: START + 1000,
+      type: 'signal',
+      spec: APPLY,
+      ensure: true,
+    };
+    expect(foldLog([ep0, ep1])).toEqual(foldLog([{ ...ep1, seq: 0 }]));
+  });
+
+  test('decision never creates an entity on its own, even with no prior state', () => {
+    const caseId = newDecisionCaseId(KEY, mulberry32(2));
+    const ep0: Episode = {
+      seq: 0,
+      key: KEY,
+      at: START,
+      type: 'decision',
+      caseId,
+      condition: 'x',
+      decision: { type: 'ignore' },
+    };
+    expect(foldEpisode(undefined, ep0)).toBeUndefined();
+  });
+
+  test('foldDecisionTree builds a parent-linked forest, latest-write-wins per case id on edit', () => {
+    const rootId = newDecisionCaseId(KEY, mulberry32(3));
+    const childId = newDecisionCaseId(KEY, mulberry32(4));
+    const episodes: Episode[] = [
+      {
+        seq: 0,
+        key: KEY,
+        at: START,
+        type: 'decision',
+        caseId: rootId,
+        condition: 'root cond',
+        decision: { type: 'probability', value: 0.5 },
+      },
+      {
+        seq: 1,
+        key: KEY,
+        at: START + 1,
+        type: 'decision',
+        caseId: childId,
+        parentId: rootId,
+        condition: 'child cond',
+        decision: { type: 'ignore' },
+      },
+      // Edit: same caseId as seq 0, later in the log — this must win.
+      {
+        seq: 2,
+        key: KEY,
+        at: START + 2,
+        type: 'decision',
+        caseId: rootId,
+        condition: 'root cond',
+        decision: { type: 'apply' },
+      },
+    ];
+
+    const tree = foldDecisionTree(episodes, KEY);
+    expect(tree).toHaveLength(2);
+    const root = tree.find((c) => c.id === rootId);
+    const child = tree.find((c) => c.id === childId);
+    expect(root?.decision).toEqual({ type: 'apply' });
+    expect(root?.parentId).toBeUndefined();
+    expect(child?.parentId).toBe(rootId);
+  });
+});
+
+describe('medha-arj.3: SignalEpisode.caseId — per-branch evidence isolated from the entity aggregate', () => {
+  const ADOPTED = { name: 'ADOPTED', value: 0.6, countsAsTrial: true, countsAsSuccess: true };
+
+  test('two branches diverge — one trusted, one quarantined — under the same entity', () => {
+    const trustedCase = newDecisionCaseId(KEY, mulberry32(10));
+    const quarantinedCase = newDecisionCaseId(KEY, mulberry32(11));
+    const episodes: Episode[] = [
+      {
+        seq: 0,
+        key: KEY,
+        at: START,
+        type: 'decision',
+        caseId: trustedCase,
+        condition: 'good branch',
+        decision: { type: 'apply' },
+      },
+      {
+        seq: 1,
+        key: KEY,
+        at: START,
+        type: 'decision',
+        caseId: quarantinedCase,
+        condition: 'bad branch',
+        decision: { type: 'ignore' },
+      },
+    ];
+    let seq = 2;
+    for (let i = 0; i < 20; i++) {
+      episodes.push({
+        seq: seq++,
+        key: KEY,
+        at: START + 1000 * (i + 1),
+        type: 'signal',
+        spec: ADOPTED,
+        ensure: true,
+        caseId: trustedCase,
+      });
+      episodes.push({
+        seq: seq++,
+        key: KEY,
+        at: START + 1000 * (i + 1),
+        type: 'signal',
+        spec: REJECT_RULE,
+        ensure: true,
+        caseId: quarantinedCase,
+      });
+    }
+
+    const tree = foldDecisionTree(episodes, KEY);
+    const trusted = tree.find((c) => c.id === trustedCase);
+    const quarantined = tree.find((c) => c.id === quarantinedCase);
+    if (trusted === undefined || quarantined === undefined) {
+      throw new InvariantViolationError(
+        'expected both branches to be present in the decision tree',
+      );
+    }
+    const now = START + 1000 * 25;
+
+    expect(caseStatus(trusted, now)).toBe('trusted');
+    expect(caseStatus(quarantined, now)).toBe('quarantined');
+    expect(caseTrust(trusted, now).trust).toBeGreaterThan(caseTrust(quarantined, now).trust);
+
+    // Additive by design (medha-arj.3): every tagged signal still folds into the entity's own
+    // aggregate exactly as it would without a caseId.
+    const finalState = foldLog(episodes)[0];
+    expect(finalState?.evidence.n).toBe(40);
+  });
+
+  test('existing signal-episode behavior with no caseId is unchanged', () => {
+    const withoutField: Episode = {
+      seq: 0,
+      key: KEY,
+      at: START,
+      type: 'signal',
+      spec: APPLY,
+      ensure: true,
+    };
+    const withUndefined: Episode = { ...withoutField, caseId: undefined };
+    expect(foldEpisode(undefined, withoutField)).toEqual(foldEpisode(undefined, withUndefined));
+  });
+
+  test('caseId is validated non-empty when present', () => {
+    const validation: EpisodeValidation = {
+      kinds: new KindRegistry(),
+      signals: new SignalRegistry(),
+    };
+    expect(() =>
+      validateEpisodeInput(
+        { key: KEY, at: START, type: 'signal', spec: APPLY, ensure: true, caseId: '  ' },
+        validation,
+      ),
+    ).toThrow(InvalidArgumentError);
+  });
+});
+
+describe("medha-arj.4: KindSpec.decisionPolicy.requireHumanFor — gate who can grant an 'apply' branch", () => {
+  test('a kind with requireHumanFor="apply" rejects an agent-authored apply decision and accepts a human-authored one', () => {
+    const kinds = new KindRegistry();
+    kinds.register({ name: 'tool-gate', decisionPolicy: { requireHumanFor: 'apply' } });
+    const validation: EpisodeValidation = { kinds, signals: new SignalRegistry() };
+    const gatedKey = { namespace: 'n', kind: 'tool-gate', id: 't1' };
+    const caseId = newDecisionCaseId(gatedKey, mulberry32(20));
+
+    const agentAttempt = {
+      key: gatedKey,
+      at: START,
+      type: 'decision' as const,
+      caseId,
+      condition: 'x',
+      decision: { type: 'apply' as const },
+      author: 'agent:reviewer',
+    };
+    expect(() => validateEpisodeInput(agentAttempt, validation)).toThrow(PermissionDeniedError);
+
+    const humanAttempt = { ...agentAttempt, author: 'human:nimish' };
+    expect(() => validateEpisodeInput(humanAttempt, validation)).not.toThrow();
+
+    // ignore/probability are not gated by this policy — an agent may still grant them.
+    const agentIgnore = { ...agentAttempt, decision: { type: 'ignore' as const } };
+    expect(() => validateEpisodeInput(agentIgnore, validation)).not.toThrow();
+  });
+
+  test('a kind without decisionPolicy accepts either author for an apply decision', () => {
+    const kinds = new KindRegistry();
+    kinds.register({ name: 'code-review' });
+    const validation: EpisodeValidation = { kinds, signals: new SignalRegistry() };
+    const openKey = { namespace: 'n', kind: 'code-review', id: 't1' };
+    const caseId = newDecisionCaseId(openKey, mulberry32(21));
+    expect(() =>
+      validateEpisodeInput(
+        {
+          key: openKey,
+          at: START,
+          type: 'decision',
+          caseId,
+          condition: 'x',
+          decision: { type: 'apply' },
+          author: 'agent:reviewer',
+        },
+        validation,
+      ),
+    ).not.toThrow();
   });
 });
