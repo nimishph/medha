@@ -15,7 +15,7 @@ import math
 import pathlib
 import sys
 
-SPEC_VERSION = "1.1.0"
+SPEC_VERSION = "1.2.0"
 DAY_MS = 86_400_000
 WEEK_MS = 7 * DAY_MS
 

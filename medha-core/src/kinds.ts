@@ -39,7 +39,7 @@ export interface KindRecency {
 export type EvidenceWeightingMode = 'count' | 'signal-value';
 
 /**
- * Governs who may grant a decision-tree branch of a given type (medha-arj.4). `'apply'` is
+ * Governs who may grant a decision-tree branch of a given type, trust spec §11a.4. `'apply'` is
  * shorthand for `['apply']`. Absent means every decision type is agent-editable (code-review
  * governance); listing a type here makes it human-gated (tool-gate governance) — both governance
  * modes ride the same `DecisionEpisode` type.

@@ -26,12 +26,13 @@ import { validateSignalSpec } from './signals.ts';
 import { statusFor } from './trust.ts';
 
 /**
- * Episodes, library spec §3 and §7.1.
+ * Episodes, library spec §3 and §7.1. `define`/`decision` (non-evidential metadata) are spec §11a.
  *
  * An episode is one immutable evidence event: a signal, a guard report, a human override, a
- * proposal, or a sweep action. The episode log is the append-only **source of truth**: entity
- * state is a fold over episodes, so any backend can rebuild it and it can be recomputed under
- * new parameters.
+ * proposal, or a sweep action — plus two non-evidential metadata types, a host-authored
+ * `define` and a decision-tree `decision` (spec §11a), which `foldEpisode` treats as pure no-ops.
+ * The episode log is the append-only **source of truth**: entity state is a fold over episodes, so
+ * any backend can rebuild it and it can be recomputed under new parameters.
  *
  * Episodes are self-describing: a signal episode embeds the resolved `SignalSpec` (not a bare
  * name), so the fold is a pure function of the log — no mutable registries in the way, which is

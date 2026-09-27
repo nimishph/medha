@@ -1,7 +1,7 @@
 import { InvalidArgumentError } from './errors.ts';
 
 /**
- * Host-authored, non-evidential definition of an entity (spec medha-arj): title, optional tags,
+ * Host-authored, non-evidential definition of an entity, trust spec §11a.1: title, optional tags,
  * and rationale. Never folded as evidence — a `define` episode must never change `EntityState`,
  * so this has its own fold (`foldDefinitions`) entirely separate from `foldEpisode`'s trust fold.
  */

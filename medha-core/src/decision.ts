@@ -6,7 +6,7 @@ import { DEFAULT_THETA0 } from './thresholds.ts';
 import { statusFor, type TrustResult, trustOf } from './trust.ts';
 
 /**
- * Per-entity decision trees (spec medha-arj): each branch is a condition -> decision
+ * Per-entity decision trees, trust spec §11a.2/§11a.3: each branch is a condition -> decision
  * (apply/ignore/probability), growing incrementally from usage, with its own Wilson evidence
  * separate from the entity's aggregate trust.
  */

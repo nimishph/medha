@@ -1,6 +1,6 @@
 # Medha trust formula — specification
 
-**Spec version: 1.1.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
+**Spec version: 1.2.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
 
 This document is the normative definition of how Medha turns an entity's history into a trust
 score, a lifecycle status, and the threshold gates. A port (Python, Go, …) is conformant when it
@@ -226,6 +226,102 @@ grows with the number of distinct authors; pair it with `allowedAuthors` on untr
   `n >= minUsesForTrusted` — for any per-kind thresholds (property-tested).
 - A gate is met iff all its conditions are met.
 - With `signalLimits`, suppressed successes never change evidence, EMA, anchors, recency or status.
+- **Fold-purity (since 1.2.0, §11a)**: `define` and `decision` episodes never change `EntityState`
+  — stripping every one of them from a log produces byte-identical states to the full log.
+
+## 11a. Definitions and decision trees (since 1.2.0)
+
+Two more episode types ride the same log, both **entirely non-evidential**: applying either MUST
+leave `EntityState` byte-for-byte unchanged. A conformant port MUST make `foldEpisode`/its
+equivalent treat both as pure no-ops (`return prev`), including when there is no prior state (a
+`define`/`decision` episode MUST NOT create an entity, even without an explicit `ensure`-style
+flag — there is none for these two types).
+
+**Fold-purity invariant.** For any log, the `EntityState` per key produced by folding it is
+identical to the `EntityState` produced by folding the same log with every `define` and `decision`
+episode removed (and, symmetrically, with all `signal` episodes' `caseId` stripped — a tagged
+signal folds into `EntityState` exactly as it would untagged; see below). Trust math is computed
+purely from `signal`/`guard`/`override`/`proposal`/`sweep`/`baseline` episodes. Definitions and
+decision-tree structure are metadata riding the same log, read by their own, separate folds.
+
+### 11a.1 `EntityDefinition` (`define` episode)
+
+A host-authored, non-evidential definition: `{ title: string, tags?: string[], rationale: string
+}`. `title` and `rationale` MUST be non-empty. `foldDefinitions(episodes):
+Map<entityKeyString, EntityDefinition>` rebuilds, per key, the definition from the **last**
+`define` episode by `seq` order (latest-write-wins) — independent of `foldEpisode`'s trust fold.
+
+### 11a.2 `DecisionCase` / `Decision` (`decision` episode)
+
+A branch of an entity's decision tree: a condition growing incrementally from usage. `Decision` is
+one of `{type: 'apply'}`, `{type: 'ignore'}`, or `{type: 'probability', value}` (`value` in
+`[0,1]`). A `DecisionCase` is `{id, parentId?, condition, decision, evidence, ema}` — `evidence`
+and `ema` are exactly the same shapes an `EntityState` carries (§3), but scoped to the branch alone
+(§11a.3).
+
+A `decision` episode carries `{caseId, parentId?, condition, decision}`. `caseId` is minted by
+`newDecisionCaseId(key, random?)`: `<entity-id>-dec-<5-char-alnum>`, where `entityKeyString(key)`
+(§9's key-string form) is folded (FNV-1a) into every character of the 5-char suffix. This makes two
+*different* entities' ids diverge even when their `random` draws coincide (e.g. both hosts reseed
+from a similar clock), while `random`'s entropy is what keeps the *same* entity's repeated calls
+from colliding. `random` is caller-supplied (defaults to a non-deterministic source); a port
+targeting these vectors MUST accept an injected `random` for reproducibility, exactly as
+`Context.seed` already lets `explore` (§6.3) replay deterministically.
+
+`foldDecisionTree(episodes, key): DecisionCase[]` builds the parent-linked forest for one entity
+key: only `decision` episodes for that key are read, latest-write-wins per `caseId` by `seq` order
+(an "edit" is a later `decision` episode reusing an existing `caseId`). `parentId` is not validated
+against the tree — a `parentId` naming a case absent from the log (a dangling reference, or one
+outside a folded slice) is carried on the case as-is; a renderer MUST treat it as a root rather
+than dropping the case.
+
+### 11a.3 Per-branch evidence (`SignalEpisode.caseId`)
+
+A `signal` episode MAY carry an optional `caseId`, naming an existing `DecisionCase`. When present:
+
+- The signal folds into `EntityState` **exactly as it would without `caseId`** — untouched,
+  unconditional. This is what makes "existing signal-episode behavior with no caseId" trivially
+  unchanged: the two paths are the same code path.
+- **Additionally**, `foldDecisionTree` rolls the same signal's evidence (§9's `k`/`n`/
+  `contextRejects` accrual rule, `evidenceWeighting`-aware) and EMA step (§7's `emaStep`) into
+  the named case's own `evidence`/`ema`, isolated from every other case and from the entity's own
+  aggregate. A `caseId` naming no case present in the folded slice is silently ignored by the tree
+  fold (the signal still folds into `EntityState` as usual).
+
+This is a deliberate **additive**, not exclusive, design: a branch's evidence is a second,
+independent view of the same signal, not a redirection away from the entity's aggregate. A branch
+can therefore be `trusted` while its parent entity — whose aggregate has also accrued every other
+branch's (and every untagged) signal — reads `quarantined`, or vice versa.
+
+**Scoring a branch** (`caseTrust`/`caseStatus`/`scoreDecisionTree`): a `DecisionCase` has no guard
+or anchors of its own. It is scored by constructing a synthetic state with guard `{kind: 'branch',
+lastOk: true}` (passed, never unguarded) and no anchors, then applying §5/§6 unchanged. A branch's
+trust is therefore driven purely by its own Wilson evidence and EMA — it can reach `trusted`
+without ever being "guarded" in the host sense, because nothing about a branch is guardable; the
+concept doesn't apply below the entity level.
+
+### 11a.4 `KindSpec.decisionPolicy` (governance gate)
+
+`KindSpec.decisionPolicy.requireHumanFor?: Decision['type'][] | 'apply'` gates which decision types
+require a human-tagged author. `'apply'` is shorthand for `['apply']`. **Convention: default-deny.**
+An author counts as human only when the string is exactly `human:<id>` (prefix match); every other
+author — including an absent one — fails the check. This is what makes `tool-gate` (only a
+human-authored `decision` episode may create/upgrade an `apply` branch) and `code-review` (every
+decision type is agent-editable) both real over the same episode type: the policy lives on the
+kind, not the episode. A rejected episode MUST fail with a typed permission error naming the kind
+and the decision type, at validation time (the same point a `signal`'s or `retract`'s invalid shape
+is rejected) — never as a silent no-op.
+
+### 11a.5 Known gap: retraction does not mask `define`/`decision`
+
+A `retract` episode (§entityKeyString / retraction semantics) masks its target for `foldEpisode`'s
+trust fold and `foldLog`. It is **not** currently read by `foldDefinitions` or `foldDecisionTree` —
+a `retract` targeting a bad `define` or `decision` episode's `seq` does not remove it from either
+fold's output. A future spec revision should decide whether these folds should honor `retract`
+symmetrically with the trust fold, or whether definitions/decisions want their own correction
+mechanism (e.g. a later `define`/`decision` simply superseding, which latest-write-wins already
+gives them). Until resolved, a host wanting to correct a bad definition or decision should submit a
+newer one for the same key/`caseId`, not rely on `retract`.
 
 ## 11. Conformance vectors
 

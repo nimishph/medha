@@ -1,15 +1,39 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { caseStatus, type Decision } from '../decision.ts';
 import { durabilityFactor } from '../durability.ts';
 import { emaStep } from '../ema.ts';
-import { type EntityState, freshState } from '../entity.ts';
-import { type Episode, foldEpisode } from '../episode.ts';
+import {
+  type EntityKey,
+  type EntityState,
+  type Evidence,
+  freshState,
+  type LifecycleStatus,
+} from '../entity.ts';
+import {
+  type Episode,
+  type EpisodeInput,
+  foldDecisionTree,
+  foldEpisode,
+  foldLog,
+  newDecisionCaseId,
+  validateEpisodeInput,
+} from '../episode.ts';
+import { InvalidArgumentError, MedhaError } from '../errors.ts';
 import { evaluateGates } from '../hint.ts';
-import type { KindSpec } from '../kinds.ts';
+import { KindRegistry, type KindSpec } from '../kinds.ts';
 import { recencyDecay } from '../recency.ts';
+import { mulberry32 } from '../rng.ts';
 import { round6 } from '../rounding.ts';
-import { APPLY, REJECT_CONTEXT, REJECT_RULE, type SignalSpec, SKIP } from '../signals.ts';
+import {
+  APPLY,
+  REJECT_CONTEXT,
+  REJECT_RULE,
+  SignalRegistry,
+  type SignalSpec,
+  SKIP,
+} from '../signals.ts';
 import { TRUST_SPEC_VERSION } from '../thresholds.ts';
 import { statusFrom, trustOf } from '../trust.ts';
 import { wilsonLowerBound } from '../wilson.ts';
@@ -115,6 +139,184 @@ describe('conformance vectors', () => {
       expect(state.evidence).toEqual(want.evidence);
       expect(state.ema.mu).toBe(want.ema.mu);
       expect(state.authors ?? {}).toEqual(want.authors);
+    });
+  }
+});
+
+/**
+ * §11a conformance: definitions and decision trees are non-evidential metadata, hand-authored
+ * (docs/spec/vectors/decision-tree.json — see its own note on why it isn't generate.py output).
+ * `caseRef` labels are resolved to real case ids here before folding; only the fold's behavior —
+ * fold-purity, per-case evidence isolation, decisionPolicy rejection — is the cross-port vector.
+ */
+describe('medha-arj.8: definitions/decision-tree conformance (spec §11a)', () => {
+  const dt = load('decision-tree.json');
+
+  test('vectors target the kernel spec version', () => {
+    expect(dt.specVersion).toBe(TRUST_SPEC_VERSION);
+  });
+
+  interface DTEpisode {
+    readonly type: string;
+    readonly at?: number;
+    readonly spec?: string;
+    readonly ensure?: boolean;
+    readonly definition?: {
+      readonly title: string;
+      readonly tags?: string[];
+      readonly rationale: string;
+    };
+    readonly caseRef?: string;
+    readonly condition?: string;
+    readonly decision?: Decision;
+    readonly count?: number;
+    readonly startAt?: number;
+    readonly stepMs?: number;
+  }
+
+  function buildEpisodes(
+    key: EntityKey,
+    raw: readonly DTEpisode[],
+  ): { readonly episodes: Episode[]; readonly caseIds: Map<string, string> } {
+    const caseIds = new Map<string, string>();
+    const resolve = (ref: string): string => {
+      let id = caseIds.get(ref);
+      if (id === undefined) {
+        id = newDecisionCaseId(key, mulberry32(caseIds.size + 1));
+        caseIds.set(ref, id);
+      }
+      return id;
+    };
+    const episodes: Episode[] = [];
+    let seq = 0;
+    const push = (input: EpisodeInput) => episodes.push({ ...input, seq: seq++ } as Episode);
+    for (const ep of raw) {
+      switch (ep.type) {
+        case 'define':
+          push({
+            type: 'define',
+            key,
+            at: ep.at ?? 0,
+            definition: ep.definition as NonNullable<DTEpisode['definition']>,
+          });
+          break;
+        case 'signal':
+          push({
+            type: 'signal',
+            key,
+            at: ep.at ?? 0,
+            spec: SIGNALS[ep.spec as string] as SignalSpec,
+            ensure: ep.ensure ?? false,
+            ...(ep.caseRef !== undefined ? { caseId: resolve(ep.caseRef) } : {}),
+          });
+          break;
+        case 'decision':
+          push({
+            type: 'decision',
+            key,
+            at: ep.at ?? 0,
+            caseId: resolve(ep.caseRef as string),
+            condition: ep.condition as string,
+            decision: ep.decision as Decision,
+          });
+          break;
+        case 'signalBurst': {
+          const count = ep.count as number;
+          const startAt = ep.startAt as number;
+          const stepMs = ep.stepMs as number;
+          const caseId = ep.caseRef !== undefined ? resolve(ep.caseRef) : undefined;
+          for (let i = 0; i < count; i++) {
+            push({
+              type: 'signal',
+              key,
+              at: startAt + i * stepMs,
+              spec: SIGNALS[ep.spec as string] as SignalSpec,
+              ensure: true,
+              ...(caseId !== undefined ? { caseId } : {}),
+            });
+          }
+          break;
+        }
+        default:
+          throw new InvalidArgumentError(
+            'vector episode.type',
+            'a known vector episode type',
+            ep.type,
+          );
+      }
+    }
+    return { episodes, caseIds };
+  }
+
+  for (const vec of dt.foldPurity) {
+    test(`fold-purity: ${vec.name}`, () => {
+      const key: EntityKey = vec.key;
+      const kindSpec: KindSpec = vec.kindSpec;
+      const { episodes } = buildEpisodes(key, vec.episodes);
+      const full = foldLog(episodes, { kindSpec })[0];
+      const stripped = foldLog(
+        episodes
+          .filter((e) => e.type !== 'define' && e.type !== 'decision')
+          .map((e, i) => ({ ...e, seq: i }) as Episode),
+        { kindSpec },
+      )[0];
+      expect(full).toEqual(stripped);
+      expect(full?.evidence).toEqual(vec.expected.evidence);
+      expect(full?.status).toBe(vec.expected.status);
+    });
+  }
+
+  for (const vec of dt.caseIsolation) {
+    test(`case isolation: ${vec.name}`, () => {
+      const key: EntityKey = vec.key;
+      const kindSpec: KindSpec = vec.kindSpec;
+      const { episodes, caseIds } = buildEpisodes(key, vec.episodes);
+      const tree = foldDecisionTree(episodes, key, kindSpec);
+      for (const [label, expectedCase] of Object.entries(vec.expectedCases) as [
+        string,
+        { evidence: Evidence; status: LifecycleStatus },
+      ][]) {
+        const caseId = caseIds.get(label);
+        expect(caseId).toBeDefined();
+        const kase = tree.find((c) => c.id === caseId);
+        expect(kase).toBeDefined();
+        if (kase === undefined) continue;
+        expect(kase.evidence).toEqual(expectedCase.evidence);
+        expect(caseStatus(kase, vec.now, kindSpec)).toBe(expectedCase.status);
+      }
+      const aggregate = foldLog(episodes, { kindSpec })[0];
+      expect(aggregate?.evidence).toEqual(vec.expectedAggregate.evidence);
+    });
+  }
+
+  for (const vec of dt.decisionPolicyRejections) {
+    test(`decisionPolicy: ${vec.name}`, () => {
+      const kinds = new KindRegistry([vec.kindSpec]);
+      const signals = new SignalRegistry();
+      const key: EntityKey = vec.key;
+      const input: EpisodeInput = {
+        type: 'decision',
+        key,
+        at: 0,
+        caseId: newDecisionCaseId(key),
+        condition: vec.decisionEpisode.condition,
+        decision: vec.decisionEpisode.decision,
+        author: vec.decisionEpisode.author,
+      };
+      if (vec.rejected === true) {
+        let caught: unknown;
+        try {
+          validateEpisodeInput(input, { kinds, signals });
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(MedhaError);
+        if (vec.errorCode !== undefined) {
+          expect((caught as MedhaError).code).toBe(vec.errorCode);
+        }
+      } else {
+        expect(() => validateEpisodeInput(input, { kinds, signals })).not.toThrow();
+      }
     });
   }
 });

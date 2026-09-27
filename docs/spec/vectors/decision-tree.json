@@ -1,0 +1,103 @@
+{
+  "specVersion": "1.2.0",
+  "note": "medha-arj.8: definitions/decision-tree conformance vectors, trust-formula.md §11a. caseRef labels are resolved to real case ids by the runner (via newDecisionCaseId or equivalent) before folding — case ids are locally minted, not portable literals, so only the fold's *behavior* is a cross-port vector here.",
+  "foldPurity": [
+    {
+      "name": "define-and-decision-interleaved-with-signal-are-noop",
+      "key": { "namespace": "n", "kind": "rule", "id": "r1" },
+      "kindSpec": { "name": "rule" },
+      "episodes": [
+        { "type": "define", "at": 0, "definition": { "title": "t", "rationale": "r" } },
+        { "type": "signal", "at": 1000, "spec": "APPLY", "ensure": true },
+        {
+          "type": "decision",
+          "at": 2000,
+          "caseRef": "root",
+          "condition": "c",
+          "decision": { "type": "apply" }
+        },
+        { "type": "signal", "at": 3000, "spec": "APPLY" },
+        { "type": "define", "at": 4000, "definition": { "title": "t2", "rationale": "r2" } }
+      ],
+      "expected": { "evidence": { "k": 2, "n": 2, "contextRejects": 0 }, "status": "probation" }
+    }
+  ],
+  "caseIsolation": [
+    {
+      "name": "good-branch-trusted-bad-branch-quarantined-parent-additive",
+      "key": { "namespace": "n", "kind": "rule", "id": "r1" },
+      "kindSpec": { "name": "rule" },
+      "episodes": [
+        {
+          "type": "decision",
+          "at": 0,
+          "caseRef": "good",
+          "condition": "good branch",
+          "decision": { "type": "apply" }
+        },
+        {
+          "type": "decision",
+          "at": 0,
+          "caseRef": "bad",
+          "condition": "bad branch",
+          "decision": { "type": "ignore" }
+        },
+        { "type": "signalBurst", "count": 20, "startAt": 1000, "stepMs": 1000, "spec": "ADOPTED", "caseRef": "good" },
+        { "type": "signalBurst", "count": 20, "startAt": 1000, "stepMs": 1000, "spec": "REJECT_RULE", "caseRef": "bad" }
+      ],
+      "now": 21000,
+      "expectedCases": {
+        "good": { "evidence": { "k": 20, "n": 20, "contextRejects": 0 }, "status": "trusted" },
+        "bad": { "evidence": { "k": 0, "n": 20, "contextRejects": 0 }, "status": "quarantined" }
+      },
+      "expectedAggregate": { "evidence": { "k": 20, "n": 40, "contextRejects": 0 } }
+    }
+  ],
+  "decisionPolicyRejections": [
+    {
+      "name": "tool-gate-apply-requires-human-rejects-agent",
+      "kindSpec": { "name": "tool-gate", "decisionPolicy": { "requireHumanFor": "apply" } },
+      "key": { "namespace": "", "kind": "tool-gate", "id": "t1" },
+      "decisionEpisode": {
+        "condition": "never touched",
+        "decision": { "type": "apply" },
+        "author": "agent:reviewer"
+      },
+      "rejected": true,
+      "errorCode": "CORE_PERMISSION_DENIED"
+    },
+    {
+      "name": "tool-gate-apply-accepts-human",
+      "kindSpec": { "name": "tool-gate", "decisionPolicy": { "requireHumanFor": "apply" } },
+      "key": { "namespace": "", "kind": "tool-gate", "id": "t1" },
+      "decisionEpisode": {
+        "condition": "never touched",
+        "decision": { "type": "apply" },
+        "author": "human:nimish"
+      },
+      "rejected": false
+    },
+    {
+      "name": "tool-gate-ignore-is-not-gated",
+      "kindSpec": { "name": "tool-gate", "decisionPolicy": { "requireHumanFor": "apply" } },
+      "key": { "namespace": "", "kind": "tool-gate", "id": "t1" },
+      "decisionEpisode": {
+        "condition": "never touched",
+        "decision": { "type": "ignore" },
+        "author": "agent:reviewer"
+      },
+      "rejected": false
+    },
+    {
+      "name": "no-policy-accepts-agent-apply",
+      "kindSpec": { "name": "code-review" },
+      "key": { "namespace": "", "kind": "code-review", "id": "t1" },
+      "decisionEpisode": {
+        "condition": "never touched",
+        "decision": { "type": "apply" },
+        "author": "agent:reviewer"
+      },
+      "rejected": false
+    }
+  ]
+}
