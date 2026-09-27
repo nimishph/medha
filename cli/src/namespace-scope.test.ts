@@ -88,6 +88,76 @@ describe('medha init --namespace', () => {
   });
 });
 
+describe('medha init --recreate on a namespace-scoped home', () => {
+  test('carries the existing scope over instead of silently widening the home', async () => {
+    const { env, root, out } = fresh();
+    expect(await runCli(['init', '--namespace', 'proj-a'], env)).toBe(0);
+
+    expect(await runCli(['init', '--recreate'], env)).toBe(0);
+    expect(readConfig(join(root, '.medha'))?.namespaceScope).toEqual(['proj-a']);
+    // The report says so, so preserving the boundary is never a silent no-op either.
+    expect(out()).toContain('namespaces: proj-a');
+
+    // And the recreated home is still actually scoped: the engine is not the admin engine.
+    const opened = openHome(env.cwd);
+    await expect(
+      opened.engine.record(
+        { namespace: 'proj-b', kind: 'rule', id: 'foreign' },
+        'APPLY',
+        { now: NOW },
+        { ensure: true },
+      ),
+    ).rejects.toThrow(/namespace/i);
+    await opened.engine.close();
+  });
+
+  test('--namespace on --recreate replaces the scope outright', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init', '--namespace', 'proj-a'], env)).toBe(0);
+
+    expect(await runCli(['init', '--recreate', '--namespace', 'proj-b,proj-c'], env)).toBe(0);
+    expect(readConfig(join(root, '.medha'))?.namespaceScope).toEqual(['proj-b', 'proj-c']);
+  });
+
+  test('--no-namespace on --recreate drops the scope deliberately', async () => {
+    const { env, root, out } = fresh();
+    expect(await runCli(['init', '--namespace', 'proj-a'], env)).toBe(0);
+
+    const before = out().length;
+    expect(await runCli(['init', '--recreate', '--no-namespace'], env)).toBe(0);
+    expect(readConfig(join(root, '.medha'))?.namespaceScope).toBeUndefined();
+    expect(out().slice(before)).not.toContain('namespaces:');
+    // Unscoped now, and visibly so: the whole store is reachable through the engine.
+    const opened = openHome(env.cwd);
+    await opened.engine.record(
+      { namespace: 'proj-b', kind: 'rule', id: 'anything' },
+      'APPLY',
+      { now: NOW },
+      { ensure: true },
+    );
+    expect((await opened.engine.list({}, { now: NOW })).items).toHaveLength(1);
+    await opened.engine.close();
+  });
+
+  test('--namespace and --no-namespace together are a usage error', async () => {
+    const { env, err, root } = fresh();
+    expect(await runCli(['init', '--namespace', 'proj-a'], env)).toBe(0);
+    expect(
+      await runCli(['init', '--recreate', '--namespace', 'proj-b', '--no-namespace'], env),
+    ).toBe(2);
+    expect(err()).toContain('--no-namespace');
+    // The home is untouched: the contradiction is caught before anything is wiped.
+    expect(readConfig(join(root, '.medha'))?.namespaceScope).toEqual(['proj-a']);
+  });
+
+  test('--recreate on an unscoped home stays unscoped', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init'], env)).toBe(0);
+    expect(await runCli(['init', '--recreate'], env)).toBe(0);
+    expect(readConfig(join(root, '.medha'))?.namespaceScope).toBeUndefined();
+  });
+});
+
 describe('a namespace-scoped engine home', () => {
   test('list and show only ever surface the granted namespace', async () => {
     const { env, out } = fresh();

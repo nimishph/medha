@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 import { defineCommand } from 'citty';
 import { currentEnvironment } from './environment.ts';
 import { type InitOptions, runInit } from './init.ts';
@@ -88,8 +89,21 @@ export const initCommand = defineCommand({
       'Scaffold the engine home (.medha/config.json + store) headlessly and gate on preflight.',
   },
   args: initCommandArgs,
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const environment = currentEnvironment();
+    // citty maps `--no-namespace` to `namespace: false` on the same key as the value form, so the
+    // negated form overwrites rather than coexists with `--namespace x`. Scan the raw argv to tell
+    // "denied" apart from "contradictory": the two together must not silently widen the home.
+    const namespaceFlag = args.namespace as string | false | undefined;
+    const named = rawArgs.some((a) => a === '--namespace' || a.startsWith('--namespace='));
+    const denied = rawArgs.some((a) => a === '--no-namespace' || a.startsWith('--no-namespace='));
+    if (named && denied) {
+      throw new InvalidArgumentError(
+        '--no-namespace',
+        'no --namespace alongside it (they contradict)',
+        namespaceFlag === false ? '--no-namespace' : namespaceFlag,
+      );
+    }
     const options: InitOptions = {
       dir: args.dir ?? environment.cwd,
       ...(args.home === undefined ? {} : { home: args.home }),
@@ -97,7 +111,11 @@ export const initCommand = defineCommand({
       ...(args.path === undefined ? {} : { path: args.path }),
       ...(args.config === undefined ? {} : { config: args.config }),
       ...(args.backup === undefined ? {} : { backup: args.backup }),
-      ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+      ...(denied
+        ? { noNamespace: true }
+        : typeof namespaceFlag === 'string'
+          ? { namespace: namespaceFlag }
+          : {}),
       recreate: args.recreate === true,
     };
     const report = await runInit(options, environment);

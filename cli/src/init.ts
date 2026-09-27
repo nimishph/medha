@@ -53,6 +53,12 @@ export interface InitOptions {
   readonly recreate: boolean;
   /** Comma-separated namespaces; see `MedhaConfigV1.namespaceScope`. */
   readonly namespace?: string;
+  /**
+   * `--no-namespace`: drop an existing `namespaceScope` instead of carrying it over. Needed because
+   * `--recreate` otherwise inherits the scope, and there would be no way to widen a home back out
+   * without hand-editing config.json.
+   */
+  readonly noNamespace?: boolean;
 }
 
 export interface InitReport {
@@ -100,9 +106,46 @@ export function normalizeBackend(value: string): Backend {
   throw new InvalidArgumentError('--store', `one of ${BACKENDS.join(', ')}`, value);
 }
 
+/**
+ * The namespace scope the config.json about to be written gets.
+ *
+ * `--namespace` always wins and `--no-namespace` explicitly drops the scope. With neither, a scope
+ * already in the config.json being replaced carries over: `--recreate` replaces the *data*, not the
+ * home's identity, and deriving the scope from this invocation's flags alone silently dropped the
+ * tenant boundary — leaving every later CLI/MCP operation on the unscoped `adminEngine` (medha-4yj).
+ *
+ * The carry-over read is best-effort by design: it runs only under `--recreate`, where config.json is
+ * about to be overwritten regardless, and an unreadable config has no scope to preserve. That is
+ * precisely the case `--recreate` exists to recover from, so it must not fail here. The strict read
+ * on the non-recreate path is untouched.
+ */
+function resolveNamespaceScope(
+  requested: readonly string[] | undefined,
+  options: InitOptions,
+  home: string,
+): readonly string[] | undefined {
+  if (requested !== undefined) {
+    if (options.noNamespace === true) {
+      throw new InvalidArgumentError(
+        '--no-namespace',
+        'no --namespace alongside it (they contradict)',
+        options.namespace,
+      );
+    }
+    return requested;
+  }
+  if (options.noNamespace === true) return undefined;
+  if (!options.recreate) return undefined;
+  try {
+    return readConfig(home)?.namespaceScope;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function runInit(options: InitOptions, environment: Environment): Promise<InitReport> {
   const backend = normalizeBackend(options.backend);
-  const namespaceScope = parseNamespaceScope(options.namespace);
+  const requestedScope = parseNamespaceScope(options.namespace);
   const home = homeFor(options.dir, options.home);
   const storePath = resolveStorePath(backend, home, options.path);
   const now = environment.now();
@@ -143,7 +186,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
       preflight,
       registryDrift: null,
       backup: options.backup ?? null,
-      namespaceScope: namespaceScope ?? null,
+      namespaceScope: requestedScope ?? null,
       gitignore: null,
       readme: null,
     };
@@ -164,6 +207,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
       throw new HomeExistsError(home);
     }
   }
+  const namespaceScope = resolveNamespaceScope(requestedScope, options, home);
   if (options.recreate) {
     removeStoreArtifacts(backend, forcedStorePath);
   }

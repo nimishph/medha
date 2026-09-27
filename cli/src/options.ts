@@ -34,7 +34,8 @@ export const initCommandArgs: ArgsDef = {
     description:
       'Restrict this home to one or more namespaces (comma-separated) via scopeStore, for a ' +
       'store shared by more than one project. Maintenance commands (sync/maintain/report/ui) ' +
-      'still see the whole store. Default: unrestricted.',
+      'still see the whole store. Default: unrestricted, or the existing config.json’s scope ' +
+      'under --recreate. Pass --no-namespace to drop that scope explicitly.',
   },
   recreate: {
     type: 'boolean',
