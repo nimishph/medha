@@ -99,9 +99,15 @@ export function freshState(
     readonly anchor?: Anchor;
   } = {},
 ): EntityState {
-  if (key.id.trim() === '') throw new InvalidArgumentError('key.id', 'a non-empty string', key.id);
-  if (key.kind.trim() === '')
+  if (typeof key.namespace !== 'string') {
+    throw new InvalidArgumentError('key.namespace', 'a string', key.namespace);
+  }
+  if (typeof key.id !== 'string' || key.id.trim() === '') {
+    throw new InvalidArgumentError('key.id', 'a non-empty string', key.id);
+  }
+  if (typeof key.kind !== 'string' || key.kind.trim() === '') {
     throw new InvalidArgumentError('key.kind', 'a non-empty string', key.kind);
+  }
   const theta0 = init.theta0 ?? DEFAULT_THETA0;
   if (theta0 < 0 || theta0 > 1) {
     throw new InvalidArgumentError('init.theta0', 'a number in [0,1]', theta0);

@@ -468,6 +468,34 @@ describe('registry integrity', () => {
   });
 });
 
+describe('freshState — key fields are type-checked before use, never a bare TypeError', () => {
+  test('rejects a non-string id with InvalidArgumentError, not a raw TypeError', () => {
+    // Simulates a loosely-typed caller (JSON deserialization, a proposal episode, a host miner)
+    // constructing an EntityKey with id: undefined — must not reach key.id.trim() uncaught.
+    const key = { namespace: '', kind: 'rule', id: undefined } as unknown as EntityState['key'];
+    expect(() => freshState(key, START)).toThrow(InvalidArgumentError);
+  });
+
+  test('rejects a numeric id with InvalidArgumentError', () => {
+    const key = { namespace: '', kind: 'rule', id: 123 } as unknown as EntityState['key'];
+    expect(() => freshState(key, START)).toThrow(InvalidArgumentError);
+  });
+
+  test('rejects a non-string kind with InvalidArgumentError', () => {
+    const key = { namespace: '', kind: undefined, id: 'r1' } as unknown as EntityState['key'];
+    expect(() => freshState(key, START)).toThrow(InvalidArgumentError);
+  });
+
+  test('rejects a non-string namespace instead of silently coercing to "undefined"', () => {
+    const key = { namespace: undefined, kind: 'rule', id: 'r1' } as unknown as EntityState['key'];
+    expect(() => freshState(key, START)).toThrow(InvalidArgumentError);
+  });
+
+  test('still accepts a well-formed key', () => {
+    expect(() => freshState({ namespace: '', kind: 'rule', id: 'r1' }, START)).not.toThrow();
+  });
+});
+
 describe('findDanglingRetractions — diagnostic scan for retractions with no resolvable target', () => {
   const ep0: Episode = {
     seq: 0,
