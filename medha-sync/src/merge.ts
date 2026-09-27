@@ -20,8 +20,23 @@ import {
 
 /**
  * Computes a deterministic content key for an episode, ignoring local store seq.
+ *
+ * A `retract` folds in its `targetSeq` and `reason`. Folding in *something* is the point: with no
+ * log in hand there is no target to resolve against, and leaving a retraction's distinguishing
+ * fields out made two retractions of different episodes hash identically, so `mergeEpisodes`
+ * deduplicated one away (medha-8gx). `targetSeq` is a *local* store seq, so two replicas only
+ * converge on it if they happen to number their logs alike — `mergeEpisodes` therefore resolves
+ * the target to a content key before deduping, and this function is the unresolved fallback.
  */
 export function canonicalEpisodeKey(episode: Episode | EpisodeInput): string {
+  return contentKey(episode, episode.type === 'retract' ? String(episode.targetSeq) : '');
+}
+
+/**
+ * The episode's content key with a caller-supplied stand-in for a `retract`'s target. Split out so
+ * the resolved (`mergeEpisodes`) and unresolved (`canonicalEpisodeKey`) forms cannot drift apart.
+ */
+function contentKey(episode: Episode | EpisodeInput, retractTarget: string): string {
   const { key, at, type } = episode;
   const parts: string[] = [key.namespace, key.kind, key.id, String(at), type];
 
@@ -75,45 +90,98 @@ export function canonicalEpisodeKey(episode: Episode | EpisodeInput): string {
       parts.push(episode.state.status);
       break;
     }
+    case 'retract': {
+      parts.push(retractTarget);
+      parts.push(episode.reason);
+      break;
+    }
   }
 
   return parts.join('\u0000');
+}
+
+/** A retraction whose target is not present in the log it came from, keyed by the raw seq. */
+function danglingTarget(targetSeq: number): string {
+  return `\u0000<unresolved-target>${targetSeq}`;
+}
+
+/** How one episode is identified against another replica's log, plus what a retraction masks. */
+interface Identity {
+  /** Dedup and sort identity of the episode itself. */
+  readonly id: string;
+  /** For a `retract`: the identity of the episode it masks, or null when unresolvable. */
+  readonly targetId: string | null;
+}
+
+/**
+ * Resolve every episode in one log to its cross-replica identity. A `retract` is identified by the
+ * *content* of the episode it masks, not by the local seq it happens to point at, so replicas that
+ * retracted the same episode under different local numbering still dedupe to one entry. Targets are
+ * resolved within the log that carries the retraction, because `seq` only means something there.
+ */
+function identities(log: readonly Episode[]): ReadonlyMap<number, Identity> {
+  const own = new Map<number, string>();
+  for (const ep of log) own.set(ep.seq, contentKey(ep, ''));
+
+  const bySeq = new Map<number, Identity>();
+  for (const ep of log) {
+    if (ep.type !== 'retract') bySeq.set(ep.seq, { id: contentKey(ep, ''), targetId: null });
+  }
+  for (const ep of log) {
+    if (ep.type !== 'retract') continue;
+    const targetKey = own.get(ep.targetSeq);
+    bySeq.set(ep.seq, {
+      id: contentKey(ep, targetKey ?? danglingTarget(ep.targetSeq)),
+      targetId: targetKey ?? null,
+    });
+  }
+  return bySeq;
 }
 
 /**
  * Merges two episode logs deterministically.
  * Deduplicates identical episodes, sorts chronologically with deterministic tie-breaking,
  * and assigns fresh sequential sequence numbers.
+ *
+ * Because `seq` is renumbered, a surviving `retract` has its `targetSeq` renumbered with it —
+ * pointing it at the episode that now occupies the target's slot. Leaving it stale would let a
+ * retraction mask a different episode after every merge (medha-8gx).
  */
 export function mergeEpisodes(local: readonly Episode[], incoming: readonly Episode[]): Episode[] {
-  const map = new Map<string, Episode>();
+  const map = new Map<string, { readonly episode: Episode; readonly targetId: string | null }>();
 
-  for (const ep of local) {
-    const k = canonicalEpisodeKey(ep);
-    if (!map.has(k)) map.set(k, ep);
-  }
+  const collect = (log: readonly Episode[], ids: ReadonlyMap<number, Identity>): void => {
+    for (const ep of log) {
+      const { id, targetId } = ids.get(ep.seq) as Identity;
+      if (!map.has(id)) map.set(id, { episode: ep, targetId });
+    }
+  };
+  collect(local, identities(local));
+  collect(incoming, identities(incoming));
 
-  for (const ep of incoming) {
-    const k = canonicalEpisodeKey(ep);
-    if (!map.has(k)) map.set(k, ep);
-  }
-
-  const all = Array.from(map.values());
+  const entries = [...map.entries()];
 
   // Deterministic total ordering
-  all.sort((a, b) => {
-    if (a.at !== b.at) return a.at - b.at;
-    const keyA = entityKeyString(a.key);
-    const keyB = entityKeyString(b.key);
+  entries.sort(([aId, a], [bId, b]) => {
+    if (a.episode.at !== b.episode.at) return a.episode.at - b.episode.at;
+    const keyA = entityKeyString(a.episode.key);
+    const keyB = entityKeyString(b.episode.key);
     if (keyA !== keyB) return keyA.localeCompare(keyB);
-    if (a.type !== b.type) return a.type.localeCompare(b.type);
-    return canonicalEpisodeKey(a).localeCompare(canonicalEpisodeKey(b));
+    if (a.episode.type !== b.episode.type) return a.episode.type.localeCompare(b.episode.type);
+    return aId.localeCompare(bId);
   });
 
-  return all.map((ep, idx) => ({
-    ...ep,
-    seq: idx,
-  }));
+  const seqById = new Map(entries.map(([id], idx) => [id, idx] as const));
+
+  return entries.map(([, { episode, targetId }], idx) => {
+    if (episode.type !== 'retract') return { ...episode, seq: idx };
+    // An unresolvable target (a retraction whose target is absent from the log it arrived in) keeps
+    // the seq it came with, as before: it is a no-op at worst, and a synthetic one could mask a real
+    // episode that arrives later at that index.
+    const targetSeq =
+      targetId === null ? episode.targetSeq : (seqById.get(targetId) ?? episode.targetSeq);
+    return { ...episode, seq: idx, targetSeq };
+  });
 }
 
 /**
