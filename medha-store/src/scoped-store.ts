@@ -46,6 +46,20 @@ export function scopeStore(inner: StorePort, namespaces: readonly string[]): Sto
   };
   const inScope = (key: EntityKey): boolean => allowedSet.has(key.namespace);
 
+  /**
+   * A `retract` masks the episode named by `targetSeq`, so the retraction's real reach is the
+   * *target's* namespace, not the wrapper's. Checking only `episode.key` let a caller granted
+   * namespace A file a retraction against namespace B's episode and mask it out of every future
+   * fold (medha-bis). Resolve against the unscoped `inner.episodes()` — a scoped view hides the very
+   * episodes whose keys need checking. A `targetSeq` that resolves to no episode is passed through
+   * untouched: it names no namespace to violate, and whether it is a valid retraction is not this
+   * wrapper's call to make.
+   */
+  const checkRetractTarget = async (episode: Extract<EpisodeInput, { type: 'retract' }>) => {
+    const target = (await inner.episodes()).find((e) => e.seq === episode.targetSeq);
+    if (target !== undefined) check('append (retract target)', target.key);
+  };
+
   return {
     name: `${inner.name}[scoped:${allowed.join(',')}]`,
     registries: inner.registries,
@@ -59,6 +73,7 @@ export function scopeStore(inner: StorePort, namespaces: readonly string[]): Sto
     async append(episode: EpisodeInput): Promise<AppendResult> {
       check('append', episode.key);
       if (episode.type === 'baseline') check('append', episode.state.key);
+      if (episode.type === 'retract') await checkRetractTarget(episode);
       return inner.append(episode);
     },
     async episodes(afterSeq?: number, limit?: number): Promise<Episode[]> {

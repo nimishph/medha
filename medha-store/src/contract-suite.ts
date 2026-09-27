@@ -63,6 +63,11 @@ export function purgeAt(key: EntityKey, at: number): EpisodeInput {
   return { type: 'sweep', key, at, action: 'purge', reason: 'contract suite' };
 }
 
+/** A retraction that masks whatever episode sits at `targetSeq` in the log it is appended to. */
+export function retractAt(key: EntityKey, targetSeq: number, at: number): EpisodeInput {
+  return { type: 'retract', key, at, targetSeq, reason: 'contract suite' };
+}
+
 export function runStoreContractSuite(setup: StoreContractSetup): void {
   describe('store contract — §7.1', () => {
     test('open report on a healthy store is ok', async () => {
@@ -163,6 +168,29 @@ export function runStoreContractSuite(setup: StoreContractSetup): void {
       expect(await store.get(KEY)).toBeUndefined();
       expect(await store.list()).toEqual([]);
       expect((await store.episodes()).map((e) => e.seq)).toEqual([0, 1]);
+    });
+
+    test('a retraction is logged, masks its target in the fold, and leaves the log intact', async () => {
+      const store = await setup.create();
+      await store.open();
+      const applied = await store.append(applyAt(KEY, NOW));
+      const other = await store.append(applyAt(KEY, NOW + 1));
+      await store.append(retractAt(KEY, applied.episode.seq, NOW + 2));
+
+      // The episode is still in the log — retraction masks, it does not delete (§6.2).
+      expect((await store.episodes()).map((e) => e.seq)).toEqual([0, 1, 2]);
+      expect((await store.episodes())[2]?.type).toBe('retract');
+
+      // Only the retracted signal is masked; the surviving one still folds.
+      const state = await store.get(KEY);
+      expect(state?.evidence.n).toBe(1);
+      expect(state?.evidence.k).toBe(1);
+      expect((await store.rebuild())[0]).toEqual(state);
+
+      // Retracting the other episode too leaves nothing, still with both episodes logged.
+      await store.append(retractAt(KEY, other.episode.seq, NOW + 3));
+      expect(await store.get(KEY)).toBeUndefined();
+      expect(await store.episodes()).toHaveLength(4);
     });
 
     test('unknown kinds fail loud with the registry names', async () => {

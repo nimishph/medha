@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { EntityKey, StorePort } from '@cntxt-labs/medha-core';
-import { applyAt, guardAt, type StoreContractSetup } from './contract-suite.ts';
+import { applyAt, guardAt, retractAt, type StoreContractSetup } from './contract-suite.ts';
 import { NamespaceViolationError } from './errors.ts';
 import { scopeStore } from './scoped-store.ts';
 
@@ -86,6 +86,52 @@ export function runScopeStoreContractSuite(setup: StoreContractSetup): void {
           state: foreignState,
         }),
       ).rejects.toBeInstanceOf(NamespaceViolationError);
+    });
+
+    test('a retraction is checked by the episode it masks, not only the outer key (medha-bis)', async () => {
+      const raw = await seeded();
+      const scoped = scopeStore(raw, [A]);
+      // `seeded()` appends A/A/B, so seq 2 is namespace B's episode.
+      const foreignSeq = (await raw.episodes()).find((e) => e.key.namespace === B)?.seq;
+      expect(foreignSeq).toBe(2);
+      const before = await raw.episodes();
+
+      // The wrapper's own key is in scope, so only the target's namespace can catch this.
+      await expect(
+        scoped.append(
+          retractAt({ namespace: A, kind: setup.extraKind, id: 'r1' }, foreignSeq as number, 1_000),
+        ),
+      ).rejects.toBeInstanceOf(NamespaceViolationError);
+      expect(await raw.episodes()).toEqual(before);
+
+      // ...and namespace B's episode is still foldable: it was not masked out.
+      const foreignState = await raw.get({ namespace: B, kind: setup.extraKind, id: 'r1' });
+      expect(foreignState?.evidence.n).toBe(1);
+    });
+
+    test('a retraction against an in-scope target is allowed', async () => {
+      const raw = await seeded();
+      const scoped = scopeStore(raw, [A]);
+      const inScopeSeq = (await raw.episodes()).find((e) => e.key.namespace === A)?.seq;
+      const before = await raw.episodes();
+
+      const { episode } = await scoped.append(
+        retractAt({ namespace: A, kind: setup.extraKind, id: 'r1' }, inScopeSeq as number, 1_000),
+      );
+      expect(episode.type).toBe('retract');
+      expect((await raw.episodes()).length).toBe(before.length + 1);
+      // The retraction is invisible in the scoped view too — it carries an in-scope key.
+      expect((await scoped.episodes()).filter((e) => e.type === 'retract')).toHaveLength(1);
+    });
+
+    test('a retraction naming no existing episode is left to the inner store, not judged here', async () => {
+      const raw = await seeded();
+      const scoped = scopeStore(raw, [A]);
+      const before = await raw.episodes();
+      await scoped.append(
+        retractAt({ namespace: A, kind: setup.extraKind, id: 'r1' }, 9_999, 1_000),
+      );
+      expect((await raw.episodes()).length).toBe(before.length + 1);
     });
 
     test('list, rebuild and episodes are filtered to the scope', async () => {
