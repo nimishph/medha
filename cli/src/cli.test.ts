@@ -80,6 +80,18 @@ function readRawConfig(home: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')) as Record<string, unknown>;
 }
 
+/**
+ * `stdout` accumulates across every command in a test, so a multi-command test needs to slice out
+ * just the one it is asserting on. `markOut` before the call, `outSince` after.
+ */
+function markOut(out: () => string): number {
+  return out().length;
+}
+
+function outSince(out: () => string, mark: number): string {
+  return out().slice(mark);
+}
+
 /** `layout.ts`'s `readConfig`, asserting the home is already initialized (every caller here just ran `init`). */
 function readConfig(home: string): MedhaConfigV1 {
   const config = readConfigOrNull(home);
@@ -380,6 +392,100 @@ describe('medha init — registry validation', () => {
     expect(err()).toContain('CLI_CONFIG_INVALID');
   });
 
+  /*
+   * An unrecognised config key used to be accepted and dropped, so a policy the operator believed
+   * was active simply was not. The failure mode was invisible: init exited 0, the home initialised,
+   * and the typo only showed up as a rule that never behaved as configured (nimishph/medha#5).
+   */
+  test('an unknown top-level config key is refused, naming the key and the allowed set', async () => {
+    const { env, root, err } = fresh();
+    const cfg = join(root, 'typo.json');
+    // 'kindPolicies' is a plausible misspelling of 'kindSpecs'.
+    writeFileSync(cfg, JSON.stringify({ kindPolicies: { rule: {} } }));
+
+    expect(await runCli(['init', '--config', cfg], env)).toBe(1);
+    const message = err();
+    expect(message).toContain('kindPolicies');
+    // Close enough to be a typo, so it is named back rather than just rejected.
+    expect(message).toContain("did you mean 'kindSpecs'?");
+    expect(message).toContain('kindSpecs, signalSpecs, anchorKinds');
+    expect(message).toContain('CLI_CONFIG_INVALID');
+
+    // And nothing was created: a rejected config must not leave a half-initialised home behind.
+    expect(existsSync(join(root, '.medha', 'config.json'))).toBe(false);
+  });
+
+  test('an unknown key inside a kindSpec group is refused with its path', async () => {
+    const { env, root, err } = fresh();
+    const cfg = join(root, 'nested.json');
+    writeFileSync(
+      cfg,
+      JSON.stringify({
+        kindSpecs: [
+          {
+            name: 'rule',
+            thresholds: { bogus: 1 },
+            recency: { halfLifeDays: 30, florr: 0.3 },
+            signalLimits: { minIntervalMs: 100, maxSucessesPerAuthor: 3 },
+          },
+        ],
+      }),
+    );
+
+    expect(await runCli(['init', '--config', cfg], env)).toBe(1);
+    // The first offender is reported with the group it was found in, so the fix is unambiguous.
+    expect(err()).toContain('kindSpecs[0].thresholds');
+    expect(err()).toContain('trusted, active, unguardedCeiling');
+  });
+
+  test('every allowed kindSpec key is accepted, so strictness does not reject real config', async () => {
+    const { env, root } = fresh();
+    const cfg = join(root, 'full.json');
+    writeFileSync(
+      cfg,
+      JSON.stringify({
+        kindSpecs: [
+          {
+            name: 'rule',
+            description: 'a rule',
+            thresholds: {
+              trusted: 0.8,
+              active: 0.4,
+              unguardedCeiling: 0.9,
+              retiredTrustThreshold: 0.2,
+              minUsesForTrusted: 5,
+              minUsesForRetired: 30,
+            },
+            recency: { halfLifeDays: 30, floor: 0.3 },
+            evidenceWeighting: 'count',
+            signalLimits: { minIntervalMs: 100, maxSuccessesPerAuthor: 3 },
+            decisionPolicy: { requireHumanFor: ['ignore'] },
+          },
+        ],
+      }),
+    );
+
+    expect(await runCli(['init', '--config', cfg], env)).toBe(0);
+  });
+
+  test('an unknown key is refused in the kinds map and array-of-spec forms too', async () => {
+    const { env, root, err } = fresh();
+
+    const asMap = join(root, 'map.json');
+    writeFileSync(asMap, JSON.stringify({ kinds: { rule: { thresholds: { nope: 1 } } } }));
+    expect(await runCli(['init', '--config', asMap], env)).toBe(1);
+    expect(err()).toContain("kinds['rule']");
+
+    const asArray = join(root, 'array.json');
+    writeFileSync(
+      asArray,
+      JSON.stringify({ kinds: [{ name: 'rule', decisionPolicy: { requireHuman: ['ignore'] } }] }),
+    );
+    expect(await runCli(['init', '--config', asArray], env)).toBe(1);
+    expect(err()).toContain('decisionPolicy');
+    expect(err()).toContain('requireHumanFor');
+  });
+
   test('--config additions are additive over built-ins', async () => {
     const { env, root, home } = fresh();
     const cfg = join(root, 'add.json');
@@ -620,6 +726,72 @@ describe('medha read plane — status and drift', () => {
 
     expect(await runCli(['drift', '--limit', '0'], env)).toBe(2);
     expect(err()).toContain('CORE_INVALID_ARGUMENT');
+  });
+});
+
+/**
+ * Drift is a symmetric report but a one-sided quarantine gate (spec section 7). These are the two
+ * user-visible consequences, pinned end-to-end: getting either backwards silently buries the best
+ * rules in a store (upward) or quietly retires dormant ones (the sweep's age rule).
+ */
+describe('drift direction (spec section 7: report symmetric, quarantine one-sided)', () => {
+  test('sustained success is reported as drifting but is not quarantined', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    // 20 straight APPLYs walk mu to ~0.94, i.e. at least 0.4 *above* the 0.5 default baseline.
+    for (let i = 0; i < 20; i++) {
+      expect(await runCli(['record', '--id', 'good', '--signal', 'APPLY', '--ensure'], env)).toBe(
+        0,
+      );
+    }
+
+    expect(await runCli(['show', '--id', 'good'], env)).toBe(0);
+    const shown = out();
+    expect(shown).toContain('drift up yes');
+    expect(shown).not.toContain('quarantined');
+    expect(shown).toMatch(/trust:\s+0\.[1-9]/);
+
+    // The report still lists it: one-sided applies to the gate, not to observability.
+    const beforeDrift = out().length;
+    expect(await runCli(['drift'], env)).toBe(0);
+    const driftText = out().slice(beforeDrift);
+    expect(driftText).toContain('rule/good');
+    expect(driftText).toContain('up');
+  });
+
+  test('sustained failure is still quarantined', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+
+    for (let i = 0; i < 6; i++) {
+      expect(
+        await runCli(['record', '--id', 'bad', '--signal', 'REJECT_RULE', '--ensure'], env),
+      ).toBe(0);
+    }
+
+    expect(await runCli(['show', '--id', 'bad'], env)).toBe(0);
+    const shown = out();
+    expect(shown).toContain('quarantined');
+    expect(shown).toMatch(/trust:\s+0\.000/);
+  });
+
+  test('a dormant but unrefuted entity stays on probation: age never retires it', async () => {
+    const { env, out, setNow } = fresh();
+    await runCli(['init'], env);
+
+    // One success, then silence for well past the recency floor.
+    expect(await runCli(['record', '--id', 'old', '--signal', 'APPLY', '--ensure'], env)).toBe(0);
+    setNow(NOW + 900 * 24 * 60 * 60 * 1000);
+
+    // Reads are pure, so they never sweep: the kernel alone must not retire on decay.
+    expect(await runCli(['show', '--id', 'old'], env)).toBe(0);
+    const shown = out();
+    expect(shown).toContain('probation');
+    expect(shown).not.toContain('retired');
+    expect(shown).toMatch(/recency 0\.300/);
+    // Decayed, not zeroed.
+    expect(shown).toMatch(/trust:\s+0\.0[1-9]/);
   });
 });
 
@@ -869,6 +1041,28 @@ describe('medha write plane', () => {
     expect(removeReport.removed).toBe(true);
     expect(removeReport.remainingCount).toBe(1);
   });
+
+  test('remove-episode --author/--reason land in the audit trail, which backups carry', async () => {
+    const { env, root } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env);
+    const args = ['remove-episode', '--seq', '0', '--author', 'human:ops', '--reason', 'bad data'];
+    expect(await runCli(args, env)).toBe(0);
+
+    const backupPath = join(root, 'audit.json');
+    expect(await runCli(['maintain', 'backup', backupPath], env)).toBe(0);
+    const { snapshot } = JSON.parse(readFileSync(backupPath, 'utf8')) as {
+      snapshot: { meta: Record<string, string> };
+    };
+    const trail = JSON.parse(snapshot.meta['audit:removedEpisodes'] ?? '[]') as {
+      author: string;
+      reason: string;
+      episode: { key: { id: string } };
+    }[];
+    expect(trail).toHaveLength(1);
+    expect(trail[0]).toMatchObject({ author: 'human:ops', reason: 'bad data' });
+    expect(trail[0]?.episode.key.id).toBe('r1');
+  });
 });
 
 describe('medha-arj.5: define and decision commands', () => {
@@ -983,7 +1177,12 @@ describe('medha-arj.5: define and decision commands', () => {
       env,
     );
     expect(rejected).toBe(1);
+    // The code stays the machine-readable signal; the hint tells an agent to escalate, not to
+    // retry with a `human:` label it can set itself.
     expect(err()).toContain('CORE_PERMISSION_DENIED');
+    expect(err()).toContain('hint: Do not retry with another author');
+    expect(err()).toContain('Escalate to a human');
+    expect(err()).not.toContain("'human:<id>'");
     expect(err()).not.toContain('at ');
 
     const accepted = await runCli(
@@ -1002,6 +1201,389 @@ describe('medha-arj.5: define and decision commands', () => {
       env,
     );
     expect(accepted).toBe(0);
+  });
+});
+
+/**
+ * Decision trees have to be *buildable* over every public interface, or branch trust is stuck at
+ * zero forever: the engine accrues per-branch evidence but nothing could record any, and the tree
+ * silently rotted into whatever shape the last partial command left behind. Each test here pins one
+ * way a tree used to be corrupted without any error surfacing.
+ */
+describe('decision trees: branch evidence and structural integrity', () => {
+  /** Run `medha decision` and return the minted (or edited) case id from its output. */
+  async function decide(
+    env: Environment,
+    out: () => string,
+    args: readonly string[],
+  ): Promise<{ caseId: string; text: string }> {
+    const before = markOut(out);
+    const code = await runCli(['decision', ...args], env);
+    expect(code).toBe(0);
+    const text = outSince(out, before);
+    const caseId = /decision case (\S+) on/.exec(text)?.[1];
+    expect(caseId).toBeDefined();
+    return { caseId: caseId as string, text };
+  }
+
+  test('record --case-id makes the branch learn, not just the rule', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    const { caseId } = await decide(env, out, [
+      '--id',
+      'r1',
+      '--condition',
+      'under app/Http/Controllers',
+      '--apply',
+    ]);
+
+    // Before any evidence the branch reads k=0 n=0.
+    const before = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    expect(outSince(out, before)).toContain('k=0 n=0');
+
+    for (let i = 0; i < 3; i++) {
+      const mark = markOut(out);
+      expect(
+        await runCli(
+          ['record', '--id', 'r1', '--signal', 'APPLY', '--case-id', caseId, '--ensure'],
+          env,
+        ),
+      ).toBe(0);
+      expect(outSince(out, mark)).toContain(caseId);
+    }
+
+    const after = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = outSince(out, after);
+    const branchLine = shown.split('\n').find((l) => l.includes(caseId));
+    expect(branchLine).toBeDefined();
+    // The whole point: branch evidence is no longer stuck at zero.
+    expect(branchLine).toContain('k=3 n=3');
+    expect(branchLine).toContain('[active]');
+  });
+
+  test('record --case-id naming no branch is refused, not folded into the rule', async () => {
+    const { env, err, out } = fresh();
+    await runCli(['init'], env);
+    await decide(env, out, ['--id', 'r1', '--condition', 'root branch', '--apply']);
+
+    expect(
+      await runCli(
+        ['record', '--id', 'r1', '--signal', 'APPLY', '--case-id', 'r1-dec-nope', '--ensure'],
+        env,
+      ),
+    ).toBe(2);
+    // The error must list the real branches, so a typo is recoverable without a second guess.
+    expect(err()).toContain('r1-dec-');
+    expect(err()).toContain('CORE_INVALID_ARGUMENT');
+  });
+
+  test('editing a branch without --parent keeps it nested (it used to be orphaned)', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    const root = await decide(env, out, ['--id', 'r1', '--condition', 'root', '--apply']);
+    const child = await decide(env, out, [
+      '--id',
+      'r1',
+      '--condition',
+      'in app/Legacy',
+      '--ignore',
+      '--parent',
+      root.caseId,
+    ]);
+
+    // Change the probability, deliberately omitting --parent.
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'in app/Legacy',
+          '--probability',
+          '0.4',
+          '--case-id',
+          child.caseId,
+        ],
+        env,
+      ),
+    ).toBe(0);
+
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = outSince(out, mark);
+    expect(shown).toContain('in app/Legacy -> probability(0.4)');
+    // Still a child of root, one indent deeper.
+    const rootLine = shown.split('\n').find((l) => l.includes('root ->'));
+    const childLine = shown.split('\n').find((l) => l.includes('in app/Legacy ->'));
+    expect(childLine?.match(/^\s*/)?.[0].length ?? 0).toBeGreaterThan(
+      rootLine?.match(/^\s*/)?.[0].length ?? 0,
+    );
+  });
+
+  test('--detach promotes a branch to the top level, and is refused with --parent', async () => {
+    const { env, out, err } = fresh();
+    await runCli(['init'], env);
+    const root = await decide(env, out, ['--id', 'r1', '--condition', 'root', '--apply']);
+    const child = await decide(env, out, [
+      '--id',
+      'r1',
+      '--condition',
+      'child',
+      '--ignore',
+      '--parent',
+      root.caseId,
+    ]);
+
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'child',
+          '--ignore',
+          '--case-id',
+          child.caseId,
+          '--detach',
+        ],
+        env,
+      ),
+    ).toBe(0);
+
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const lines = outSince(out, mark).split('\n');
+    const rootLine = lines.find((l) => l.includes('root ->'));
+    const childLine = lines.find((l) => l.includes('child ->'));
+    expect(rootLine).toBeDefined();
+    expect(childLine?.match(/^\s*/)?.[0].length ?? 0).toBe(
+      rootLine?.match(/^\s*/)?.[0].length ?? 0,
+    );
+
+    // Contradictory request: refuse rather than pick a winner silently.
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'child',
+          '--ignore',
+          '--case-id',
+          child.caseId,
+          '--parent',
+          root.caseId,
+          '--detach',
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('--detach/--parent');
+  });
+
+  test('--parent naming an unknown branch is refused instead of creating a root orphan', async () => {
+    const { env, err, out } = fresh();
+    await runCli(['init'], env);
+    await decide(env, out, ['--id', 'r1', '--condition', 'root', '--apply']);
+
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'orphan attempt',
+          '--apply',
+          '--parent',
+          'nope-123',
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('decision.parentId');
+
+    // Nothing was written: the tree still has exactly the one branch.
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    expect(outSince(out, mark)).not.toContain('orphan attempt');
+  });
+
+  test('--case-id naming no branch is refused instead of minting a branch called by the typo', async () => {
+    const { env, err, out } = fresh();
+    await runCli(['init'], env);
+    const root = await decide(env, out, ['--id', 'r1', '--condition', 'root', '--apply']);
+
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'revised root',
+          '--ignore',
+          '--case-id',
+          'r1-dec-typo',
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('decision.caseId');
+    // The error has to carry the real id, or a mistyped edit is not recoverable.
+    expect(err()).toContain(root.caseId);
+
+    // Nothing was written and the real branch kept its decision.
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const rendered = outSince(out, mark);
+    expect(rendered).not.toContain('revised root');
+    expect(rendered).toContain('root -> apply');
+  });
+
+  test('a branch cannot be its own parent, nor re-parent under its own descendant', async () => {
+    const { env, err, out } = fresh();
+    await runCli(['init'], env);
+    const root = await decide(env, out, ['--id', 'r1', '--condition', 'root', '--apply']);
+    const child = await decide(env, out, [
+      '--id',
+      'r1',
+      '--condition',
+      'child',
+      '--apply',
+      '--parent',
+      root.caseId,
+    ]);
+
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'root',
+          '--apply',
+          '--case-id',
+          root.caseId,
+          '--parent',
+          root.caseId,
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('decision.parentId');
+
+    // Re-parenting root under its own child would close a loop.
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'root',
+          '--apply',
+          '--case-id',
+          root.caseId,
+          '--parent',
+          child.caseId,
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('decision.parentId');
+  });
+
+  test('a duplicate condition under one parent is refused; under another parent it is not', async () => {
+    const { env, err, out } = fresh();
+    await runCli(['init'], env);
+    const rootA = await decide(env, out, ['--id', 'r1', '--condition', 'root A', '--apply']);
+    const rootB = await decide(env, out, ['--id', 'r1', '--condition', 'root B', '--apply']);
+    await decide(env, out, [
+      '--id',
+      'r1',
+      '--condition',
+      'in legacy',
+      '--ignore',
+      '--parent',
+      rootA.caseId,
+    ]);
+
+    // Same condition, same parent: refused, and the error names the sibling that already has it.
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'IN   Legacy',
+          '--ignore',
+          '--parent',
+          rootA.caseId,
+        ],
+        env,
+      ),
+    ).toBe(2);
+    expect(err()).toContain('decision.condition');
+
+    // Same condition under a *different* parent is a genuinely different branch.
+    expect(
+      await runCli(
+        [
+          'decision',
+          '--id',
+          'r1',
+          '--condition',
+          'in legacy',
+          '--ignore',
+          '--parent',
+          rootB.caseId,
+        ],
+        env,
+      ),
+    ).toBe(0);
+
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = outSince(out, mark);
+    expect(shown.split('\n').filter((l) => l.includes('in legacy')).length).toBe(2);
+  });
+
+  // GitHub #6: a gated write refused, then made by a human, then repeated, used to leave two
+  // top-level branches with the same condition and different case ids.
+  test('a refused gated write leaves no branch, and repeating the accepted condition is refused', async () => {
+    const { env, err, out, root } = fresh();
+    const cfg = join(root, 'gate.json');
+    writeFileSync(
+      cfg,
+      JSON.stringify({
+        kindSpecs: [{ name: 'rule', decisionPolicy: { requireHumanFor: ['ignore'] } }],
+      }),
+    );
+    expect(await runCli(['init', '--config', cfg], env)).toBe(0);
+    const args = ['--id', 'r1', '--condition', 'in legacy', '--ignore'];
+
+    expect(await runCli(['decision', ...args, '--author', 'agent:reviewer'], env)).toBe(1);
+    expect(err()).toContain('CORE_PERMISSION_DENIED');
+
+    const accepted = await decide(env, out, [...args, '--author', 'human:nimish']);
+
+    // Same top-level condition again, by any author: refused, naming the branch that has it.
+    expect(await runCli(['decision', ...args, '--author', 'human:nimish'], env)).toBe(2);
+    expect(err()).toContain('decision.condition');
+    expect(err()).toContain(accepted.caseId);
+
+    const mark = markOut(out);
+    expect(await runCli(['show', '--id', 'r1'], env)).toBe(0);
+    const shown = outSince(out, mark);
+    expect(shown.split('\n').filter((l) => l.includes('in legacy')).length).toBe(1);
   });
 });
 
@@ -1163,8 +1745,14 @@ describe('medha maintain plane', () => {
     };
     expect(wipedList.page.items.length).toBe(0);
 
-    // Restore from backup
+    // Restore from backup. GitHub #9: this used to print `episodes: 0 -> -1` into an empty store.
+    const beforeRestore = out();
     expect(await runCli(['maintain', 'restore', backupPath], env)).toBe(0);
+    const backup = JSON.parse(readFileSync(backupPath, 'utf8')) as {
+      snapshot: { episodes: unknown[] };
+    };
+    const episodeCount = backup.snapshot.episodes.length;
+    expect(out().slice(beforeRestore.length)).toContain(`episodes:   0 -> ${episodeCount}`);
 
     // Verify entities are restored
     const afterRestoreList = out();
@@ -1317,7 +1905,37 @@ describe('medha mcp server', () => {
     return { isError: result.isError === true, body: JSON.parse(text) };
   };
 
-  test('lists all twelve tools and calls every tool with asserted results', async () => {
+  // GitHub #8: without annotations a client cannot tell reads from writes, or ask before a delete.
+  test('every tool declares annotations: reads are read-only, remove_episode is destructive', async () => {
+    const { env, root } = fresh();
+    await runCli(['init'], env);
+    const session = await connect(root);
+    try {
+      const tools = (await session.client.listTools()).tools;
+      const byName = new Map(tools.map((t) => [t.name, t]));
+      for (const tool of tools) {
+        expect(tool.annotations?.openWorldHint).toBe(false);
+        expect(typeof tool.annotations?.readOnlyHint).toBe('boolean');
+      }
+      const reads = ['hints', 'list_entities', 'show_entity', 'drift', 'simulate', 'status'];
+      for (const name of [...reads, 'pack_context']) {
+        expect(byName.get(name)?.annotations?.readOnlyHint).toBe(true);
+      }
+      const destructive = tools.filter((t) => t.annotations?.destructiveHint === true);
+      expect(destructive.map((t) => t.name)).toEqual(['remove_episode']);
+      expect(byName.get('record_signal')?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+      });
+      expect(byName.get('remove_episode')?.inputSchema.required).toEqual(
+        expect.arrayContaining(['seq', 'author', 'reason']),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
+  test('lists all thirteen tools and calls every tool with asserted results', async () => {
     const { env, root } = fresh();
     await runCli(['init'], env);
     await seedHome(env);
@@ -1326,7 +1944,7 @@ describe('medha mcp server', () => {
     try {
       const { client } = session;
       const tools = (await client.listTools()).tools.map((t) => t.name);
-      expect(tools).toHaveLength(12);
+      expect(tools).toHaveLength(13);
       expect(tools).toEqual(
         expect.arrayContaining([
           'hints',
@@ -1334,6 +1952,7 @@ describe('medha mcp server', () => {
           'show_entity',
           'record_signal',
           'report_guard',
+          'record_decision',
           'propose',
           'drift',
           'simulate',
@@ -1399,7 +2018,40 @@ describe('medha mcp server', () => {
       expect(guardRes.isError).toBe(false);
       expect(guardRes.body.key.id).toBe('mcp_test_e');
 
-      // 6. propose
+      // 6. record_decision: build a branch, then attribute evidence to it via caseId
+      const decRes = await call(client, 'record_decision', {
+        id: 'mcp_dec_e',
+        condition: 'under app/Http/Controllers',
+        decision: { type: 'apply' },
+      });
+      expect(decRes.isError).toBe(false);
+      expect(typeof decRes.body.caseId).toBe('string');
+      expect(decRes.body.decisionTree).toBeDefined();
+      const branchId = decRes.body.caseId as string;
+
+      const branchSignal = await call(client, 'record_signal', {
+        id: 'mcp_dec_e',
+        signal: 'APPLY',
+        ensure: true,
+        caseId: branchId,
+      });
+      expect(branchSignal.isError).toBe(false);
+      expect(branchSignal.body.caseId).toBe(branchId);
+
+      // Editing by a caseId that names no branch is a typo, not a licence to mint one.
+      const typoEdit = await call(client, 'record_decision', {
+        id: 'mcp_dec_e',
+        condition: 'somewhere else',
+        decision: { type: 'ignore' },
+        caseId: 'mcp_dec_e-dec-typo',
+      });
+      expect(typoEdit.isError).toBe(true);
+      expect(typoEdit.body.error.code).toBe('CORE_INVALID_ARGUMENT');
+      const afterTypo = await call(client, 'show_entity', { id: 'mcp_dec_e' });
+      const branches = afterTypo.body.decisionTree as { id: string; condition: string }[];
+      expect(branches.map((b) => b.id)).toEqual([branchId]);
+
+      // 7. propose
       const propRes = await call(client, 'propose', {
         id: 'mcp_prop_e',
         source: 'test-miner',
@@ -1411,13 +2063,13 @@ describe('medha mcp server', () => {
       expect(propRes.body.state).toBeUndefined();
       expect(propRes.body.episode).toBeDefined();
 
-      // 7. drift
+      // 8. drift
       const driftRes = await call(client, 'drift', { limit: 5 });
       expect(driftRes.isError).toBe(false);
       expect(Array.isArray(driftRes.body.drifting)).toBe(true);
       expect(typeof driftRes.body.count).toBe('number');
 
-      // 8. simulate
+      // 9. simulate
       const simRes = await call(client, 'simulate', { id: 't1', signal: 'APPLY' });
       expect(simRes.isError).toBe(false);
       expect(simRes.body.before).toBeDefined();
@@ -1443,8 +2095,14 @@ describe('medha mcp server', () => {
       expect(retractRes.isError).toBe(false);
       expect(retractRes.body.retractedSeq).toBe(0);
 
-      // 11. remove_episode
-      const removeRes = await call(client, 'remove_episode', { seq: 0 });
+      // 11. remove_episode: author and reason are required (GitHub #8)
+      const anonymous = await client.callTool({ name: 'remove_episode', arguments: { seq: 0 } });
+      expect(anonymous.isError).toBe(true);
+      const removeRes = await call(client, 'remove_episode', {
+        seq: 0,
+        author: 'mcp-agent',
+        reason: 'mcp test removal',
+      });
       expect(removeRes.isError).toBe(false);
       expect(removeRes.body.removed).toBe(true);
 
@@ -1464,7 +2122,7 @@ describe('medha mcp server', () => {
     await runCli(['init'], env);
 
     const bin = join(import.meta.dir, 'bin.ts');
-    const proc = spawn(process.execPath, [bin, 'mcp', '--dir', root], {
+    const proc = spawn(process.execPath, [bin, 'mcp', 'serve', '--dir', root], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -1493,7 +2151,7 @@ describe('medha mcp server', () => {
           );
         } else if (msg.id === 2) {
           sawTools = true;
-          expect(msg.result?.tools).toHaveLength(12);
+          expect(msg.result?.tools).toHaveLength(13);
           proc.stdin.end();
         }
       }

@@ -1,6 +1,46 @@
 {
-  "specVersion": "1.2.0",
+  "specVersion": "1.4.0",
   "note": "medha-arj.8: definitions/decision-tree conformance vectors, trust-formula.md §11a. caseRef labels are resolved to real case ids by the runner (via newDecisionCaseId or equivalent) before folding — case ids are locally minted, not portable literals, so only the fold's *behavior* is a cross-port vector here.",
+  "parentInheritance": [
+    {
+      "name": "edit-without-parent-keeps-branch-nested",
+      "note": "spec 1.4.0: an edit that says nothing about position must not move the branch.",
+      "key": { "namespace": "n", "kind": "rule", "id": "r1" },
+      "kindSpec": { "name": "rule" },
+      "episodes": [
+        { "type": "decision", "at": 0, "caseRef": "root", "condition": "root cond", "decision": { "type": "apply" } },
+        { "type": "decision", "at": 1000, "caseRef": "child", "parentRef": "root", "condition": "child cond", "decision": { "type": "ignore" } },
+        { "type": "decision", "at": 2000, "caseRef": "child", "condition": "child cond", "decision": { "type": "probability", "value": 0.4 } }
+      ],
+      "expectedParentByCase": { "root": null, "child": "root" },
+      "expectedConditionsByCase": { "root": "root cond", "child": "child cond" }
+    },
+    {
+      "name": "detach-promotes-branch-to-root",
+      "note": "spec 1.4.0: detach is the explicit, and only, way to move a branch to the top level.",
+      "key": { "namespace": "n", "kind": "rule", "id": "r1" },
+      "kindSpec": { "name": "rule" },
+      "episodes": [
+        { "type": "decision", "at": 0, "caseRef": "root", "condition": "root cond", "decision": { "type": "apply" } },
+        { "type": "decision", "at": 1000, "caseRef": "child", "parentRef": "root", "condition": "child cond", "decision": { "type": "ignore" } },
+        { "type": "decision", "at": 2000, "caseRef": "child", "detach": true, "condition": "child cond", "decision": { "type": "ignore" } }
+      ],
+      "expectedParentByCase": { "root": null, "child": null }
+    },
+    {
+      "name": "explicit-parent-re-parents-a-branch",
+      "note": "spec 1.4.0: naming a parent still moves the branch; inheritance only covers the omitted case.",
+      "key": { "namespace": "n", "kind": "rule", "id": "r1" },
+      "kindSpec": { "name": "rule" },
+      "episodes": [
+        { "type": "decision", "at": 0, "caseRef": "rootA", "condition": "root a", "decision": { "type": "apply" } },
+        { "type": "decision", "at": 0, "caseRef": "rootB", "condition": "root b", "decision": { "type": "apply" } },
+        { "type": "decision", "at": 1000, "caseRef": "kid", "parentRef": "rootA", "condition": "kid", "decision": { "type": "ignore" } },
+        { "type": "decision", "at": 2000, "caseRef": "kid", "parentRef": "rootB", "condition": "kid", "decision": { "type": "ignore" } }
+      ],
+      "expectedParentByCase": { "rootA": null, "rootB": null, "kid": "rootB" }
+    }
+  ],
   "foldPurity": [
     {
       "name": "define-and-decision-interleaved-with-signal-are-noop",

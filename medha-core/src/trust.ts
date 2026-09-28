@@ -1,5 +1,5 @@
 import { type Anchor, anchorSetFor, distinctSurvived, durabilityFactor } from './durability.ts';
-import { isDrifting } from './ema.ts';
+import { isDriftingDown } from './ema.ts';
 import type { EntityState, Evidence, LifecycleStatus } from './entity.ts';
 import { type GuardState, guardFactor, guardFailed, isUnguarded } from './guard.ts';
 import type { KindSpec } from './kinds.ts';
@@ -191,9 +191,13 @@ export function statusForTrust(
 
 /**
  * The status the numbers justify, independent of the stored one. Model §5.1 transitions:
- * probation → active → trusted; exits: quarantine (G=0 or drift) and retire (T < 0.10).
- * Drift is a pure function of the EMA state, so it belongs in the kernel: an entity whose
- * learned weight has moved ≥ 0.40 away from its author baseline cannot be trusted.
+ * probation → active → trusted; exits: quarantine (G=0 or downward drift) and retire (repeated
+ * failure). Drift is a pure function of the EMA state, so it belongs in the kernel: an entity whose
+ * learned weight has moved ≥ 0.40 *below* its author baseline cannot be trusted.
+ *
+ * The drift gate is one-sided. `isDrifting` (symmetric) is the *report* behind `medha drift` and
+ * the `drifting` gate; quarantining on it would bury an entity that has out-performed its baseline
+ * for long enough, which is the opposite of what quarantine means. See `isDriftingDown`.
  *
  * `trust` is already computed by the caller (statusFor here, the hint builder when it holds the
  * same TrustResult) — this is the single-pass core shared by both, so a batch never pays for the
@@ -210,7 +214,7 @@ export function statusFrom(
   if (state.override === 'quarantined') return 'quarantined';
   if (state.status === 'retired') return 'retired';
   if (guardFailed(state.guard)) return 'quarantined';
-  if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) return 'quarantined';
+  if (isDriftingDown(state.ema.mu, state.ema.theta0, state.evidence.n)) return 'quarantined';
   return statusForTrust(state, trust, kindSpec);
 }
 

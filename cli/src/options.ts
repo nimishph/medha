@@ -200,16 +200,22 @@ export const syncStatusArgs: ArgsDef = {
   ...readCommonArgs,
   ref: {
     type: 'string',
-    description: 'Git ref to synchronize (default: refs/sutra/medha/memory).',
+    description: 'Git ref to synchronize (default: refs/medha/memory).',
   },
-  remote: { type: 'string', description: 'Git remote to synchronize with (default: origin).' },
+  remote: {
+    type: 'string',
+    description: 'Git remote name, or a path/URL, to synchronize with (default: origin).',
+  },
   file: { type: 'string', description: 'File path for file-based synchronization.' },
 };
 
 export const syncPullArgs: ArgsDef = {
   ...readCommonArgs,
-  ref: { type: 'string', description: 'Git ref to pull from (default: refs/sutra/medha/memory).' },
-  remote: { type: 'string', description: 'Git remote to pull from (default: origin).' },
+  ref: { type: 'string', description: 'Git ref to pull from (default: refs/medha/memory).' },
+  remote: {
+    type: 'string',
+    description: 'Git remote name, or a path/URL, to pull from (default: origin).',
+  },
   file: { type: 'string', description: 'File path for file-based synchronization.' },
   'auto-import-registries': {
     type: 'boolean',
@@ -220,8 +226,11 @@ export const syncPullArgs: ArgsDef = {
 
 export const syncPushArgs: ArgsDef = {
   ...readCommonArgs,
-  ref: { type: 'string', description: 'Git ref to push to (default: refs/sutra/medha/memory).' },
-  remote: { type: 'string', description: 'Git remote to push to (default: origin).' },
+  ref: { type: 'string', description: 'Git ref to push to (default: refs/medha/memory).' },
+  remote: {
+    type: 'string',
+    description: 'Git remote name, or a path/URL, to push to (default: origin).',
+  },
   file: { type: 'string', description: 'File path for file-based synchronization.' },
 };
 
@@ -231,6 +240,12 @@ export const recordCommandArgs: ArgsDef = {
   signal: { type: 'string', description: 'Signal to record (e.g. APPLY, REJECT_RULE, SKIP).' },
   updater: { type: 'string', description: 'Weight updater name to use.' },
   ensure: { type: 'boolean', description: 'Create the entity if it does not exist.' },
+  'case-id': {
+    type: 'string',
+    description:
+      'Existing decision case id to attribute this signal to, so the branch learns too (not just ' +
+      'the rule as a whole).',
+  },
   author: { type: 'string', description: 'Author or agent identifier recording this evidence.' },
   at: {
     type: 'string',
@@ -290,16 +305,29 @@ export const decisionCommandArgs: ArgsDef = {
   apply: { type: 'boolean', description: 'Decision: apply.' },
   ignore: { type: 'boolean', description: 'Decision: ignore.' },
   probability: { type: 'string', description: 'Decision: probability value in [0,1].' },
-  parent: { type: 'string', description: 'Existing case id this branch attaches under.' },
-  caseId: {
+  parent: {
     type: 'string',
+    description:
+      'Existing case id this branch attaches under. Must name a branch of this entity. On an ' +
+      'edit, omitting this keeps the branch where it already is; use --detach to move it up.',
+  },
+  'case-id': {
+    type: 'string',
+    // 0.5.0 shipped this as --caseId, the only camelCase flag in the CLI. Keep it working, but
+    // make --case-id the documented spelling like every other multi-word flag here.
+    alias: ['caseId'],
     description: 'Existing case id to edit (latest-write-wins), instead of creating a new branch.',
+  },
+  detach: {
+    type: 'boolean',
+    description: 'Move an edited branch to the top level. Cannot be combined with --parent.',
   },
   author: {
     type: 'string',
     description:
-      "Author or agent identifier granting this decision. Use 'human:<id>' for a kind whose " +
-      'decisionPolicy.requireHumanFor gates this decision type.',
+      "Author or agent identifier granting this decision. If the kind's " +
+      'decisionPolicy.requireHumanFor gates this decision type, a human must run this ' +
+      "command: 'human:' is a label you set yourself, and passing it is not verification.",
   },
   at: {
     type: 'string',
@@ -321,6 +349,8 @@ export const retractCommandArgs: ArgsDef = {
 export const removeEpisodeCommandArgs: ArgsDef = {
   ...maintainCommonArgs,
   seq: { type: 'string', description: 'Episode sequence number to remove.', required: true },
+  author: { type: 'string', description: 'Author identifier, kept in the removal audit trail.' },
+  reason: { type: 'string', description: 'Why the episode is removed, kept in the audit trail.' },
 };
 
 export const packCommandArgs: ArgsDef = {

@@ -161,6 +161,12 @@ export interface DecisionEpisode extends BaseEpisode {
   readonly type: 'decision';
   readonly caseId: string;
   readonly parentId?: string | undefined;
+  /**
+   * Explicitly move an existing branch to the top level. The fold reads an absent `parentId` on an
+   * edit as "unchanged", so this is the only way to clear a branch's parent — otherwise editing a
+   * branch would silently promote it out of its subtree.
+   */
+  readonly detach?: boolean | undefined;
   readonly condition: string;
   readonly decision: Decision;
 }
@@ -402,6 +408,16 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       ) {
         throw new InvalidArgumentError('episode.parentId', 'a non-empty string', input.parentId);
       }
+      if (input.detach !== undefined && typeof input.detach !== 'boolean') {
+        throw new InvalidArgumentError('episode.detach', 'a boolean', input.detach);
+      }
+      if (input.detach === true && input.parentId !== undefined) {
+        throw new InvalidArgumentError(
+          'episode.detach',
+          'not combined with episode.parentId (detach means "move to the top level")',
+          { detach: input.detach, parentId: input.parentId },
+        );
+      }
       validateDecision(input.decision);
 
       const kindSpec = validation.kinds.get(input.key.kind);
@@ -414,8 +430,12 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
         if (gated && !isHumanAuthor(input.author)) {
           throw new PermissionDeniedError(
             `decision:${input.decision.type}`,
-            `kind '${input.key.kind}' requires a human-tagged author (author: 'human:<id>') for a '${input.decision.type}' branch`,
+            `kind '${input.key.kind}' requires a human to grant a '${input.decision.type}' branch`,
             {
+              hint:
+                "Do not retry with another author: 'human:' is a label the caller sets itself, " +
+                'and passing it is not verification. Escalate to a human, who must run this ' +
+                'command themselves.',
               context: {
                 kind: input.key.kind,
                 decisionType: input.decision.type,
@@ -728,9 +748,14 @@ export function foldDecisionTree(
     if (entityKeyString(episode.key) !== target) continue;
     if (episode.type === 'decision') {
       const prevCase = byId.get(episode.caseId);
+      // Latest-write-wins per field of *position*, latest-write-wins per field of content: an edit
+      // that names no parentId keeps the branch where it already is, and only an explicit `detach`
+      // promotes it to the top level. (Before this, any edit without a --parent orphaned the branch.)
+      const parentId =
+        episode.detach === true ? undefined : (episode.parentId ?? prevCase?.parentId);
       byId.set(episode.caseId, {
         id: episode.caseId,
-        ...(episode.parentId === undefined ? {} : { parentId: episode.parentId }),
+        ...(parentId === undefined ? {} : { parentId }),
         condition: episode.condition,
         decision: episode.decision,
         evidence: prevCase?.evidence ?? { k: 0, n: 0, contextRejects: 0 },

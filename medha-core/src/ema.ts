@@ -48,8 +48,24 @@ export function driftDelta(mu: number, theta0: number): number {
 }
 
 /**
- * Whether the entity is drifting: enough trials, and enough divergence from baseline
- * to rule out noise.
+ * How far μ has fallen *below* the author baseline, 0 when it is at or above it. One-sided on
+ * purpose: falling behind the baseline is the hazard, out-performing it is not (see
+ * `isDriftingDown`).
+ */
+export function driftDownDelta(mu: number, theta0: number): number {
+  return round6(Math.max(0, theta0 - mu));
+}
+
+/**
+ * Whether the entity is drifting in *either* direction: enough trials, and enough divergence from
+ * baseline to rule out noise. This is the report — `medha drift`, the `drifting` gate, and
+ * `temporal.isDrifting` all answer "how far has the learned weight moved from its baseline",
+ * regardless of sign.
+ *
+ * It is deliberately NOT the quarantine predicate: an entity that only ever succeeds walks μ up to
+ * 1 against the 0.5 default baseline and trips a symmetric 0.4 threshold after ~16 consecutive
+ * successes, so using it to quarantine buries the most reliable rules in the store. Quarantine uses
+ * `isDriftingDown` instead.
  */
 export function isDrifting(
   mu: number,
@@ -59,4 +75,24 @@ export function isDrifting(
 ): boolean {
   if (samples < params.minSamplesForDrift) return false;
   return driftDelta(mu, theta0) >= params.driftThreshold;
+}
+
+/**
+ * Whether the entity has drifted far enough *downward* to be quarantined: enough trials, and μ at
+ * or more than `driftThreshold` below the author baseline.
+ *
+ * Downward-only, because quarantine is a statement that an entity can no longer be trusted. μ
+ * moving toward 0 is that statement; μ moving toward 1 says the opposite — the entity outperforms
+ * the author's prior and has earned trust, not lost it. A symmetric test would make sustained
+ * success a punishment, so ~16 straight APPLYs at the default α quarantine a flawless rule with
+ * trust 0 and it stops surfacing entirely.
+ */
+export function isDriftingDown(
+  mu: number,
+  theta0: number,
+  samples: number,
+  params: EmaParams = DEFAULT_EMA_PARAMS,
+): boolean {
+  if (samples < params.minSamplesForDrift) return false;
+  return driftDownDelta(mu, theta0) >= params.driftThreshold;
 }

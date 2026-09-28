@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type EntityKey,
+  foldDecisionTree,
   foldLog,
   InvalidArgumentError,
   KindRegistry,
@@ -319,6 +320,40 @@ describe('write plane — retract and removeEpisode (§6.2)', () => {
     const state = await store.get(KEY);
     expect(state?.evidence.k).toBe(1);
   });
+
+  // GitHub #8: a hard delete used to leave no trace of who removed what, or why.
+  test('removeEpisode keeps who, why, when and the removed episode in the audit trail', async () => {
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    await medha.record(KEY, 'APPLY', { now: NOW + 1000 }, { author: 'agent:rogue' });
+    const [, rogue] = await store.episodes();
+
+    await medha.removeEpisode(1, { author: 'human:ops', reason: 'forged signal', now: NOW + 5 });
+    const trail = await medha.removedEpisodes();
+    expect(trail).toHaveLength(1);
+    expect(trail[0]).toMatchObject({
+      removedAt: NOW + 5,
+      author: 'human:ops',
+      reason: 'forged signal',
+    });
+    expect(trail[0]?.episode).toEqual(rogue as NonNullable<typeof rogue>);
+
+    // A miss removes nothing and records nothing; an empty reason is refused.
+    expect((await medha.removeEpisode(99, { author: 'human:ops', reason: 'x' })).removed).toBe(
+      false,
+    );
+    await expect(medha.removeEpisode(0, { reason: '  ' })).rejects.toThrow(/reason/);
+    expect(await medha.removedEpisodes()).toHaveLength(1);
+  });
+
+  test('removeEpisode is gated on the author like every other write', async () => {
+    const { store, medha } = makeEngine();
+    await medha.record(KEY, 'APPLY', { now: NOW }, { ensure: true, author: 'agent:1' });
+    const gated = new Medha({ store, permissions: { requireAuthor: true } });
+    await expect(gated.removeEpisode(0)).rejects.toThrow(/author/i);
+    // Before #8 the author was never passed through, so this refused every caller.
+    expect((await gated.removeEpisode(0, { author: 'human:ops' })).removed).toBe(true);
+  });
 });
 
 function entityKey(k: EntityKey): string {
@@ -458,6 +493,183 @@ describe('medha-arj.1/.2/.4: write plane — define and decision', () => {
 
     const log = await store.episodes();
     expect(log.filter((e) => e.type === 'decision')).toHaveLength(2);
+  });
+
+  test('editing a branch without a parentId keeps it nested; detach promotes it', async () => {
+    const { medha } = makeEngine();
+    const key = { ...KEY, kind: HOST_KIND };
+    const root = await medha.decision(
+      key,
+      { condition: 'root', decision: { type: 'apply' } },
+      ctx,
+      { random: () => 0.1 },
+    );
+    const child = await medha.decision(
+      key,
+      { condition: 'child', decision: { type: 'ignore' }, parentId: root.caseId },
+      { now: NOW + 1 },
+      { random: () => 0.2 },
+    );
+    const find = async (id: string) =>
+      (await medha.show(key, { now: NOW + 9 })).decisionTree?.find((k) => k.id === id);
+
+    // An edit that says nothing about position must not move the branch.
+    await medha.decision(
+      key,
+      { condition: 'child', decision: { type: 'probability', value: 0.4 }, caseId: child.caseId },
+      { now: NOW + 2 },
+    );
+    expect((await find(child.caseId))?.parentId).toBe(root.caseId);
+    expect((await find(child.caseId))?.decision).toEqual({ type: 'probability', value: 0.4 });
+
+    // detach is the explicit, and only, way to move it to the top level.
+    await medha.decision(
+      key,
+      { condition: 'child', decision: { type: 'ignore' }, caseId: child.caseId, detach: true },
+      { now: NOW + 3 },
+    );
+    expect((await find(child.caseId))?.parentId).toBeUndefined();
+  });
+
+  test('decision refuses a structurally broken tree: unknown parent, cycle, duplicate condition', async () => {
+    const { medha } = makeEngine();
+    const key = { ...KEY, kind: HOST_KIND };
+    const rootA = await medha.decision(
+      key,
+      { condition: 'root A', decision: { type: 'apply' } },
+      ctx,
+      { random: () => 0.1 },
+    );
+    const rootB = await medha.decision(
+      key,
+      { condition: 'root B', decision: { type: 'apply' } },
+      { now: NOW + 1 },
+      { random: () => 0.2 },
+    );
+
+    // An unknown parent is refused instead of quietly creating a root-level orphan.
+    await expect(
+      medha.decision(
+        key,
+        { condition: 'orphan', decision: { type: 'apply' }, parentId: 'nope-123' },
+        { now: NOW + 2 },
+      ),
+    ).rejects.toThrow(/decision\.parentId/);
+
+    // A branch cannot be its own parent.
+    await expect(
+      medha.decision(
+        key,
+        {
+          condition: 'root A',
+          decision: { type: 'apply' },
+          caseId: rootA.caseId,
+          parentId: rootA.caseId,
+        },
+        { now: NOW + 3 },
+      ),
+    ).rejects.toThrow(/decision\.parentId/);
+
+    const legacy = await medha.decision(
+      key,
+      { condition: 'in legacy', decision: { type: 'ignore' }, parentId: rootA.caseId },
+      { now: NOW + 4 },
+      { random: () => 0.3 },
+    );
+
+    // Re-parenting under the branch's own descendant would close a loop.
+    const grandchild = await medha.decision(
+      key,
+      { condition: 'grandchild', decision: { type: 'apply' }, parentId: legacy.caseId },
+      { now: NOW + 5 },
+      { random: () => 0.4 },
+    );
+    await expect(
+      medha.decision(
+        key,
+        {
+          condition: 'in legacy',
+          decision: { type: 'ignore' },
+          caseId: legacy.caseId,
+          parentId: grandchild.caseId,
+        },
+        { now: NOW + 6 },
+      ),
+    ).rejects.toThrow(/decision\.parentId/);
+
+    // The same condition under the same parent is a duplicate, even re-cased and re-spaced.
+    await expect(
+      medha.decision(
+        key,
+        { condition: 'IN   Legacy', decision: { type: 'ignore' }, parentId: rootA.caseId },
+        { now: NOW + 7 },
+      ),
+    ).rejects.toThrow(/decision\.condition/);
+
+    // Under a different parent it is a genuinely different branch.
+    await expect(
+      medha.decision(
+        key,
+        { condition: 'in legacy', decision: { type: 'ignore' }, parentId: rootB.caseId },
+        { now: NOW + 8 },
+        { random: () => 0.5 },
+      ),
+    ).resolves.toBeDefined();
+  });
+
+  test('a decision edit with a caseId that names no branch is refused, and the tree does not grow', async () => {
+    const { store, medha } = makeEngine();
+    const key = { ...KEY, kind: HOST_KIND };
+    await medha.decision(key, { condition: 'root', decision: { type: 'apply' } }, ctx, {
+      random: () => 0.1,
+    });
+    const before = (await store.episodes()).length;
+
+    // A mistyped id used to mint a branch literally called `r1-dec-typo`: the intended branch
+    // stayed untouched and the tree quietly grew a stray leaf.
+    await expect(
+      medha.decision(
+        key,
+        { condition: 'revised', decision: { type: 'ignore' }, caseId: 'r1-dec-typo' },
+        ctx,
+      ),
+    ).rejects.toThrow(/decision\.caseId/);
+    expect((await store.episodes()).length).toBe(before);
+    expect(foldDecisionTree(await store.episodes(), key).length).toBe(1);
+  });
+
+  test('record with a caseId that names no branch is refused, and no episode is written', async () => {
+    const { store, medha } = makeEngine();
+    const key = { ...KEY, kind: HOST_KIND };
+    const created = await medha.decision(
+      key,
+      { condition: 'root', decision: { type: 'apply' } },
+      ctx,
+      {
+        random: () => 0.1,
+      },
+    );
+    const before = (await store.episodes()).length;
+
+    await expect(
+      medha.record(key, 'APPLY', ctx, { ensure: true, caseId: 'r1-dec-typo' }),
+    ).rejects.toThrow(/options\.caseId/);
+    // The signal must not have landed on the rule as a whole as a silent fallback.
+    expect((await store.episodes()).length).toBe(before);
+
+    // The real branch still accepts evidence, and the entity learns too.
+    const outcome = await medha.record(
+      key,
+      'APPLY',
+      { now: NOW + 1 },
+      {
+        ensure: true,
+        caseId: created.caseId,
+      },
+    );
+    expect(outcome.hint.evidence.totalTrials).toBe(1);
+    const after = (await medha.show(key, { now: NOW + 1 })).decisionTree ?? [];
+    expect(after.find((k) => k.id === created.caseId)?.evidence.n).toBe(1);
   });
 
   test("decisionPolicy.requireHumanFor rejects an agent-authored 'apply' branch and accepts a human one", async () => {

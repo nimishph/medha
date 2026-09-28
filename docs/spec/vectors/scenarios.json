@@ -1,5 +1,5 @@
 {
-  "specVersion": "1.2.0",
+  "specVersion": "1.4.0",
   "scenarios": [
     {
       "name": "fresh-unguarded",
@@ -1403,7 +1403,7 @@
     },
     {
       "name": "drift-quarantines",
-      "description": "Learned weight moves >= 0.4 from the baseline with n >= 3.",
+      "description": "Learned weight moves >= 0.4 *below* the baseline with n >= 3.",
       "steps": [
         {
           "signal": "REJECT_RULE",
@@ -1454,6 +1454,243 @@
         },
         "ema": {
           "mu": 0.24659
+        },
+        "authors": {}
+      }
+    },
+    {
+      "name": "upward-drift-never-quarantines",
+      "description": "20 straight successes push mu >= 0.4 *above* the 0.5 baseline: still reported as drifting, but trusted, not quarantined (spec §7 — the quarantine gate is one-sided).",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        },
+        {
+          "ok": true,
+          "at": 1700000030000
+        }
+      ],
+      "now": 1700000031000,
+      "guardKind": "ci",
+      "theta0": 0.5,
+      "expected": {
+        "trust": 0.926087,
+        "components": {
+          "wilson": 0.83887,
+          "guard": 1,
+          "recency": 0.999998,
+          "durability": 1.103972,
+          "ceiling": 1
+        },
+        "status": "trusted",
+        "storedStatus": "trusted",
+        "gates": {
+          "trusted": true,
+          "active": true,
+          "drifting": true
+        },
+        "driftDelta": 0.439212,
+        "isDrifting": true,
+        "evidence": {
+          "k": 20,
+          "n": 20,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.939212
+        },
+        "authors": {}
+      }
+    },
+    {
+      "name": "upward-drift-unguarded-never-quarantines",
+      "description": "Same upward drift without a guard: active on evidence, still not quarantined, and still capped by the unguarded ceiling.",
+      "steps": [
+        {
+          "signal": "APPLY",
+          "at": 1700000000000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000001000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000002000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000003000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000004000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000005000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000006000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000007000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000008000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000009000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000010000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000011000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000012000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000013000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000014000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000015000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000016000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000017000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000018000
+        },
+        {
+          "signal": "APPLY",
+          "at": 1700000019000
+        }
+      ],
+      "now": 1700000021000,
+      "theta0": 0.5,
+      "expected": {
+        "trust": 0.419435,
+        "components": {
+          "wilson": 0.83887,
+          "guard": 0.5,
+          "recency": 1.0,
+          "durability": 1,
+          "ceiling": 0.5
+        },
+        "status": "active",
+        "storedStatus": "active",
+        "gates": {
+          "trusted": false,
+          "active": true,
+          "drifting": true
+        },
+        "driftDelta": 0.439212,
+        "isDrifting": true,
+        "evidence": {
+          "k": 20,
+          "n": 20,
+          "contextRejects": 0
+        },
+        "ema": {
+          "mu": 0.939212
         },
         "authors": {}
       }

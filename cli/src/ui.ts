@@ -766,6 +766,18 @@ export function generateDashboardHtml(data: {
       \`;
     }
 
+    // Drift is a symmetric report, so an entity that has out-performed its baseline shows up here
+    // too. Only downward drift is the hazard (it is the direction that quarantines), so only that
+    // one gets the warning colour - painting healthy upward drift as a warning would make the
+    // dashboard cry wolf about the most reliable rules in the store.
+    function driftCell(e) {
+      if (!e.temporal.isDrifting) return { text: '✓ stable', color: 'var(--text-faint)' };
+      const delta = e.temporal.driftDelta.toFixed(3);
+      return e.temporal.driftDirection === 'down'
+        ? { text: '⚠ ↓ ' + delta, color: 'var(--probation)' }
+        : { text: '↑ ' + delta + ' above', color: 'var(--text-faint)' };
+    }
+
     function renderEntitiesTable() {
       const q = (document.getElementById('filterSearch').value || '').toLowerCase();
       const statusFilter = document.getElementById('filterStatus').value;
@@ -798,8 +810,8 @@ export function generateDashboardHtml(data: {
               </div>
             </td>
             <td style="font-family: var(--font-mono); font-size: 0.82rem;">\${e.evidence.successes}/\${e.evidence.totalTrials}</td>
-            <td style="font-family: var(--font-mono); font-size: 0.82rem; color: \${e.temporal.isDrifting ? 'var(--probation)' : 'var(--text-faint)'}">
-              \${e.temporal.isDrifting ? '⚠ ' + e.temporal.driftDelta.toFixed(3) : '✓ stable'}
+            <td style="font-family: var(--font-mono); font-size: 0.82rem; color: \${driftCell(e).color}">
+              \${driftCell(e).text}
             </td>
             <td style="font-size: 0.8rem; color: var(--text-muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
               \${e.lastNote ? '"' + escapeHtml(e.lastNote) + '"' : '—'}

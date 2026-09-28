@@ -377,6 +377,7 @@ export const recordCommand = defineCommand({
         ...(args.signal === undefined ? {} : { signal: args.signal }),
         ...(args.updater === undefined ? {} : { updater: args.updater }),
         ...(args.ensure === true ? { ensure: true } : {}),
+        ...(args['case-id'] === undefined ? {} : { caseId: args['case-id'] }),
         ...(args.author === undefined ? {} : { author: args.author }),
         ...(args.at === undefined ? {} : { at: args.at }),
         ...(args.note === undefined ? {} : { note: args.note }),
@@ -490,7 +491,8 @@ export const decisionCommand = defineCommand({
         ...(args.ignore === true ? { ignore: true } : {}),
         ...(args.probability === undefined ? {} : { probability: args.probability }),
         ...(args.parent === undefined ? {} : { parent: args.parent }),
-        ...(args.caseId === undefined ? {} : { caseId: args.caseId }),
+        ...(args['case-id'] === undefined ? {} : { caseId: args['case-id'] }),
+        ...(args.detach === true ? { detach: true } : {}),
         ...(args.author === undefined ? {} : { author: args.author }),
         ...(args.at === undefined ? {} : { at: args.at }),
       },
@@ -536,6 +538,8 @@ export const removeEpisodeCommand = defineCommand({
         ...(args.dir === undefined ? {} : { dir: args.dir }),
         ...(args.home === undefined ? {} : { home: args.home }),
         ...(args.seq === undefined ? {} : { seq: args.seq }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.reason === undefined ? {} : { reason: args.reason }),
       },
       environment,
     );
@@ -736,11 +740,20 @@ export const mcpCommand = defineCommand({
   subCommands: {
     serve: mcpServeCommand,
   },
-  async run({ args }) {
-    const environment = currentEnvironment();
-    const { serveMcp } = await import('./mcp.ts');
-    await serveMcp({ dir: args.dir, home: args.home }, environment);
-  },
+  /*
+   * Deliberately no `run` and no `default` here: `medha mcp serve` is the one spelling.
+   *
+   * citty runs a command's own `run` unconditionally *after* dispatching a matched subcommand
+   * (citty/dist/index.mjs, runCommand: the subcommand branch recurses, then the `run` line
+   * follows). A `run` that served here therefore started a *second* server on the same stdin for
+   * `medha mcp serve`: the two transports split the JSON-RPC stream between them, so a
+   * `tools/call` went unanswered and the process never reached a clean EOF, hanging until the
+   * client gave up (nimishph/medha#2). Restating the work in a `run` to also accept a bare
+   * `medha mcp` is what caused it, so the alias is gone rather than papered over.
+   *
+   * A bare `medha mcp` now fails as a usage error (citty E_NO_COMMAND, exit 2) naming the
+   * subcommand it wants, which is a better answer than a second undocumented entry point.
+   */
 });
 
 /** Sync subcommands (§9.1). */

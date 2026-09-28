@@ -129,6 +129,118 @@ export function storeForConfig(config: MedhaConfigV1): StorePort {
 }
 
 /** The opinions a user may override or add to, written to an optional --config registries.json. */
+/**
+ * The exact key sets a host config file may use. Kept beside the parsing that enforces them, so a
+ * field added to a `*Spec` interface is a one-line change here rather than a silent no-op.
+ *
+ * A config that names a key we do not recognise used to be accepted in full and quietly dropped, so
+ * `{"kindPolicies": {...}}` (a plausible misspelling of `kindSpecs`) or
+ * `{"thresholds": {"bogus": 1}}` produced a home whose policy was not the policy on disk, and the
+ * only symptom was a policy that never took effect (nimishph/medha#5).
+ */
+const CONFIG_KEYS = {
+  host: ['kinds', 'kindSpecs', 'signalSpecs', 'anchorKinds'],
+  kindSpec: [
+    'name',
+    'description',
+    'thresholds',
+    'recency',
+    'evidenceWeighting',
+    'signalLimits',
+    'decisionPolicy',
+  ],
+  thresholds: [
+    'trusted',
+    'active',
+    'unguardedCeiling',
+    'minUsesForTrusted',
+    'minUsesForRetired',
+    'retiredTrustThreshold',
+  ],
+  recency: ['halfLifeDays', 'floor'],
+  signalLimits: ['minIntervalMs', 'maxSuccessesPerAuthor'],
+  decisionPolicy: ['requireHumanFor'],
+} as const satisfies Record<string, readonly string[]>;
+
+/** Levenshtein distance, over key lengths short enough that the table stays trivial. */
+function editDistance(a: string, b: string): number {
+  const initialRow = (): number[] => Array.from({ length: b.length + 1 }, (_, i) => i);
+  let previous = initialRow();
+  for (let i = 1; i <= a.length; i++) {
+    const current = initialRow();
+    current[0] = i;
+    const fromA = a[i - 1] as string;
+    for (let j = 1; j <= b.length; j++) {
+      const substitution = (previous[j - 1] as number) + (fromA === b[j - 1] ? 0 : 1);
+      current[j] = Math.min(
+        (previous[j] as number) + 1,
+        (current[j - 1] as number) + 1,
+        substitution,
+      );
+    }
+    previous = current;
+  }
+  return previous[b.length] as number;
+}
+
+/** The allowed key closest to `key`, when one is close enough to be a plausible typo. */
+function closestAllowed(key: string, allowed: readonly string[]): string | undefined {
+  const ranked = allowed
+    .map((candidate) => ({
+      candidate,
+      distance: editDistance(key.toLowerCase(), candidate.toLowerCase()),
+    }))
+    .sort((a, b) => a.distance - b.distance);
+  const best = ranked[0];
+  // Half the key's length, floor 2: catches kindPolicies/kindSpecs and recency.bogus/floor, but
+  // never guesses a "did you mean" for a word that is simply not close to anything.
+  return best !== undefined && best.distance <= Math.max(2, Math.floor(key.length / 2))
+    ? best.candidate
+    : undefined;
+}
+
+/**
+ * Reject every key the schema does not define, naming the offender, where it was found, and what
+ * was allowed. All unknown keys in one object are reported together, so a group of typos in the same
+ * object costs one round-trip rather than one per key.
+ */
+function assertKnownKeys(
+  configPath: string,
+  where: string,
+  value: object,
+  allowed: readonly string[],
+): void {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  if (unknown.length === 0) {
+    return;
+  }
+  const allowedText = allowed.join(', ');
+  const details = unknown.map((key) => {
+    const guess = closestAllowed(key, allowed);
+    return `'${key}'${guess === undefined ? '' : ` (did you mean '${guess}'?)`}`;
+  });
+  throw new ConfigFileError(
+    configPath,
+    `unknown key${unknown.length === 1 ? '' : 's'} in ${where}: ${details.join(', ')}; allowed: ${allowedText}`,
+  );
+}
+
+/** Run {@link assertKnownKeys} on the nested groups of a kind spec, when they are present. */
+function assertKindSpecKeys(configPath: string, where: string, spec: object): void {
+  assertKnownKeys(configPath, where, spec, CONFIG_KEYS.kindSpec);
+  for (const [group, allowed] of [
+    ['thresholds', CONFIG_KEYS.thresholds],
+    ['recency', CONFIG_KEYS.recency],
+    ['signalLimits', CONFIG_KEYS.signalLimits],
+    ['decisionPolicy', CONFIG_KEYS.decisionPolicy],
+  ] as const) {
+    const nested = (spec as Record<string, unknown>)[group];
+    if (typeof nested === 'object' && nested !== null && !Array.isArray(nested)) {
+      assertKnownKeys(configPath, `${where}.${group}`, nested, allowed);
+    }
+  }
+}
+
 export interface HostRegistries {
   readonly kinds?:
     | readonly string[]
@@ -150,6 +262,7 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new ConfigFileError(configPath, 'expected a JSON object');
   }
+  assertKnownKeys(configPath, 'the config root', parsed, CONFIG_KEYS.host);
   const host = parsed as Partial<HostRegistries>;
 
   const extractedKinds: string[] = [];
@@ -169,6 +282,7 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
           if (typeof spec.name !== 'string' || spec.name.trim() === '') {
             throw new ConfigFileError(configPath, 'kind spec must have a non-empty string name');
           }
+          assertKindSpecKeys(configPath, `kinds[${extractedKinds.length}]`, spec);
           extractedKinds.push(spec.name);
           extractedKindSpecs.push(spec);
         } else {
@@ -192,6 +306,7 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
             `kind configuration for '${name}' must be an object`,
           );
         }
+        assertKindSpecKeys(configPath, `kinds['${name}']`, rawSpec);
         extractedKinds.push(name);
         extractedKindSpecs.push({ name, ...rawSpec });
       }
@@ -207,7 +322,7 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
     if (!Array.isArray(host.kindSpecs)) {
       throw new ConfigFileError(configPath, 'kindSpecs must be an array');
     }
-    for (const spec of host.kindSpecs) {
+    for (const [specIndex, spec] of host.kindSpecs.entries()) {
       if (
         typeof spec !== 'object' ||
         spec === null ||
@@ -219,6 +334,7 @@ export function effectiveRegistriesFrom(configPath: string): StoreRegistries {
           'each kindSpec must be an object with a non-empty name',
         );
       }
+      assertKindSpecKeys(configPath, `kindSpecs[${specIndex}]`, spec);
       if (!extractedKinds.includes(spec.name)) {
         extractedKinds.push(spec.name);
       }

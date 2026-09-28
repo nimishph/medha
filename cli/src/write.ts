@@ -66,6 +66,12 @@ export interface RecordOptions extends WriteFlags {
   readonly signal?: string;
   readonly updater?: string;
   readonly ensure?: boolean;
+  /**
+   * Decision case id to attribute this signal to, so the branch accrues the evidence as well as the
+   * entity. Must name a branch the entity already has — a typo is refused rather than silently
+   * folding into the rule as a whole.
+   */
+  readonly caseId?: string;
   readonly author?: string;
   readonly at?: string | number;
   readonly note?: string;
@@ -79,6 +85,8 @@ export interface RecordReport {
   readonly recorded: boolean;
   readonly hint: EvidentialHint;
   readonly note?: string | undefined;
+  /** The decision case this evidence was attributed to, when --case-id was given. */
+  readonly caseId?: string | undefined;
 }
 
 export async function runRecord(
@@ -111,6 +119,7 @@ export async function runRecord(
         ensure: options.ensure === true,
         ...(author === undefined ? {} : { author }),
         ...(options.note === undefined ? {} : { note: options.note }),
+        ...(options.caseId === undefined ? {} : { caseId: options.caseId }),
       },
     );
     return {
@@ -120,6 +129,7 @@ export async function runRecord(
       recorded: outcome.state !== undefined,
       hint: outcome.hint,
       ...(options.note === undefined ? {} : { note: options.note }),
+      ...(options.caseId === undefined ? {} : { caseId: options.caseId }),
     };
   } finally {
     await opened.engine.close();
@@ -308,6 +318,8 @@ export interface RemoveEpisodeOptions {
   readonly dir?: string;
   readonly home?: string;
   readonly seq?: string | number;
+  readonly author?: string;
+  readonly reason?: string;
 }
 
 export interface RemoveEpisodeReport {
@@ -330,7 +342,11 @@ export async function runRemoveEpisode(
     if (!Number.isInteger(seq) || seq < 0) {
       throw new InvalidArgumentError('--seq', 'a non-negative integer', options.seq);
     }
-    const outcome = await opened.adminEngine.removeEpisode(seq);
+    const outcome = await opened.adminEngine.removeEpisode(seq, {
+      author: options.author,
+      reason: options.reason,
+      now: environment.now(),
+    });
     return {
       home: opened.home,
       seq,
@@ -401,6 +417,7 @@ export interface DecisionOptions extends WriteFlags {
   readonly probability?: string;
   readonly parent?: string;
   readonly caseId?: string;
+  readonly detach?: boolean;
   readonly author?: string;
   readonly at?: string | number;
 }
@@ -420,6 +437,11 @@ export interface DecisionReport {
  * `decisionPolicy.requireHumanFor` rejection (medha-arj.4) surfaces as the typed
  * `PermissionDeniedError` it already is — the CLI layer's usual error rendering gives it a clean,
  * non-zero exit rather than a stack trace.
+ *
+ * Re-parenting is explicit: on an edit, omitting `--parent` leaves the branch where it is (the
+ * engine's fold inherits the previous parent), and `--detach` is the only way to move it to the top
+ * level. A `--parent` naming no branch of this entity is refused rather than quietly creating an
+ * orphan at the root.
  */
 export async function runDecision(
   options: DecisionOptions,
@@ -456,6 +478,13 @@ export async function runDecision(
     }
     const key = keyFromFlags(options);
     requireConfiguredKind(opened.config.registries, key.kind);
+    if (options.detach === true && options.parent !== undefined) {
+      throw new InvalidArgumentError(
+        '--detach/--parent',
+        'not both (--detach means "move to the top level")',
+        { detach: options.detach, parent: options.parent },
+      );
+    }
     const at = parseTimestamp(options.at, environment.now());
     const author = resolveAuthor(options.author);
     const outcome = await opened.engine.decision(
@@ -465,6 +494,7 @@ export async function runDecision(
         decision,
         ...(options.parent === undefined ? {} : { parentId: options.parent }),
         ...(options.caseId === undefined ? {} : { caseId: options.caseId }),
+        ...(options.detach === true ? { detach: true } : {}),
       },
       { now: at },
       { ...(author === undefined ? {} : { author }) },
@@ -473,7 +503,11 @@ export async function runDecision(
       home: opened.home,
       key,
       caseId: outcome.caseId,
-      ...(options.parent === undefined ? {} : { parentId: options.parent }),
+      // Report the *effective* parent, not just what was passed: an edit that omits --parent keeps
+      // the branch's existing one, and that is the useful thing for a caller to see.
+      ...(options.parent === undefined && options.detach !== true
+        ? {}
+        : { parentId: options.detach === true ? undefined : options.parent }),
       condition: options.condition,
       decision,
     };
@@ -496,6 +530,9 @@ export function renderRecord(report: RecordReport): string {
   ];
   if (report.note !== undefined) {
     lines.push(`  note:     ${report.note}`);
+  }
+  if (report.caseId !== undefined) {
+    lines.push(`  branch:   ${report.caseId} (branch trust learns too, not just the rule)`);
   }
   return `${lines.join('\n')}\n`;
 }

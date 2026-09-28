@@ -135,6 +135,7 @@ export interface MaintainRestoreReport {
   readonly asOf: number;
   readonly path: string;
   readonly restored: { readonly from: number; readonly to: number };
+  readonly episodes: { readonly before: number; readonly after: number };
   readonly migration?: { readonly from: number; readonly to: number } | undefined;
 }
 
@@ -148,13 +149,14 @@ export async function runMaintainRestore(
   const snapshot = readSnapshotFile(options.path);
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
-    const { restored, migration } = await opened.adminEngine.restore(snapshot);
+    const { restored, episodes, migration } = await opened.adminEngine.restore(snapshot);
     const now = environment.now();
     return {
       home: opened.home,
       asOf: now,
       path: options.path,
       restored,
+      episodes,
       ...(migration ? { migration } : {}),
     };
   } finally {

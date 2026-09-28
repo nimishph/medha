@@ -1,5 +1,10 @@
 import type { Medha } from '@cntxt-labs/medha';
-import { type LifecycleStatus, MedhaError, toMedhaError } from '@cntxt-labs/medha-core';
+import {
+  type Decision,
+  type LifecycleStatus,
+  MedhaError,
+  toMedhaError,
+} from '@cntxt-labs/medha-core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -14,12 +19,31 @@ import { parseTimestamp, resolveAuthor } from './write.ts';
 
 /**
  * An MCP server over a project's evidential memory engine.
- * Exposes 11 tools:
+ * Exposes 13 tools:
  * hints (batch), list_entities, show_entity, record_signal, report_guard,
- * propose, drift, simulate, status, retract_episode, remove_episode.
+ * record_decision, propose, drift, simulate, status, retract_episode,
+ * remove_episode, pack_context.
  */
 export function createMcpServer(engine: Medha, environment: Environment): McpServer {
   const server = new McpServer({ name: 'medha', version: VERSION });
+
+  // Tool annotations (GitHub #8) let a client tell reads from writes, and ask before the one hard
+  // delete. Every tool acts only on the local store, so none is open-world. Writes other than
+  // remove_episode append to the log, so they are not destructive, and none is idempotent: repeating
+  // a signal or a proposal is a second piece of evidence.
+  const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
+  const APPEND = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  } as const;
+  const DESTRUCTIVE = {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: false,
+  } as const;
 
   const respond = async (run: () => Promise<unknown>, compact = false) => {
     try {
@@ -41,6 +65,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     {
       description:
         'Batch fetch hints for entity keys. Returns { hints, unknown }: `unknown` lists requested keys that do not exist (treat them as probation).',
+      annotations: READ_ONLY,
       inputSchema: {
         keys: z
           .array(
@@ -75,6 +100,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     {
       description:
         'List entities with trust, lifecycle status, and drift flags, filtered and paginated.',
+      annotations: READ_ONLY,
       inputSchema: {
         kind: z.string().optional().describe('Filter by entity kind.'),
         status: z
@@ -116,6 +142,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     {
       description:
         'Show entity details: trust, components, temporal state, recent episodes, and provenance.',
+      annotations: READ_ONLY,
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -144,6 +171,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     {
       description:
         'Record an evidential signal (APPLY, REJECT_RULE, etc.) on an entity, updating its weight. Returns `recorded: false` when the entity is unknown and `ensure` is not set.',
+      annotations: APPEND,
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -154,6 +182,14 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .boolean()
           .optional()
           .describe('If true, materialize the entity if it does not exist.'),
+        caseId: z
+          .string()
+          .optional()
+          .describe(
+            'Decision branch (case) id to attribute this signal to, so the branch learns too and ' +
+              'not just the rule as a whole. Read the ids off the `decisionTree` in show_entity. ' +
+              'Must name a branch the entity already has: a typo is an error, never a silent no-op.',
+          ),
         author: z.string().optional().describe('Author or agent identity recording the signal.'),
         at: z
           .union([z.string(), z.number()])
@@ -166,7 +202,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ namespace, kind, id, signal, updater, ensure, author, at, note, compact }) =>
+    ({ namespace, kind, id, signal, updater, ensure, caseId, author, at, note, compact }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
         const resolvedAuthor = resolveAuthor(author, environment.env);
@@ -179,6 +215,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
             ensure: ensure === true,
             ...(resolvedAuthor === undefined ? {} : { author: resolvedAuthor }),
             ...(note === undefined ? {} : { note }),
+            ...(caseId === undefined ? {} : { caseId }),
           },
         );
         const recorded = outcome.state !== undefined;
@@ -191,6 +228,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
               }),
           hint: compact === true ? compactHint(outcome.hint) : outcome.hint,
           ...(outcome.updater === undefined ? {} : { updater: outcome.updater }),
+          ...(caseId === undefined ? {} : { caseId }),
         };
       }, compact === true),
   );
@@ -201,6 +239,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     {
       description:
         'Record a guard evaluation result (harness passed/failed, review verdict, etc.).',
+      annotations: APPEND,
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -238,11 +277,95 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }),
   );
 
-  // 6. propose
+  // 6. record_decision
+  server.registerTool(
+    'record_decision',
+    {
+      description:
+        "Grow or edit one branch of an entity's decision tree: a free-text `condition` and a " +
+        'decision (apply / ignore / probability). Omit `caseId` to create a new branch; pass the ' +
+        "caseId from show_entity's decisionTree to edit that branch in place. Medha does not " +
+        'evaluate conditions: you pick the branch that fits, then report outcomes against it via ' +
+        "record_signal's caseId. Omitting `parentId` when editing keeps the branch where it is; " +
+        'pass `detach: true` to move it to the top level. A `parentId` naming no branch of this ' +
+        'entity is an error, not a new root.',
+      annotations: APPEND,
+      inputSchema: {
+        namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
+        kind: z.string().optional().describe('Entity kind. Default: rule.'),
+        id: z.string().describe('Entity id.'),
+        condition: z.string().describe('Free-text condition this branch covers.'),
+        decision: z
+          .union([
+            z.object({ type: z.literal('apply') }),
+            z.object({ type: z.literal('ignore') }),
+            z.object({ type: z.literal('probability'), value: z.number().min(0).max(1) }),
+          ])
+          .describe('What to do under this condition: apply, ignore, or probability(p) in [0,1].'),
+        caseId: z
+          .string()
+          .optional()
+          .describe('Existing branch id to edit in place. Omit to create a new branch.'),
+        parentId: z
+          .string()
+          .optional()
+          .describe(
+            'Existing branch id to nest under. Omit on edit to keep the current parent; omit on ' +
+              'create to make a top-level branch.',
+          ),
+        detach: z
+          .boolean()
+          .optional()
+          .describe('Move this branch to the top level. Cannot be combined with parentId.'),
+        author: z
+          .string()
+          .optional()
+          .describe(
+            "Author or agent identity writing this branch. If the kind's " +
+              'decisionPolicy.requireHumanFor gates this decision type, a human must run this ' +
+              "command: 'human:' is a label you set yourself, and passing it is not verification.",
+          ),
+        at: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe('Historical timestamp (ISO 8601 or epoch ms) for backfilling.'),
+      },
+    },
+    ({ namespace, kind, id, condition, decision, caseId, parentId, detach, author, at }) =>
+      respond(async () => {
+        const effectiveNow = parseTimestamp(at, environment.now());
+        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const key = { namespace: namespace ?? '', kind: kind ?? 'rule', id };
+        const outcome = await engine.decision(
+          key,
+          {
+            condition,
+            decision: decision as Decision,
+            ...(caseId === undefined ? {} : { caseId }),
+            ...(parentId === undefined ? {} : { parentId }),
+            ...(detach === true ? { detach: true } : {}),
+          },
+          { now: effectiveNow },
+          { ...(resolvedAuthor === undefined ? {} : { author: resolvedAuthor }) },
+        );
+        // Return the whole tree, not just the branch: the caller needs the parent's id to keep
+        // nesting, and the sibling ids to branch further.
+        const detail = await engine.show(key, { now: effectiveNow });
+        return {
+          caseId: outcome.caseId,
+          condition,
+          decision,
+          decisionTree: detail.decisionTree ?? [],
+        };
+      }),
+  );
+
+  // 7. propose
   server.registerTool(
     'propose',
     {
       description: 'Submit a candidate entity proposal for evidential promotion/mining.',
+      annotations: APPEND,
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -305,12 +428,13 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }, compact === true),
   );
 
-  // 7. drift
+  // 8. drift
   server.registerTool(
     'drift',
     {
       description:
         'List entities currently experiencing weight drift, ordered by most-drifted first.',
+      annotations: READ_ONLY,
       inputSchema: {
         limit: z
           .number()
@@ -324,12 +448,13 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       respond(() => engine.drift({ now: environment.now() }, limit === undefined ? {} : { limit })),
   );
 
-  // 8. simulate
+  // 9. simulate
   server.registerTool(
     'simulate',
     {
       description:
         'Simulate the trust delta a signal would produce on an entity without persisting anything.',
+      annotations: READ_ONLY,
       inputSchema: {
         namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
         kind: z.string().optional().describe('Entity kind. Default: rule.'),
@@ -345,12 +470,13 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       ),
   );
 
-  // 9. status
+  // 10. status
   server.registerTool(
     'status',
     {
       description:
         'Engine health report: preflight integrity, distribution by lifecycle status, drift count.',
+      annotations: READ_ONLY,
       inputSchema: {},
     },
     () =>
@@ -379,12 +505,13 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }),
   );
 
-  // 10. retract_episode
+  // 11. retract_episode
   server.registerTool(
     'retract_episode',
     {
       description:
         'Retract an erroneous episode by its sequence number, appending a masking retract episode.',
+      annotations: APPEND,
       inputSchema: {
         seq: z.number().int().nonnegative().describe('Sequence number of the episode to retract.'),
         reason: z.string().describe('Reason for retracting the episode.'),
@@ -418,29 +545,32 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }, compact === true),
   );
 
-  // 11. remove_episode
+  // 12. remove_episode
   server.registerTool(
     'remove_episode',
     {
       description:
-        'Physically remove an episode from the store log and resequence remaining episodes.',
+        'Hard-delete an episode from the store log and resequence the rest. Destructive: the ' +
+        'evidence is gone from the log. Prefer retract_episode, which keeps the history. The ' +
+        'author, reason and removed episode are kept in the store audit trail.',
+      annotations: DESTRUCTIVE,
       inputSchema: {
         seq: z.number().int().nonnegative().describe('Sequence number of the episode to remove.'),
+        author: z.string().min(1).describe('Author or agent identity removing the episode.'),
+        reason: z.string().min(1).describe('Why this episode is being removed.'),
       },
     },
-    ({ seq }) =>
-      respond(async () => {
-        const outcome = await engine.removeEpisode(seq);
-        return outcome;
-      }),
+    ({ seq, author, reason }) =>
+      respond(() => engine.removeEpisode(seq, { author, reason, now: environment.now() })),
   );
 
-  // 12. pack_context
+  // 13. pack_context
   server.registerTool(
     'pack_context',
     {
       description:
         'Pack active and probation entities (rules, tools) into an evidential context window within a token budget.',
+      annotations: READ_ONLY,
       inputSchema: {
         budget: z.number().int().nonnegative().describe('Maximum token budget (e.g. 2000).'),
         kind: z.string().optional().describe('Filter by entity kind (default: rule).'),

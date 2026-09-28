@@ -15,7 +15,7 @@ import math
 import pathlib
 import sys
 
-SPEC_VERSION = "1.2.0"
+SPEC_VERSION = "1.4.0"
 DAY_MS = 86_400_000
 WEEK_MS = 7 * DAY_MS
 
@@ -77,6 +77,10 @@ def drift_delta(mu, theta0):
     return round6(abs(mu - theta0))
 
 
+def drift_down_delta(mu, theta0):
+    return round6(max(0.0, theta0 - mu))
+
+
 # ---------------------------------------------------------------------------------------------
 # entity state / fold
 # ---------------------------------------------------------------------------------------------
@@ -133,6 +137,12 @@ def drifting(st):
     return st["n"] >= D["min_samples_drift"] and drift_delta(st["mu"], st["theta0"]) >= D["drift"]
 
 
+def drifting_down(st):
+    """The quarantine gate (spec §6 step 4): one-sided. See spec §7."""
+    return st["n"] >= D["min_samples_drift"] and \
+        drift_down_delta(st["mu"], st["theta0"]) >= D["drift"]
+
+
 def status_from(st, t, comps, ks):
     if st["override"] == "retired":
         return "retired"
@@ -143,7 +153,7 @@ def status_from(st, t, comps, ks):
     g = st["guard"]
     if g["kind"] not in ("none", "") and g["lastOk"] is False:
         return "quarantined"
-    if drifting(st):
+    if drifting_down(st):
         return "quarantined"
     if st["n"] >= thr(ks, "minUsesForRetired", D["min_uses_retired"]) and \
             comps["wilson"] * comps["guard"] < thr(ks, "retiredTrustThreshold", D["retired"]):
@@ -299,8 +309,16 @@ def scenarios():
         rejects(6, T0) + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.0)
     add("age-alone-never-retires", "A dormant entity is not retired by decay.",
         applies(3) + [guard(True, T0 + 5000)], T0 + 900 * DAY_MS, guardKind="ci", theta0=1.0)
-    add("drift-quarantines", "Learned weight moves >= 0.4 from the baseline with n >= 3.",
+    add("drift-quarantines", "Learned weight moves >= 0.4 *below* the baseline with n >= 3.",
         rejects(4, T0) + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.9)
+    add("upward-drift-never-quarantines",
+        "20 straight successes push mu >= 0.4 *above* the 0.5 baseline: still reported as drifting, "
+        "but trusted, not quarantined (spec §7 — the quarantine gate is one-sided).",
+        applies(20) + [guard(True, T0 + 30_000)], T0 + 31_000, guardKind="ci", theta0=0.5)
+    add("upward-drift-unguarded-never-quarantines",
+        "Same upward drift without a guard: active on evidence, still not quarantined, and still "
+        "capped by the unguarded ceiling.",
+        applies(20), T0 + 21_000, theta0=0.5)
     add("durability-declared-anchors", "Distinct host anchors raise durability.",
         [dict(signal="APPLY", at=T0 + i * 1000, anchors=[["git", f"h{i}"]]) for i in range(8)]
         + [guard(True, T0 + 20_000)], T0 + 21_000, guardKind="ci", theta0=0.9)

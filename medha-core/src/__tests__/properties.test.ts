@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { durabilityFactor } from '../durability.ts';
+import { isDrifting, isDriftingDown } from '../ema.ts';
 import { type EntityState, freshState } from '../entity.ts';
 import { applySignal, overrideStatus, reportGuard } from '../fold.ts';
 import { evaluateGates } from '../hint.ts';
@@ -251,16 +252,32 @@ describe('documented non-monotonicities (pinned: changing these is a spec decisi
     return state;
   };
 
-  test('sustained success can quarantine: drift is symmetric around the author baseline', () => {
+  test('sustained success does not quarantine: the drift gate is one-sided', () => {
     const now = T0 + 100_000;
     const few = guarded(0.5, 4);
     const many = guarded(0.5, 40);
     expect(trustOf(few, now).trust).toBeGreaterThan(0);
     expect(statusFrom(few, trustOf(few, now))).not.toBe('quarantined');
-    // 40 successes push mu toward 1, >= 0.4 away from theta0 = 0.5 -> quarantined, T = 0.
-    expect(statusFrom(many, trustOf(many, now))).toBe('quarantined');
-    expect(many.status).toBe('quarantined');
-    expect(trustOf(many, now).trust).toBe(0);
+    // 40 successes push mu toward 1, >= 0.4 away from theta0 = 0.5 — but *above* the baseline, so
+    // the quarantine gate (which is downward-only) must not fire. Symmetric drift used to bury the
+    // most reliable rules in the store at ~16 consecutive successes.
+    expect(statusFrom(many, trustOf(many, now))).not.toBe('quarantined');
+    expect(many.status).not.toBe('quarantined');
+    // The report stays symmetric: it is still "this far from the baseline", sign included.
+    expect(isDrifting(many.ema.mu, many.ema.theta0, many.evidence.n)).toBe(true);
+    expect(trustOf(many, now).trust).toBeGreaterThan(0);
+  });
+
+  test('sustained failure still quarantines: the gate is one-sided, not absent', () => {
+    const now = T0 + 100_000;
+    let state = freshState(KEY, T0, { guard: { kind: 'ci', lastOk: true, lastOkAt: T0 } });
+    for (let i = 0; i < 6; i++) {
+      state = applySignal(state, { spec: REJECT_RULE }, { now: T0 + i * 1000 }).state;
+    }
+    // mu has fallen well below the 0.5 baseline -> quarantined, T = 0.
+    expect(isDriftingDown(state.ema.mu, state.ema.theta0, state.evidence.n)).toBe(true);
+    expect(statusFrom(state, trustOf(state, now))).toBe('quarantined');
+    expect(trustOf(state, now).trust).toBe(0);
   });
 
   test('a rejection refreshes recency, so it can raise the score of a stale entity', () => {
