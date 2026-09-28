@@ -28,7 +28,7 @@ jobs:
           bun-version: 1.3.14
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run build
@@ -59,7 +59,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
 
       - name: Verify Tag Matches Manifest Version
@@ -92,28 +92,42 @@ jobs:
 
       # Platform packages go first so the launcher never points at a version that is not there yet.
       # A version that is already on the registry is skipped (so a re-run is safe); any other
-      # failure stops the release.
-      - name: Publish to npm
+      # failure stops the release. `npm stage publish` (npm 11+, hence node-version 24 above) defers
+      # 2FA to the approval step below, so CI needs only an ordinary automation token here — no
+      # bypass-2FA granular token.
+      - name: Stage on npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "${NODE_AUTH_TOKEN}" ]; then
-            echo "NPM_TOKEN is not set: refusing to release without publishing to npm" >&2
+            echo "NPM_TOKEN is not set: refusing to release without staging on npm" >&2
             exit 1
           fi
-          publish() {
+          stage() {
             dir="./${1#./}"
             name="$(node -p "require('${dir}/package.json').name")"
             version="$(node -p "require('${dir}/package.json').version")"
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "${name}@${version} is already published, skipping"
             else
-              npm publish "${dir}" --access public --provenance --tag latest
+              npm stage publish "${dir}" --access public --provenance --tag latest
             fi
           }
-          for folder in staged/*/; do publish "${folder%/}"; done
+          for folder in staged/*/; do stage "${folder%/}"; done
           cp README.md LICENSE SKILL.md cli/
-          publish ./cli
+          stage ./cli
+
+      - name: List what needs approval
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "::notice::Each package above is staged, not live yet. Run 'npm stage approve <id>' (with your own 2FA) for each, or 'npm stage list' to see them again later."
+          npm stage list "@cntxt-labs/medha-cli" || true
+          npm stage list "@cntxt-labs/medha-linux-x64" || true
+          npm stage list "@cntxt-labs/medha-linux-arm64" || true
+          npm stage list "@cntxt-labs/medha-darwin-arm64" || true
+          npm stage list "@cntxt-labs/medha-darwin-x64" || true
+          npm stage list "@cntxt-labs/medha-win32-x64" || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

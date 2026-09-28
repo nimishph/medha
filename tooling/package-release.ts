@@ -39,7 +39,7 @@ const canonicalPath = join(canonicalFolder, program);
 
 process.stdout.write(`Compiling medha CLI/MCP binary for ${target}...\n`);
 
-const compileArgs = ['bun', 'build', '--compile'];
+const compileArgs = ['bun', 'build', '--compile', '--minify', '--sourcemap=none'];
 if (values.target) {
   compileArgs.push(`--target=bun-${values.target}`);
 }
