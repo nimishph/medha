@@ -66,6 +66,7 @@ import {
   type SyncPort,
   sanitizeContext,
   scoreDecisionTree,
+  validateDecisionTreeEdit,
   validateSignalSpec,
   wilsonWidth,
 } from '@cntxt-labs/medha-core';
@@ -80,7 +81,10 @@ import {
   LAST_SWEEP_META_KEY,
   type MedhaSnapshot,
   type PreflightReport,
+  parseRemovedEpisodes,
   planSweep,
+  REMOVED_EPISODES_META_KEY,
+  type RemovedEpisodeRecord,
   resolveSweepOption,
   type SessionOpenResult,
   SNAPSHOT_FORMAT,
@@ -352,7 +356,14 @@ export class Medha {
     const drifting = states
       .map((state) => buildHint(state, context.now, this.kindSpecFor(state.key.kind)))
       .filter((hint) => hint.temporal.isDrifting)
-      .map((hint): DriftEntry => ({ key: hint.key, delta: hint.temporal.driftDelta, hint }))
+      .map(
+        (hint): DriftEntry => ({
+          key: hint.key,
+          delta: hint.temporal.driftDelta,
+          direction: hint.temporal.driftDirection,
+          hint,
+        }),
+      )
       .sort((a, b) => b.delta - a.delta || compareKeyString(a, b));
     const limitApplied = options.limit ?? drifting.length;
     return {
@@ -706,11 +717,15 @@ export class Medha {
   async backup(context?: Context): Promise<{ readonly snapshot: MedhaSnapshot }> {
     if (context !== undefined) sanitizeContext(context);
     await this.ensureOpen();
-    const [episodes, lastSweep] = await Promise.all([
+    const [episodes, lastSweep, removed] = await Promise.all([
       this.store.episodes(),
       this.store.getMeta(LAST_SWEEP_META_KEY),
+      this.store.getMeta(REMOVED_EPISODES_META_KEY),
     ]);
-    const meta = lastSweep === undefined ? {} : { [LAST_SWEEP_META_KEY]: lastSweep };
+    const meta = {
+      ...(lastSweep === undefined ? {} : { [LAST_SWEEP_META_KEY]: lastSweep }),
+      ...(removed === undefined ? {} : { [REMOVED_EPISODES_META_KEY]: removed }),
+    };
     return {
       snapshot: {
         format: SNAPSHOT_FORMAT,
@@ -725,11 +740,14 @@ export class Medha {
 
   /**
    * Restore a snapshot: atomically replace the episode log (validated contiguous, against this
-   * store's registries) and the engine meta it carries. Returns the seq range that was replaced.
+   * store's registries) and the engine meta it carries. `restored` is the seq range of the log
+   * that was *replaced* (so `{0, -1}` for an empty store); `episodes` is the before/after count,
+   * which is what a report should show.
    * Transparently migrates older snapshot formats (e.g. v0, legacy Sage v1) to MedhaSnapshot v1.
    */
   async restore(source: unknown): Promise<{
     readonly restored: { from: number; to: number };
+    readonly episodes: { before: number; after: number };
     readonly migration?: { from: number; to: number };
   }> {
     const opened = await this.ensureOpen();
@@ -744,6 +762,7 @@ export class Medha {
     }
     return {
       restored,
+      episodes: { before: restored.to - restored.from + 1, after: snapshot.episodes.length },
       ...(migrated ? { migration: { from: fromVersion, to: toVersion } } : {}),
     };
   }
@@ -862,6 +881,24 @@ export class Medha {
     const state = await this.store.get(key);
     const ensure = options.ensure ?? false;
     const base = state ?? (ensure ? freshState(key, context.now) : undefined);
+
+    if (options.caseId !== undefined) {
+      // A typo'd caseId would otherwise fold into the entity as usual and leave the named branch
+      // untouched — the signal would read as "it landed somewhere" while its evidence went to the
+      // rule as a whole. Refuse instead, and name the branches that do exist.
+      const log = await this.store.episodes();
+      const tree = foldDecisionTree(log, key, this.kindSpecFor(key.kind));
+      if (!tree.some((kase) => kase.id === options.caseId)) {
+        const known = tree.map((kase) => kase.id).sort();
+        throw new InvalidArgumentError(
+          'options.caseId',
+          known.length === 0
+            ? 'a decision case id (this entity has no decision branches yet)'
+            : `an existing decision case id of this entity (has: ${known.join(', ')})`,
+          options.caseId,
+        );
+      }
+    }
 
     let updater: UpdaterUsage | undefined;
     let weightEpisode: { readonly updater?: string; readonly weight?: number } = {};
@@ -983,6 +1020,11 @@ export class Medha {
    * existing branch (latest-write-wins); omit it to mint a fresh one via `newDecisionCaseId`.
    * `decisionPolicy.requireHumanFor` (medha-arj.4) is enforced by the store's own validation, so a
    * policy-gated `apply` from a non-human author surfaces as a typed `PermissionDeniedError` here.
+   *
+   * The tree's *shape* is checked here rather than in the store, because shape is a property of
+   * the log so far: an unknown `--parent`, a self-parent, a cycle, or a duplicate condition under
+   * the same parent all need the current tree in hand. On an edit, omitting `parentId` keeps the
+   * branch where it is; pass `detach` to move it to the top level.
    */
   async decision(
     key: EntityKey,
@@ -991,6 +1033,7 @@ export class Medha {
       readonly decision: Decision;
       readonly parentId?: string | undefined;
       readonly caseId?: string | undefined;
+      readonly detach?: boolean | undefined;
     },
     context: Context,
     options: { readonly author?: string; readonly random?: () => number } = {},
@@ -1001,6 +1044,19 @@ export class Medha {
     this.requireKind(key);
     this.checkWritePermission('decision', options.author);
     const caseId = input.caseId ?? newDecisionCaseId(key, options.random);
+    const kindSpec = this.kindSpecFor(key.kind);
+    const log = await this.store.episodes();
+    validateDecisionTreeEdit(
+      foldDecisionTree(log, key, kindSpec),
+      {
+        caseId,
+        condition: input.condition,
+        ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+        ...(input.detach === undefined ? {} : { detach: input.detach }),
+      },
+      // A caller-supplied caseId asks to revise that branch; only an omitted one mints a new one.
+      input.caseId === undefined ? 'create' : 'edit',
+    );
     const episodeInput: EpisodeInput = {
       type: 'decision',
       key,
@@ -1009,6 +1065,7 @@ export class Medha {
       condition: input.condition,
       decision: input.decision,
       ...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+      ...(input.detach === undefined ? {} : { detach: input.detach }),
       ...(options.author === undefined ? {} : { author: options.author }),
     };
     const appended = await this.store.append(episodeInput);
@@ -1240,21 +1297,47 @@ export class Medha {
    */
   async removeEpisode(
     seq: number,
+    options: {
+      readonly author?: string | undefined;
+      readonly reason?: string | undefined;
+      readonly now?: number | undefined;
+    } = {},
   ): Promise<{ readonly removed: boolean; readonly remainingCount: number }> {
     await this.ensureOpen();
-    this.checkWritePermission('removeEpisode');
+    this.checkWritePermission('removeEpisode', options.author);
     if (!Number.isInteger(seq) || seq < 0) {
       throw new InvalidArgumentError('seq', 'a non-negative integer', seq);
     }
+    if (options.reason !== undefined && options.reason.trim() === '') {
+      throw new InvalidArgumentError('reason', 'a non-empty string', options.reason);
+    }
     const episodes = await this.store.episodes();
-    const filtered = episodes.filter((e) => e.seq !== seq);
-    if (filtered.length === episodes.length) {
+    const target = episodes.find((e) => e.seq === seq);
+    if (target === undefined) {
       return { removed: false, remainingCount: episodes.length };
     }
-    const resequenced = filtered.map((e, idx) => assignSeq(episodeToInput(e), idx));
+    const resequenced = episodes
+      .filter((e) => e !== target)
+      .map((e, idx) => assignSeq(episodeToInput(e), idx));
     await this.store.replaceLog(resequenced);
     await this.store.rebuild();
+    // A hard delete leaves nothing in the log, so the trace lives in meta (which backups carry):
+    // who, why, when, and the episode itself, so a wrong removal can be put back by hand.
+    const audit = parseRemovedEpisodes(await this.store.getMeta(REMOVED_EPISODES_META_KEY));
+    audit.push({
+      removedAt: options.now ?? Date.now(),
+      ...(options.author === undefined ? {} : { author: options.author }),
+      ...(options.reason === undefined ? {} : { reason: options.reason }),
+      episode: target,
+    });
+    await this.store.setMeta(REMOVED_EPISODES_META_KEY, JSON.stringify(audit));
     return { removed: true, remainingCount: resequenced.length };
+  }
+
+  /** Every hard delete made through {@link removeEpisode}, oldest first. */
+  async removedEpisodes(): Promise<readonly RemovedEpisodeRecord[]> {
+    await this.ensureOpen();
+    return parseRemovedEpisodes(await this.store.getMeta(REMOVED_EPISODES_META_KEY));
   }
 }
 
@@ -1292,6 +1375,12 @@ export interface DriftEntry {
   readonly key: EntityKey;
   /** |ema.mu − theta0| — the drift magnitude. */
   readonly delta: number;
+  /**
+   * Which way it moved. `'down'` is the hazard: it is the direction the quarantine gate fires on.
+   * `'up'` means the entity is out-performing its author's baseline — still worth reporting, but
+   * healthy, and it is why the magnitude alone must not be read as "bad".
+   */
+  readonly direction: 'down' | 'up';
   readonly hint: EvidentialHint;
 }
 

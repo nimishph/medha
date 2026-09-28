@@ -32,8 +32,17 @@ export interface EvidentialHint {
   };
   readonly temporal: {
     readonly emaWeight: number;
+    /** The author-declared baseline θ0 `emaWeight` is measured against. */
+    readonly baselineWeight: number;
+    /**
+     * Symmetric report: `|emaWeight − baselineWeight| ≥ DRIFT_THRESHOLD` with enough trials.
+     * Direction-agnostic on purpose — see the `drifting` gate below and `isDriftingDown` for the
+     * one-sided quarantine predicate.
+     */
     readonly isDrifting: boolean;
     readonly driftDelta: number;
+    /** Which way it moved, and the only one the quarantine gate cares about. */
+    readonly driftDirection: 'down' | 'up';
   };
   readonly status: LifecycleStatus;
   /** Natural language rationale or note from the latest episode (if any). */
@@ -125,8 +134,10 @@ export function buildHint(state: EntityState, now: number, kindSpec?: KindSpec):
     },
     temporal: {
       emaWeight: state.ema.mu,
+      baselineWeight: state.ema.theta0,
       isDrifting: drifting.met,
       driftDelta: drifting.value,
+      driftDirection: state.ema.mu <= state.ema.theta0 ? 'down' : 'up',
     },
     status,
     ...(state.lastNote !== undefined ? { lastNote: state.lastNote } : {}),

@@ -161,7 +161,9 @@ export function renderShow(report: ShowReport): string {
     `  evidence: ${h.evidence.successes}/${h.evidence.totalTrials} successes, wilson lower bound ${fixed(
       h.evidence.lowerBound,
     )}`,
-    `  temporal: ema ${fixed(h.temporal.emaWeight)}, drift ${h.temporal.isDrifting ? 'yes' : 'no'} (delta ${fixed(
+    `  temporal: ema ${fixed(h.temporal.emaWeight)} (baseline ${fixed(
+      h.temporal.baselineWeight,
+    )}), drift ${h.temporal.isDrifting ? `${h.temporal.driftDirection} yes` : 'no'} (delta ${fixed(
       h.temporal.driftDelta,
     )})`,
     `  clears:   trusted ${h.clearsThreshold.trusted ? 'yes' : 'no'}, active ${
@@ -223,8 +225,17 @@ export function renderStatus(report: StatusReport): string {
 export function renderDrift(report: DriftResult): string {
   const { report: drift } = report;
   const lines = [`medha: ${drift.count} entities drifting (limit applied ${drift.limitApplied})`];
+  const anyDown = drift.drifting.some((entry) => entry.direction === 'down');
+  const anyUp = drift.drifting.some((entry) => entry.direction === 'up');
+  if (anyDown || anyUp) {
+    lines.push(
+      `  dir: down = below baseline (the direction that quarantines), up = above baseline (healthy)`,
+    );
+  }
   for (const entry of drift.drifting) {
-    lines.push(`  ${fixed(entry.delta)}  ${entry.hint.status.padEnd(10)} ${keyLabel(entry.key)}`);
+    lines.push(
+      `  ${fixed(entry.delta)} ${entry.direction.padEnd(4)} ${entry.hint.status.padEnd(10)} ${keyLabel(entry.key)}`,
+    );
   }
   return `${lines.join('\n')}\n`;
 }
@@ -354,7 +365,7 @@ export function renderMaintainRestore(report: MaintainRestoreReport): string {
     ...(report.migration
       ? [`  migration:  v${report.migration.from} -> v${report.migration.to}`]
       : []),
-    `  episodes:   ${report.restored.from} -> ${report.restored.to}`,
+    `  episodes:   ${report.episodes.before} -> ${report.episodes.after}`,
   ];
   return `${lines.join('\n')}\n`;
 }

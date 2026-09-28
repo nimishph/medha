@@ -33,8 +33,10 @@ function makeHint(
     },
     temporal: {
       emaWeight: trustScore,
+      baselineWeight: 0.5,
       driftDelta: 0,
       isDrifting: false,
+      driftDirection: 'down',
     },
     clearsThreshold: {
       trusted: status === 'trusted',

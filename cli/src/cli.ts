@@ -2,6 +2,7 @@ import { MedhaError, toMedhaError } from '@cntxt-labs/medha-core';
 import { type CommandDef, renderUsage, runCommand } from 'citty';
 import { commands } from './commands.ts';
 import { bindEnvironment, type Environment } from './environment.ts';
+import { CliUsageError, isCliUsageFailure } from './errors.ts';
 import { toJson } from './render.ts';
 import { VERSION } from './version.ts';
 
@@ -79,8 +80,21 @@ export async function runCli(argv: readonly string[], environment: Environment):
     await runCommand(commands, { rawArgs: [...argv] });
     return environment.exitCode;
   } catch (failure) {
-    const error =
-      failure instanceof MedhaError ? failure : toMedhaError(failure, `medha ${command}`);
+    /*
+     * citty rejects the command line before any of our runners are reached (unknown command, or a
+     * subcommand left off) and throws its own `CLIError`. That is not a `MedhaError`, so it used
+     * to be wrapped as CORE_UNEXPECTED_FAILURE: a plain typo reported as an internal crash. Keep
+     * citty's own message, which names the offending token, and label it as the usage error it is.
+     */
+    const error = isCliUsageFailure(failure)
+      ? new CliUsageError(failure.message, {
+          ...(failure.message === 'No command specified.'
+            ? { hint: `medha help ${command} lists the subcommands.` }
+            : {}),
+        })
+      : failure instanceof MedhaError
+        ? failure
+        : toMedhaError(failure, `medha ${command}`);
     if (json) {
       environment.stderr(toJson(error));
     } else {
@@ -96,7 +110,7 @@ export async function runCli(argv: readonly string[], environment: Environment):
 
 /** Exit-code taxonomy: unknown flags/args and invalid argument values are usage (2), the rest fail (1). */
 function usageExitCode(failure: unknown): number {
-  if (failure instanceof Error && failure.name === 'CLIError') {
+  if (isCliUsageFailure(failure)) {
     return 2;
   }
   if (failure instanceof MedhaError && failure.code === 'CORE_INVALID_ARGUMENT') {

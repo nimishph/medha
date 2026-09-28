@@ -113,7 +113,7 @@ describe('maintenance plane — sweep (§8)', () => {
     expect(isSwept(report) && report.quarantineCount).toBe(0);
   });
 
-  test('stale (§8: no new evidence, recency at the floor) is retired', async () => {
+  test('age alone never retires: the sweep has no stale rule (§5.1 retires on failure, not decay)', async () => {
     const { medha, store } = makeEngine();
     const k = key('s');
     await applyN(medha, k, 12, NOW - 200 * DAY);
@@ -121,19 +121,67 @@ describe('maintenance plane — sweep (§8)', () => {
     const report = await medha.open({ now: NOW });
     expect(isSwept(report)).toBe(true);
     if (!isSwept(report)) return;
-    expect(report.retireCount).toBe(1);
+    // Recency is at its floor and there is no new evidence — the sweep still has nothing to do,
+    // because a `retire` here is an override the host never asked for and is terminal until an
+    // explicit restore. Age is already priced into trust through R(dt).
+    expect(report.retireCount).toBe(0);
+    expect(report.changes.length).toBe(0);
+
+    const hint = (await medha.show(k, { now: NOW })).hint;
+    expect(hint.status).toBe('probation');
+    // Decayed, not zero: the entity is still usable, just discounted for being dormant.
+    expect(hint.trustScore).toBeGreaterThan(0);
+    expect(hint.components.recency).toBe(0.3);
+
+    const state = (await store.list()).find((s) => entityKeyString(s.key) === entityKeyString(k));
+    expect(state?.override).toBeNull();
+    expect(state?.retiredAt).toBeNull();
+  });
+
+  test('upward drift is not quarantined by the sweep', async () => {
+    const { medha, store } = makeEngine();
+    const k = key('up');
+    // 20 straight successes: mu walks to ~0.94, i.e. >= 0.4 *above* the 0.5 default baseline.
+    await applyN(medha, k, 20, NOW - 60_000);
+
+    const report = await medha.open({ now: NOW });
+    expect(isSwept(report)).toBe(true);
+    if (!isSwept(report)) return;
+    expect(report.quarantineCount).toBe(0);
+    expect(report.changes.length).toBe(0);
+
+    const state = (await store.list()).find((s) => entityKeyString(s.key) === entityKeyString(k));
+    expect(state?.override).toBeNull();
+    expect(state?.status).not.toBe('quarantined');
+  });
+
+  test('the retirement clock is still stamped for a math-retired entity that never had one', async () => {
+    const { medha, store } = makeEngine();
+    const k = key('stamped');
+    // theta0 = 0 so rejections drive mu to exactly its baseline: wilson(0, 6) = 0 retires the
+    // entity by trust (§5.1) with no downward drift, and so with no lifecycle episode ever written
+    // `retiredAt` stays null and retention could never act on it.
+    await medha.propose({ ...k, description: 'doomed', theta0: 0 }, { now: NOW - 10_000 });
+    for (let i = 0; i < 6; i++) {
+      await medha.record(k, 'REJECT_RULE', { now: NOW - 1000 * (i + 1) });
+    }
+    const before = (await store.list()).find((s) => entityKeyString(s.key) === entityKeyString(k));
+    expect(before?.status).toBe('retired');
+    expect(before?.retiredAt).toBeNull();
+
+    const report = await medha.open({ now: NOW });
+    expect(isSwept(report)).toBe(true);
+    if (!isSwept(report)) return;
     const change = report.changes.find((c: SweepChange) => c.action === 'retire');
-    expect(change?.key).toEqual(k);
-    expect(change?.action).toBe('retire');
+    expect(change?.reason).toContain('consistency');
     expect(change?.at).toBe(NOW);
-    expect(change?.reason).toContain('stale');
 
     const state = (await store.list()).find((s) => entityKeyString(s.key) === entityKeyString(k));
     expect(state?.override).toBe('retired');
     expect(state?.retiredAt).toBe(NOW);
   });
 
-  test('stale exemption: a zero-evidence probe (n === 0) is never pruned', async () => {
+  test('zero-evidence probe (n === 0) is never touched', async () => {
     const { medha } = makeEngine();
     const k = key('z');
     await medha.record(k, 'SKIP', { now: NOW - 200 * DAY }, { ensure: true });
@@ -143,7 +191,7 @@ describe('maintenance plane — sweep (§8)', () => {
     expect((await medha.show(k, { now: NOW })).hint.status).toBe('probation');
   });
 
-  test('stale exemption: an entity restored since its last evidence is never pruned', async () => {
+  test('an entity restored since its last evidence is left alone', async () => {
     const { medha, store } = makeEngine();
     const k = key('r');
     await applyN(medha, k, 12, NOW - 200 * DAY);
@@ -157,7 +205,7 @@ describe('maintenance plane — sweep (§8)', () => {
     expect(state?.restoredAt).toBe(NOW - 5 * DAY);
   });
 
-  test('stale exemption: recent evidence keeps the entity active', async () => {
+  test('recent evidence keeps the entity active', async () => {
     const { medha } = makeEngine();
     const k = key('recent');
     await applyN(medha, k, 12, NOW - 200 * DAY);
@@ -399,8 +447,10 @@ describe('maintenance plane — backup / restore (§6.4, §9)', () => {
 
     const fromIndex = await fromStore.list();
     const { store: toStore, medha: to } = makeEngine();
-    const { restored } = await to.restore(snapshot);
+    const { restored, episodes } = await to.restore(snapshot);
     expect(restored.from).toBe(0);
+    // GitHub #9: the count is before/after, not the replaced seq range (which is {0, -1} here).
+    expect(episodes).toEqual({ before: 0, after: snapshot.episodes.length });
 
     expect(await toStore.episodes()).toHaveLength(snapshot.episodes.length);
     expect(await toStore.getMeta('sweep:lastRun')).toBe(String(NOW));

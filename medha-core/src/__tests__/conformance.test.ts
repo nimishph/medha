@@ -167,6 +167,10 @@ describe('medha-arj.8: definitions/decision-tree conformance (spec §11a)', () =
       readonly rationale: string;
     };
     readonly caseRef?: string;
+    /** Label of the branch this one nests under. Omitted on an edit means "unchanged". */
+    readonly parentRef?: string;
+    /** Explicitly move this branch to the top level. */
+    readonly detach?: boolean;
     readonly condition?: string;
     readonly decision?: Decision;
     readonly count?: number;
@@ -218,6 +222,8 @@ describe('medha-arj.8: definitions/decision-tree conformance (spec §11a)', () =
             caseId: resolve(ep.caseRef as string),
             condition: ep.condition as string,
             decision: ep.decision as Decision,
+            ...(ep.parentRef === undefined ? {} : { parentId: resolve(ep.parentRef) }),
+            ...(ep.detach === undefined ? {} : { detach: ep.detach }),
           });
           break;
         case 'signalBurst': {
@@ -286,6 +292,43 @@ describe('medha-arj.8: definitions/decision-tree conformance (spec §11a)', () =
       }
       const aggregate = foldLog(episodes, { kindSpec })[0];
       expect(aggregate?.evidence).toEqual(vec.expectedAggregate.evidence);
+    });
+  }
+
+  /**
+   * spec 1.4.0: a `decision` edit that names no `parentId` inherits the branch's existing parent;
+   * only an explicit `detach` promotes it. Before this, every edit without a parent silently
+   * orphaned the branch out of its subtree.
+   */
+  for (const vec of dt.parentInheritance ?? []) {
+    test(`parent inheritance: ${vec.name}`, () => {
+      const key: EntityKey = vec.key;
+      const { episodes, caseIds } = buildEpisodes(key, vec.episodes);
+      const tree = foldDecisionTree(episodes, key, vec.kindSpec);
+      for (const [label, expectedParent] of Object.entries(vec.expectedParentByCase) as [
+        string,
+        string | null,
+      ][]) {
+        const caseId = caseIds.get(label);
+        expect(caseId).toBeDefined();
+        const kase = tree.find((c) => c.id === caseId);
+        expect(kase).toBeDefined();
+        if (kase === undefined) continue;
+        // `null` means "this branch is a root"; a label means "parented under that case".
+        if (expectedParent === null) {
+          expect(kase.parentId).toBeUndefined();
+        } else {
+          expect(kase.parentId).toBe(caseIds.get(expectedParent));
+        }
+      }
+      if (vec.expectedConditionsByCase !== undefined) {
+        for (const [label, condition] of Object.entries(
+          vec.expectedConditionsByCase as Record<string, string>,
+        )) {
+          const kase = tree.find((c) => c.id === caseIds.get(label));
+          expect(kase?.condition).toBe(condition);
+        }
+      }
     });
   }
 

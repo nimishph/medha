@@ -127,3 +127,121 @@ export function scoreDecisionTree(
     trust: caseTrust(kase, now, kindSpec).trust,
   }));
 }
+
+/**
+ * The canonical form used to decide whether two conditions are the same branch. Conditions are
+ * free text, so "duplicate" has to be pinned down or `--condition "in Legacy"` and
+ * `--condition "In  Legacy"` grow two branches that read identically and split the evidence.
+ */
+export function normalizeCondition(condition: string): string {
+  return condition.trim().replace(/\s+/gu, ' ').toLowerCase();
+}
+
+/** One `decision` write, as the engine hands it to {@link validateDecisionTreeEdit}. */
+export interface DecisionTreeEdit {
+  /** The branch being created or edited. */
+  readonly caseId: string;
+  readonly condition: string;
+  /** Explicitly re-parent here. Omitted on an edit means "keep the branch where it is". */
+  readonly parentId?: string | undefined;
+  /** Explicitly move this branch to the top level. Mutually exclusive with `parentId`. */
+  readonly detach?: boolean | undefined;
+}
+
+/**
+ * Structural checks for one `decision` write, run against the entity's *current* folded tree.
+ *
+ * Four failure modes this exists to close, each of which used to corrupt a tree silently:
+ *
+ * - **Orphaning.** An edit that names no `parentId` used to clear it, so editing a branch's
+ *   probability silently promoted it to the top level. `parentId` is now "change it, don't touch
+ *   it", with `detach` as the only way to move a branch to the root.
+ * - **Unknown parents.** `--parent nope-123` used to be accepted and quietly created a root-level
+ *   branch, so the caller believed it had built a subtree over a tree that didn't exist. A parent
+ *   must name a branch this entity already has.
+ * - **Duplicate conditions.** The same condition twice used to create two branches, splitting that
+ *   condition's evidence across two trust scores that then both read low forever.
+ * - **Typo'd case ids.** `--case-id nope-123` used to mint a *new* branch with that literal id, so
+ *   a mistyped edit left the intended branch untouched and the tree quietly grew a stray leaf.
+ *
+ * Duplicates are scoped to a parent: "in Legacy" once under each of two different roots is two
+ * genuinely different branches.
+ *
+ * `mode` is the caller's intent, because a `caseId` is meaningful in two ways. Omitting the id
+ * mints a fresh branch ('create'); supplying one asks to revise that branch ('edit'). Under 'edit'
+ * the id must already be in the tree — otherwise a typo does not fail, it *mints a branch called
+ * `nope`*, and the caller walks away believing it revised a decision that it actually created.
+ */
+export function validateDecisionTreeEdit(
+  tree: readonly DecisionCase[],
+  edit: DecisionTreeEdit,
+  mode: 'create' | 'edit' = 'create',
+): void {
+  const byId = new Map(tree.map((kase) => [kase.id, kase]));
+
+  if (mode === 'edit' && !byId.has(edit.caseId)) {
+    const known = [...byId.keys()].sort();
+    throw new InvalidArgumentError(
+      'decision.caseId',
+      known.length === 0
+        ? 'not supplied: this entity has no decision branches to edit'
+        : `an existing decision case id of this entity (has: ${known.join(', ')})`,
+      edit.caseId,
+    );
+  }
+
+  if (edit.detach === true && edit.parentId !== undefined) {
+    throw new InvalidArgumentError(
+      'decision.detach',
+      'not combined with a parentId (detach means "move to the top level")',
+      { detach: true, parentId: edit.parentId },
+    );
+  }
+
+  // Absent parentId on an edit inherits; only an explicit detach clears it.
+  const parentId =
+    edit.detach === true ? undefined : (edit.parentId ?? byId.get(edit.caseId)?.parentId);
+
+  if (parentId !== undefined) {
+    if (parentId === edit.caseId) {
+      throw new InvalidArgumentError('decision.parentId', 'a branch other than itself', parentId);
+    }
+    if (!byId.has(parentId)) {
+      const known = [...byId.keys()].sort();
+      throw new InvalidArgumentError(
+        'decision.parentId',
+        known.length === 0
+          ? 'a decision case id (this entity has no decision branches yet)'
+          : `an existing decision case id of this entity (has: ${known.join(', ')})`,
+        parentId,
+      );
+    }
+    // A parent that already sits under this branch would close a loop, and every renderer that
+    // walks parent->children would then walk forever.
+    for (let cursor: string | undefined = parentId; cursor !== undefined; ) {
+      if (cursor === edit.caseId) {
+        throw new InvalidArgumentError(
+          'decision.parentId',
+          'a branch that is not a descendant of this branch',
+          parentId,
+        );
+      }
+      cursor = byId.get(cursor)?.parentId;
+    }
+  }
+
+  const normalized = normalizeCondition(edit.condition);
+  const duplicate = tree.find(
+    (kase) =>
+      kase.id !== edit.caseId &&
+      kase.parentId === parentId &&
+      normalizeCondition(kase.condition) === normalized,
+  );
+  if (duplicate !== undefined) {
+    throw new InvalidArgumentError(
+      'decision.condition',
+      `a condition no sibling of this branch already uses (sibling ${duplicate.id} uses it)`,
+      edit.condition,
+    );
+  }
+}

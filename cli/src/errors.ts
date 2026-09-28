@@ -1,5 +1,6 @@
 import {
   type CorruptLocation,
+  type ErrorInit,
   MedhaError,
   type SignalSpec,
   type StoreRegistries,
@@ -27,6 +28,26 @@ export interface RegistryDiff {
 
 export abstract class CliError extends MedhaError {
   override readonly subsystem = 'cli';
+}
+
+/**
+ * The command line itself was rejected before any engine work happened: an unknown command, or a
+ * command whose subcommand was left off. citty raises these as its own `CLIError`, which is not a
+ * `MedhaError`, so without this they fell through the generic wrapper and surfaced as
+ * `CORE_UNEXPECTED_FAILURE` — an internal-failure banner for what is only ever a typo. The message
+ * citty supplies names the offending token, so it is kept verbatim.
+ */
+export class CliUsageError extends CliError {
+  readonly code = 'CLI_USAGE';
+
+  constructor(message: string, init: Omit<ErrorInit, 'context'> = {}) {
+    super(message, init);
+  }
+}
+
+/** Narrowing guard for citty's usage errors, which are identified by name rather than by class. */
+export function isCliUsageFailure(failure: unknown): failure is Error {
+  return failure instanceof Error && failure.name === 'CLIError';
 }
 
 /** The engine home already has a config.json and init refused to touch it. */

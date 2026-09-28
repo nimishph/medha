@@ -5,7 +5,7 @@
  * The decision logic is pure and lives here so every §8 rule is unit-testable without a store:
  *
  *   - `planSweep` turns the entity projection into the lifecycle steps the sweep must record
- *     (drift → quarantine, stale → retire, retention → archive + purge), in that order;
+ *     (downward drift → quarantine, retention → archive + purge), in that order;
  *   - `compactPrefix` folds the log prefix older than a cutoff into one `BaselineEpisode` per
  *     entity and reports the folded range — the recomputability loss the spec requires to be
  *     named, not hidden.
@@ -21,6 +21,7 @@ import {
   type CorruptLocation,
   DAY_MS,
   DRIFT_THRESHOLD,
+  driftDownDelta,
   type EntityKey,
   type EntityState,
   type Episode,
@@ -30,16 +31,35 @@ import {
   foldLog,
   InvalidArgumentError,
   InvariantViolationError,
-  isDrifting,
+  isDriftingDown,
   type KindRegistry,
-  RECENCY_FLOOR,
-  recencyDecay,
-  round6,
   type StoreRegistries,
 } from '@cntxt-labs/medha-core';
 
 /** Meta key holding the last sweep's epoch (ms), read/written through `StorePort.getMeta`. */
 export const LAST_SWEEP_META_KEY = 'sweep:lastRun';
+
+/** Meta key holding the JSON audit trail of hard deletes (`Medha.removeEpisode`), oldest first. */
+export const REMOVED_EPISODES_META_KEY = 'audit:removedEpisodes';
+
+/** One hard delete: who, why, when, and the episode as it was before it left the log. */
+export interface RemovedEpisodeRecord {
+  readonly removedAt: number;
+  readonly author?: string;
+  readonly reason?: string;
+  readonly episode: Episode;
+}
+
+/** Read the removal audit trail; an absent or unreadable value is an empty trail, never a throw. */
+export function parseRemovedEpisodes(raw: string | undefined): RemovedEpisodeRecord[] {
+  if (raw === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as RemovedEpisodeRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 /** §8: the default session-start sweep throttle — at most once per 24 hours. */
 export const DEFAULT_SWEEP_INTERVAL_MS = DAY_MS;
@@ -161,7 +181,7 @@ export interface MedhaSnapshot {
   /** The registries the snapshot was taken under (restore validates the log against its host store). */
   readonly registries: StoreRegistries;
   readonly episodes: readonly Episode[];
-  /** Engine-owned meta (the last-sweep marker). Restore overwrites the keys present here. */
+  /** Engine-owned meta (last-sweep marker, removal audit). Restore overwrites the keys present. */
   readonly meta: Readonly<Record<string, string>>;
 }
 
@@ -198,13 +218,26 @@ export interface SweepPlanOptions {
 }
 
 /**
- * Decide every lifecycle step one sweep must record (drift → quarantine, stale → retire,
- * retention → archive + purge), in §8 order. Deterministic: it walks `states` in index order and
- * each rule is a pure function of a single state, so the same store + `now` plan the same steps.
+ * Decide every lifecycle step one sweep must record (downward drift → quarantine, retention →
+ * archive + purge), in §8 order. Deterministic: it walks `states` in index order and each rule is a
+ * pure function of a single state, so the same store + `now` plan the same steps.
  *
  * Safety (§8): states under a human `override` are never touched; probation entities still
- * gathering first evidence and entities with no evidence since their last restore are never
- * pruned as stale; quarantine and retire are reversible states, only the final purge is not.
+ * gathering first evidence are never pruned; quarantine and retire are reversible states, only the
+ * final purge is not.
+ *
+ * Two things this deliberately does NOT do, because the kernel's own invariants forbid them:
+ *
+ *  - **Retire on age.** §5.1 retires on repeated evidence of failure (`n >= minUsesForRetired` and
+ *    undecayed `L·G < retiredTrustThreshold`), never on recency decay — a dormant but unrefuted
+ *    entity sits on `probation` with a decayed trust, which is exactly what the
+ *    `age-alone-never-retires` conformance vector pins down. Retiring it here anyway recorded a
+ *    `retire` *override* the host never asked for, and an override is terminal until an explicit
+ *    restore, so one quiet session turned a 2024 backup into a store of retired entities. Age is
+ *    already priced into trust via `R(Δt)`; it does not need a second, irreversible copy.
+ *  - **Quarantine on upward drift.** The drift gate is one-sided for the same reason
+ *    `isDriftingDown` exists: μ above the baseline is an entity beating its prior, and a sweep
+ *    that quarantined it would make a healthy rule durably unrecoverable.
  */
 export function planSweep(
   states: readonly EntityState[],
@@ -231,42 +264,14 @@ export function planSweep(
       continue;
     }
 
-    if (state.status === 'quarantined') {
-      // Drift (Δ ≥ 0.40, n ≥ 3) → quarantine, made durable as an override so a converging EMA
-      // cannot unsay it behind the host's back. A guard-failed quarantine is the fold's to manage.
-      if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) {
-        steps.push({
-          key: state.key,
-          action: 'quarantine',
-          reason: `drift: delta ${driftDeltaText(state)} >= ${DRIFT_THRESHOLD} after ${state.evidence.n} trials`,
-        });
-      }
-      continue;
-    }
-
-    if (isDrifting(state.ema.mu, state.ema.theta0, state.evidence.n)) {
+    // Drift (Δ ≥ 0.40 below the baseline, n ≥ 3) → quarantine, made durable as an override so a
+    // converging EMA cannot unsay it behind the host's back. A guard-failed quarantine is the
+    // fold's to manage, and it needs no override: the guard is re-reported on every use.
+    if (isDriftingDown(state.ema.mu, state.ema.theta0, state.evidence.n)) {
       steps.push({
         key: state.key,
         action: 'quarantine',
-        reason: `drift: delta ${driftDeltaText(state)} >= ${DRIFT_THRESHOLD} after ${state.evidence.n} trials`,
-      });
-      continue;
-    }
-
-    // Stale: recency at its floor and no new evidence → retire.
-    if (state.evidence.n === 0) continue; // probation still gathering first evidence
-    if (
-      state.restoredAt !== null &&
-      (state.lastSignalAt === null || state.lastSignalAt < state.restoredAt)
-    ) {
-      continue; // no evidence since the restore — treated as "just restored"
-    }
-    if (state.lastSignalAt === null) continue; // defensive: n > 0 implies a signal stamped one
-    if (recencyDecay(state.lastSignalAt, now) === RECENCY_FLOOR) {
-      steps.push({
-        key: state.key,
-        action: 'retire',
-        reason: `stale: recency at floor (last signal ${ageDaysText(now - state.lastSignalAt)}d ago) and no new evidence`,
+        reason: `drift: delta ${driftDeltaText(state)} >= ${DRIFT_THRESHOLD} below baseline after ${state.evidence.n} trials`,
       });
     }
   }
@@ -441,7 +446,7 @@ function sameState(a: EntityState, b: EntityState | undefined): boolean {
 }
 
 function driftDeltaText(state: EntityState): string {
-  return String(round6(Math.abs(state.ema.mu - state.ema.theta0)));
+  return String(driftDownDelta(state.ema.mu, state.ema.theta0));
 }
 
 function ageDaysText(ms: number): string {

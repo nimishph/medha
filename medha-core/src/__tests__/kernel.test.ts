@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { caseStatus, caseTrust } from '../decision.ts';
+import {
+  caseStatus,
+  caseTrust,
+  normalizeCondition,
+  validateDecisionTreeEdit,
+} from '../decision.ts';
 import type { EntityDefinition } from '../definition.ts';
 import { anchorSetFor, distinctAnchorValues, durabilityFactor, weekEpoch } from '../durability.ts';
 import { emaStep } from '../ema.ts';
@@ -884,6 +889,162 @@ describe('medha-arj.2: DecisionCase/DecisionEpisode + newDecisionCaseId + foldDe
     expect(root?.parentId).toBeUndefined();
     expect(child?.parentId).toBe(rootId);
   });
+
+  test('an edit that omits parentId keeps the branch nested; detach promotes it', () => {
+    const rootId = newDecisionCaseId(KEY, mulberry32(3));
+    const childId = newDecisionCaseId(KEY, mulberry32(4));
+    const episodes: Episode[] = [
+      {
+        seq: 0,
+        key: KEY,
+        at: START,
+        type: 'decision',
+        caseId: rootId,
+        condition: 'root cond',
+        decision: { type: 'apply' },
+      },
+      {
+        seq: 1,
+        key: KEY,
+        at: START + 1,
+        type: 'decision',
+        caseId: childId,
+        parentId: rootId,
+        condition: 'child cond',
+        decision: { type: 'ignore' },
+      },
+      // Edit the child without naming a parent: it must stay where it is. (Before this, an edit
+      // with no parentId cleared the parent and silently promoted the branch to the top level.)
+      {
+        seq: 2,
+        key: KEY,
+        at: START + 2,
+        type: 'decision',
+        caseId: childId,
+        condition: 'child cond',
+        decision: { type: 'probability', value: 0.4 },
+      },
+    ];
+
+    const kept = foldDecisionTree(episodes, KEY).find((c) => c.id === childId);
+    expect(kept?.parentId).toBe(rootId);
+    expect(kept?.decision).toEqual({ type: 'probability', value: 0.4 });
+
+    // detach is the explicit way to move it up.
+    const detachedEpisode: Episode = {
+      seq: 3,
+      key: KEY,
+      at: START + 3,
+      type: 'decision',
+      caseId: childId,
+      condition: 'child cond',
+      decision: { type: 'probability', value: 0.4 },
+      detach: true,
+    };
+    const detached = foldDecisionTree([...episodes, detachedEpisode], KEY).find(
+      (c) => c.id === childId,
+    );
+    expect(detached?.parentId).toBeUndefined();
+  });
+
+  test('normalizeCondition makes re-cased and re-spaced conditions the same branch', () => {
+    expect(normalizeCondition('  In   app/Legacy ')).toBe('in app/legacy');
+    expect(normalizeCondition('in app/Legacy')).toBe(normalizeCondition('IN  APP/LEGACY'));
+  });
+});
+
+describe('medha-arj.2: validateDecisionTreeEdit — structural integrity', () => {
+  const rootId = 'r1-dec-root';
+  const childId = 'r1-dec-child';
+  const tree = [
+    {
+      id: rootId,
+      condition: 'root cond',
+      decision: { type: 'apply' as const },
+      evidence: { k: 0, n: 0, contextRejects: 0 },
+      ema: { mu: 0.5, theta0: 0.5, updatedAt: 0 },
+    },
+    {
+      id: childId,
+      parentId: rootId,
+      condition: 'child cond',
+      decision: { type: 'ignore' as const },
+      evidence: { k: 0, n: 0, contextRejects: 0 },
+      ema: { mu: 0.5, theta0: 0.5, updatedAt: 0 },
+    },
+  ];
+
+  test('a new branch under a known parent is fine', () => {
+    expect(() =>
+      validateDecisionTreeEdit(tree, { caseId: 'r1-dec-new', condition: 'new', parentId: childId }),
+    ).not.toThrow();
+  });
+
+  test("an 'edit' of a case id that does not exist is refused, and names the ones that do", () => {
+    // Minting is the default, so the mode is what separates "create a branch" from "revise one".
+    expect(() =>
+      validateDecisionTreeEdit(tree, { caseId: 'r1-dec-new', condition: 'new' }),
+    ).not.toThrow();
+    let caught: unknown;
+    try {
+      validateDecisionTreeEdit(tree, { caseId: 'r1-dec-typo', condition: 'new' }, 'edit');
+    } catch (err) {
+      caught = err;
+    }
+    expect((caught as { code?: string }).code).toBe('CORE_INVALID_ARGUMENT');
+    const message = (caught as Error).message;
+    expect(message).toContain('decision.caseId');
+    // The recovery path: a caller who mistyped must be able to find the right id from the error.
+    expect(message).toContain(rootId);
+    expect(message).toContain(childId);
+  });
+
+  test('an unknown parent is refused', () => {
+    expect(() =>
+      validateDecisionTreeEdit(tree, { caseId: 'r1-dec-new', condition: 'new', parentId: 'nope' }),
+    ).toThrow(/decision\.parentId/);
+  });
+
+  test('a self-parent and a descendant cycle are both refused', () => {
+    expect(() =>
+      validateDecisionTreeEdit(tree, {
+        caseId: rootId,
+        condition: 'root cond',
+        parentId: rootId,
+      }),
+    ).toThrow(/decision\.parentId/);
+    expect(() =>
+      validateDecisionTreeEdit(tree, {
+        caseId: rootId,
+        condition: 'root cond',
+        parentId: childId,
+      }),
+    ).toThrow(/decision\.parentId/);
+  });
+
+  test('a duplicate condition is refused per-parent, and allowed across parents', () => {
+    expect(() =>
+      validateDecisionTreeEdit(tree, {
+        caseId: 'r1-dec-new',
+        condition: 'CHILD  cond',
+        parentId: rootId,
+      }),
+    ).toThrow(/decision\.condition/);
+    expect(() =>
+      validateDecisionTreeEdit(tree, { caseId: 'r1-dec-new', condition: 'child cond' }),
+    ).not.toThrow();
+  });
+
+  test('detach with a parentId is refused as contradictory', () => {
+    expect(() =>
+      validateDecisionTreeEdit(tree, {
+        caseId: childId,
+        condition: 'child cond',
+        parentId: rootId,
+        detach: true,
+      }),
+    ).toThrow(/decision\.detach/);
+  });
 });
 
 describe('medha-arj.3: SignalEpisode.caseId — per-branch evidence isolated from the entity aggregate', () => {
@@ -999,6 +1160,16 @@ describe("medha-arj.4: KindSpec.decisionPolicy.requireHumanFor — gate who can 
       author: 'agent:reviewer',
     };
     expect(() => validateEpisodeInput(agentAttempt, validation)).toThrow(PermissionDeniedError);
+    // A `human:` author is a self-set label, so the refusal must steer the caller to escalate
+    // rather than tell it which label to pass.
+    try {
+      validateEpisodeInput(agentAttempt, validation);
+    } catch (error) {
+      const denied = error as PermissionDeniedError;
+      expect(denied.code).toBe('CORE_PERMISSION_DENIED');
+      expect(denied.message).not.toContain('human:');
+      expect(denied.hint).toContain('Escalate to a human');
+    }
 
     const humanAttempt = { ...agentAttempt, author: 'human:nimish' };
     expect(() => validateEpisodeInput(humanAttempt, validation)).not.toThrow();
