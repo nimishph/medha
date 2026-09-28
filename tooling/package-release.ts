@@ -106,6 +106,22 @@ mkdirSync(join(npmFolder, 'bin'), { recursive: true });
 const npmBinPath = join(npmFolder, 'bin', program);
 cpSync(targetPath, npmBinPath);
 if (!isWin) {
+  // This is what makes the release archive (`<folder>.tar.gz`, created below) usable as-is, and it
+  // makes a locally packed npm folder usable too.
+  //
+  // It is NOT enough on its own for the npm publish path, because `actions/upload-artifact` stores
+  // files in a zip and does not carry the permission bits across the job boundary — the `release`
+  // job re-applies the mode before it publishes (see .github/workflows/release.yml). Two notes so
+  // nobody "fixes" this the obvious wrong way:
+  //
+  // - Do not add a `bin` field to the platform package to work around it. npm derives nothing from
+  //   `bin` when packing (its portable mode only clears write bits, so it preserves whatever the
+  //   file already has), and a second package claiming the `medha` bin name races the launcher's
+  //   own `bin` for `node_modules/.bin/medha` — sometimes linking the raw binary, sometimes the
+  //   launcher, depending on install order.
+  // - The launcher chmods the program on EACCES anyway, so an install that loses the bit for any
+  //   other reason still works. That is the layer that reaches users on a version published before
+  //   this was fixed.
   try {
     chmodSync(targetPath, 0o755);
     chmodSync(npmBinPath, 0o755);

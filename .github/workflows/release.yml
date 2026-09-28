@@ -90,6 +90,30 @@ jobs:
           path: archives
           merge-multiple: true
 
+      # `actions/upload-artifact` stores files in a zip and does NOT carry POSIX permission bits
+      # across the job boundary, so every program in `staged/` arrives 0644 no matter what the build
+      # job chmod'd. Publishing that as-is is exactly the bug in nimishph/medha#1: the tarball
+      # installs, and then `medha` fails with EACCES on every platform. Put the bit back, and check
+      # it stuck, rather than shipping a package that cannot run.
+      #
+      # The release archives (dist/*.tar.gz) do not need this: they are tarballs built in the build
+      # job, so their entries already carry the mode from `bun run build`.
+      - name: Restore the executable bit
+        run: |
+          set -euo pipefail
+          for dir in staged/*/; do
+            mapfile -t programs < <(find "$dir/bin" -maxdepth 1 -type f)
+            if [ "${#programs[@]}" -ne 1 ]; then
+              echo "expected exactly one program in $dir/bin, found ${#programs[@]}" >&2
+              exit 1
+            fi
+            program="${programs[0]}"
+            chmod 0755 "$program"
+            mode="$(stat -c '%a' "$program")"
+            printf '%s  %s\n' "$mode" "$program"
+            [ "$mode" = "755" ] || { echo "mode is $mode, expected 755" >&2; exit 1; }
+          done
+
       # Platform packages go first so the launcher never points at a version that is not there yet.
       # A version that is already on the registry is skipped (so a re-run is safe); any other
       # failure stops the release. `npm stage publish` (npm 11+, hence node-version 24 above) defers

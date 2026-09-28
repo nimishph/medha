@@ -9,16 +9,26 @@
  * It needs `bun run build` first. It does not touch the network: the two packages are copied into
  * a `node_modules` folder, which is the layout an install produces.
  */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { programMode } from './npm-tarball.ts';
 import { MAIN_PACKAGE, PLATFORMS, platformPackage } from './platforms.ts';
 
 const root = resolve(import.meta.dir, '..');
 const { values } = parseArgs({ options: { dist: { type: 'string' } } });
 const dist = resolve(root, values.dist ?? 'dist');
-
+const program = process.platform === 'win32' ? 'medha.exe' : 'medha';
 const here = PLATFORMS.find((p) => p.os === process.platform && p.cpu === process.arch);
 if (!here) {
   process.stderr.write(
@@ -150,6 +160,73 @@ try {
   if (exited === undefined) {
     mcpServer.kill();
     await mcpServer.exited;
+  }
+
+  /*
+   * The published tarball has to carry the executable bit, or every install ends in
+   * `spawnSync .../bin/medha EACCES` (nimishph/medha#1). Copying the folder, as the checks above do,
+   * cannot see this: the mode only becomes a fact when npm packs the package, so pack it for real
+   * and read the mode out of the archive.
+   */
+  if (process.platform === 'win32') {
+    process.stdout.write(
+      'skip the tarball mode checks: an NTFS file has no executable bit, so a tarball built here ' +
+        'cannot represent a correct one. The release job restores the bit before publishing.\n',
+    );
+  } else {
+    const installed = join(modules, platformPackage(here), 'bin', program);
+    const pack = Bun.spawn({
+      cmd: ['npm', 'pack', '--pack-destination', sandbox, '--silent'],
+      cwd: join(modules, platformPackage(here)),
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [packOut, packErr, packCode] = await Promise.all([
+      new Response(pack.stdout).text(),
+      new Response(pack.stderr).text(),
+      pack.exited,
+    ]);
+    check('the platform package packs', packCode === 0, packErr);
+    if (packCode === 0) {
+      /*
+       * Take the tarball name from what `npm pack` just printed rather than rebuilding it here.
+       * npm rewrites a scoped name when it names the file (`@cntxt-labs/medha-linux-x64` packs as
+       * `cntxt-labs-medha-linux-x64-<version>.tgz`), so a hand-built name reads a file that was
+       * never written and the mode check fails for a reason that has nothing to do with the mode.
+       */
+      const packed = packOut
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.endsWith('.tgz'))
+        .pop();
+      check(
+        'npm reports the tarball it wrote',
+        packed !== undefined,
+        `npm pack said: ${packOut.trim()}`,
+      );
+      if (packed !== undefined) {
+        const tarball = join(sandbox, packed);
+        const mode = programMode(new Uint8Array(readFileSync(tarball)));
+        check(
+          `the packed tarball ships the program as 0755 (found ${mode?.toString(8) ?? 'nothing'})`,
+          mode === 0o755,
+          `read ${tarball}`,
+        );
+      }
+    }
+
+    /*
+     * And the launcher must survive the installs that lose the bit anyway — a permission-stripping
+     * package manager, a copy through an archive, or any version published before this was fixed.
+     * This is the state a 0.5.0 user is actually in, so it is worth proving rather than assuming.
+     */
+    chmodSync(installed, 0o644);
+    const healed = await run(['--version']);
+    check(
+      'it still runs when the executable bit was stripped, and puts the bit back',
+      healed.code === 0 && /^medha \d/.test(healed.out) && (statSync(installed).mode & 0o111) !== 0,
+      healed.out + healed.err,
+    );
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
