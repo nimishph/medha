@@ -79,6 +79,9 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
+    # A pull request only proves the site builds. The github-pages environment accepts deploys from
+    # main alone, so deploying a PR's merge ref is always rejected and fails the PR.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

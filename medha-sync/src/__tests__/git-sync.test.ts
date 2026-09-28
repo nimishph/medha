@@ -284,6 +284,9 @@ describe('GitRefSyncAdapter', () => {
       const seeder = mkdtempSync(join(tmpdir(), 'medha-seeder-'));
       try {
         execFileSync('git', ['init'], { cwd: seeder });
+        // CI runners have no global git identity, and the push writes a commit.
+        execFileSync('git', ['config', 'user.name', 'Medha Seeder'], { cwd: seeder });
+        execFileSync('git', ['config', 'user.email', 'seeder@test.local'], { cwd: seeder });
         execFileSync('git', ['remote', 'add', 'origin', remoteRepo], { cwd: seeder });
         const store = createTestStore();
         await store.open();
