@@ -1,5 +1,5 @@
 /**
- * GitRefSyncAdapter — SyncPort over Git refs (refs/sutra/medha/memory), spec §7.2.
+ * GitRefSyncAdapter — SyncPort over Git refs (refs/medha/memory), spec §7.2.
  *
  * Stores calibrated versioned snapshots (schemaVersion: 1) inside git object storage
  * on dedicated refs without polluting working trees or checking out branches.
@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import {
   type Context,
   CURRENT_MEMORY_SCHEMA_VERSION,
+  InvalidArgumentError,
   type MemorySnapshotV1,
   migrateSnapshot,
   type PullResult,
@@ -23,13 +24,49 @@ import {
 } from '@cntxt-labs/medha-core';
 import { mergeEpisodes } from './merge.ts';
 
-export const DEFAULT_MEDHA_REF = 'refs/sutra/medha/memory';
+export const DEFAULT_MEDHA_REF = 'refs/medha/memory';
 
 /**
- * @deprecated Hard-deprecated. Use DEFAULT_MEDHA_REF ('refs/sutra/medha/memory') instead.
+ * The default ref up to 0.5.x. An adapter on the default ref still *reads* it (pull, peek, status)
+ * so evidence pushed by an older medha is not stranded, but only ever writes {@link DEFAULT_MEDHA_REF}.
+ */
+export const LEGACY_MEDHA_REF = 'refs/sutra/medha/memory';
+
+/**
+ * @deprecated Hard-deprecated. Use DEFAULT_MEDHA_REF ('refs/medha/memory') instead.
  */
 export const DEFAULT_SAGE_REF = 'refs/sutra/sage/memory';
 export const DEFAULT_REMOTE = 'origin';
+
+/**
+ * How the adapter reaches its remote:
+ * - `named`: a remote configured in this repo (`git remote add team <url>`).
+ * - `location`: a path or URL passed directly, which git fetches and pushes without configuring.
+ * - `none`: the default remote is not configured, so sync is local-ref only (not an error).
+ */
+export type RemoteTarget =
+  | { readonly kind: 'named'; readonly remote: string; readonly url: string }
+  | { readonly kind: 'location'; readonly remote: string }
+  | { readonly kind: 'none' };
+
+/** A path or URL rather than a remote name: git remote names cannot contain these. */
+export function isRemoteLocation(remote: string): boolean {
+  return /[/\\:]/.test(remote) || remote.startsWith('.') || remote.startsWith('~');
+}
+
+/** git's own stderr for a failed `runGit`, which is where it says *why* (hook output, rejection). */
+function gitStderr(failure: unknown): string {
+  if (failure instanceof UnexpectedFailureError) {
+    const stderr = failure.context.stderr;
+    if (typeof stderr === 'string' && stderr !== '') return stderr;
+  }
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+/** A fetch of a ref the remote simply does not have yet: nothing to pull, not a failure. */
+function isMissingRemoteRef(stderr: string): boolean {
+  return /couldn't find remote ref/i.test(stderr);
+}
 
 export interface GitExecResult {
   stdout: string;
@@ -49,6 +86,10 @@ export class GitRefSyncAdapter implements SyncPort {
   readonly rootDir: string;
   readonly ref: string;
   readonly remote: string;
+  /** Whether the caller named the remote. An unconfigured *default* remote means local-only. */
+  readonly remoteExplicit: boolean;
+  /** Extra refs read (never written) alongside `ref`: the pre-0.6 default, when on the default. */
+  readonly readRefs: readonly string[];
 
   constructor(options: GitRefSyncOptions) {
     this.store = options.store;
@@ -61,6 +102,28 @@ export class GitRefSyncAdapter implements SyncPort {
     }
     this.ref = options.ref || DEFAULT_MEDHA_REF;
     this.remote = options.remote || DEFAULT_REMOTE;
+    this.remoteExplicit = Boolean(options.remote);
+    this.readRefs = options.ref ? [] : [LEGACY_MEDHA_REF];
+  }
+
+  /**
+   * Resolve `remote` to something git can reach. A path or URL is used as-is; a name must be
+   * configured in this repo. A name the caller passed that is not configured is an error rather than
+   * a silent local-only sync, which is how a path `--remote` used to report `ok` with nothing
+   * pulled.
+   */
+  async resolveRemote(remote = this.remote): Promise<RemoteTarget> {
+    const url = await this.getRemoteUrl(remote);
+    if (url !== null) return { kind: 'named', remote, url };
+    if (isRemoteLocation(remote)) return { kind: 'location', remote };
+    if (this.remoteExplicit) {
+      throw new InvalidArgumentError(
+        'remote',
+        `a git remote configured in this repository (add it with 'git remote add ${remote} <url>'), or a path or URL`,
+        remote,
+      );
+    }
+    return { kind: 'none' };
   }
 
   /** Run a git command safely in rootDir with non-interactive flags. */
@@ -248,7 +311,14 @@ export class GitRefSyncAdapter implements SyncPort {
   async fetchRemoteRef(
     remote = this.remote,
     ref = this.ref,
-  ): Promise<{ ok: boolean; trackingRef: string; commit?: string; error?: string }> {
+  ): Promise<{
+    ok: boolean;
+    trackingRef: string;
+    commit?: string;
+    error?: string;
+    /** The remote does not have `ref` (yet). Not an error for a pull. */
+    missing?: boolean;
+  }> {
     if (ref === DEFAULT_SAGE_REF) {
       // biome-ignore lint/suspicious/noConsole: Hard deprecation warning
       console.warn(
@@ -261,8 +331,11 @@ export class GitRefSyncAdapter implements SyncPort {
       const commit = await this.getRefCommit(trackingRef);
       return { ok: true, trackingRef, ...(commit ? { commit } : {}) };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, trackingRef, error: msg };
+      const stderr = gitStderr(e);
+      if (isMissingRemoteRef(stderr)) {
+        return { ok: true, trackingRef, missing: true };
+      }
+      return { ok: false, trackingRef, error: `git fetch from '${remote}' failed:\n${stderr}` };
     }
   }
 
@@ -276,8 +349,9 @@ export class GitRefSyncAdapter implements SyncPort {
       await this.runGit(['push', remote, pushRefSpec]);
       return { ok: true };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return { ok: false, error: msg };
+      // git's stderr is the reason: a hook's output, `! [rejected] ... (fetch first)`, auth. The
+      // closing "failed to push some refs" line alone says nothing, so pass all of it through.
+      return { ok: false, error: `git push to '${remote}' failed:\n${gitStderr(e)}` };
     }
   }
 
@@ -295,9 +369,37 @@ export class GitRefSyncAdapter implements SyncPort {
       };
     }
 
-    const localCommit = (await this.getRefCommit(this.ref)) || undefined;
-    const remoteCommit = (await this.getRemoteRefCommit(this.remote, this.ref)) || undefined;
-    const remoteUrl = (await this.getRemoteUrl(this.remote)) || undefined;
+    let target: RemoteTarget;
+    try {
+      target = await this.resolveRemote();
+    } catch (failure) {
+      return {
+        state: 'uninitialized',
+        localCount,
+        ref: this.ref,
+        message: gitStderr(failure),
+      };
+    }
+    const remoteName = target.kind === 'none' ? undefined : target.remote;
+    // Before the first push on the current default ref, report the legacy ref's state instead of
+    // 'uninitialized', so an upgrade does not look like the evidence vanished.
+    let ref = this.ref;
+    for (const candidate of [this.ref, ...this.readRefs]) {
+      const hasLocal = (await this.getRefCommit(candidate)) !== null;
+      const hasRemote =
+        remoteName !== undefined && (await this.getRemoteRefCommit(remoteName, candidate)) !== null;
+      if (hasLocal || hasRemote) {
+        ref = candidate;
+        break;
+      }
+    }
+    const localCommit = (await this.getRefCommit(ref)) || undefined;
+    const remoteCommit =
+      remoteName === undefined
+        ? undefined
+        : (await this.getRemoteRefCommit(remoteName, ref)) || undefined;
+    const remoteUrl =
+      target.kind === 'named' ? target.url : target.kind === 'location' ? target.remote : undefined;
 
     if (!localCommit && !remoteCommit) {
       return {
@@ -333,34 +435,59 @@ export class GitRefSyncAdapter implements SyncPort {
       localCount,
       localHead: localCommit,
       remoteHead: remoteCommit,
-      ref: this.ref,
+      ref,
       ...(remoteUrl ? { remoteUrl } : {}),
+      ...(ref === this.ref
+        ? {}
+        : { message: `reading legacy ref ${ref}; the next push writes ${this.ref}` }),
     };
   }
 
   async hasRemote(remote = this.remote): Promise<boolean> {
     try {
-      const url = await this.getRemoteUrl(remote);
-      return url !== null;
+      return (await this.resolveRemote(remote)).kind !== 'none';
     } catch {
       return false;
     }
   }
 
+  /**
+   * Every snapshot this adapter reads: for `ref` and each legacy read ref, the remote's copy when
+   * there is a remote, else the local one. A remote that cannot be reached is an error; a remote
+   * that simply lacks the ref contributes nothing.
+   */
+  private async readSnapshots(): Promise<
+    { ok: true; snapshots: MemorySnapshotV1[] } | { ok: false; error: string }
+  > {
+    let target: RemoteTarget;
+    try {
+      target = await this.resolveRemote();
+    } catch (failure) {
+      return { ok: false, error: gitStderr(failure) };
+    }
+    const snapshots: MemorySnapshotV1[] = [];
+    for (const ref of [this.ref, ...this.readRefs]) {
+      let snapshot: MemorySnapshotV1 | null = null;
+      if (target.kind !== 'none') {
+        const fetched = await this.fetchRemoteRef(target.remote, ref);
+        if (!fetched.ok) {
+          return { ok: false, error: fetched.error ?? `git fetch from '${target.remote}' failed` };
+        }
+        if (!fetched.missing) {
+          snapshot = await this.readSnapshotFromRef(fetched.trackingRef);
+        }
+      }
+      snapshot ??= await this.readSnapshotFromRef(ref);
+      if (snapshot) snapshots.push(snapshot);
+    }
+    return { ok: true, snapshots };
+  }
+
   async peek(_context?: Context): Promise<MemorySnapshotV1 | null> {
     const isGit = await this.isGitRepo();
     if (!isGit) return null;
-
-    const remoteExists = await this.hasRemote(this.remote);
-    if (remoteExists) {
-      await this.fetchRemoteRef();
-    }
-
-    const remoteRef = this.getTrackingRef(this.remote, this.ref);
-    return (
-      (remoteExists ? await this.readSnapshotFromRef(remoteRef) : null) ||
-      (await this.readSnapshotFromRef(this.ref))
-    );
+    const read = await this.readSnapshots();
+    return read.ok ? (read.snapshots[0] ?? null) : null;
   }
 
   async pull(_context?: Context): Promise<PullResult> {
@@ -377,39 +504,32 @@ export class GitRefSyncAdapter implements SyncPort {
       };
     }
 
-    const remoteExists = await this.hasRemote(this.remote);
-    if (remoteExists) {
-      // Attempt fetch from remote if configured (errors are captured in result)
-      await this.fetchRemoteRef();
-    }
-
-    // Read remote ref or local ref
-    const remoteRef = this.getTrackingRef(this.remote, this.ref);
-    const snapshot =
-      (remoteExists ? await this.readSnapshotFromRef(remoteRef) : null) ||
-      (await this.readSnapshotFromRef(this.ref));
-
-    if (!snapshot) {
+    const read = await this.readSnapshots();
+    if (!read.ok) {
       return {
-        ok: true,
+        ok: false,
         updated: false,
         pulledCount: 0,
         localTotal: localStates.length,
+        error: read.error,
       };
     }
 
-    // Merge episodes if available
+    // Merge episodes from every snapshot read (the current ref, plus the legacy one on upgrade).
+    const localEpisodes = await this.store.episodes();
+    let mergedEpisodes = localEpisodes;
+    for (const snapshot of read.snapshots) {
+      if (snapshot.episodes && snapshot.episodes.length > 0) {
+        mergedEpisodes = mergeEpisodes(mergedEpisodes, snapshot.episodes);
+      }
+    }
     let updated = false;
     let pulledCount = 0;
-    if (snapshot.episodes && snapshot.episodes.length > 0) {
-      const localEpisodes = await this.store.episodes();
-      const mergedEpisodes = mergeEpisodes(localEpisodes, snapshot.episodes);
-      if (mergedEpisodes.length !== localEpisodes.length) {
-        await this.store.replaceLog(mergedEpisodes);
-        await this.store.rebuild();
-        updated = true;
-        pulledCount = mergedEpisodes.length - localEpisodes.length;
-      }
+    if (mergedEpisodes.length !== localEpisodes.length) {
+      await this.store.replaceLog(mergedEpisodes);
+      await this.store.rebuild();
+      updated = true;
+      pulledCount = mergedEpisodes.length - localEpisodes.length;
     }
 
     const updatedStates = await this.store.list();
@@ -440,8 +560,13 @@ export class GitRefSyncAdapter implements SyncPort {
         episodes: episodes.length > 0 ? episodes : undefined,
       };
 
-      const localCommit = await this.getRefCommit(this.ref);
-      const remoteExists = await this.hasRemote(this.remote);
+      const target = await this.resolveRemote();
+      const remoteExists = target.kind !== 'none';
+      // First push on the default ref after an upgrade continues the legacy ref's history.
+      let localCommit = await this.getRefCommit(this.ref);
+      for (const legacy of this.readRefs) {
+        localCommit ??= await this.getRefCommit(legacy);
+      }
       const trackingRef = this.getTrackingRef(this.remote, this.ref);
       const remoteCommit = remoteExists ? await this.getRefCommit(trackingRef) : null;
       const parents: string[] = [];
@@ -462,7 +587,7 @@ export class GitRefSyncAdapter implements SyncPort {
           return {
             ok: false,
             pushedCount: 0,
-            error: `Failed to push to remote ref '${this.remote}': ${pushRes.error ?? 'unknown error'}`,
+            error: pushRes.error ?? `git push to '${this.remote}' failed`,
           };
         }
       }
@@ -476,7 +601,7 @@ export class GitRefSyncAdapter implements SyncPort {
       return {
         ok: false,
         pushedCount: 0,
-        error: err instanceof Error ? err.message : String(err),
+        error: gitStderr(err),
       };
     }
   }

@@ -4,10 +4,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_MEDHA_REF, DEFAULT_SAGE_REF, GitRefSyncAdapter } from '../index.ts';
+import {
+  DEFAULT_MEDHA_REF,
+  DEFAULT_SAGE_REF,
+  GitRefSyncAdapter,
+  LEGACY_MEDHA_REF,
+} from '../index.ts';
 import { createTestStore } from './test-store.ts';
 
 describe('GitRefSyncAdapter', () => {
@@ -160,7 +165,7 @@ describe('GitRefSyncAdapter', () => {
     await store.open();
     const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo });
     const res = await adapter.fetchRemoteRef('origin', DEFAULT_MEDHA_REF);
-    expect(res.trackingRef).toBe('refs/remotes/origin/sutra/medha/memory');
+    expect(res.trackingRef).toBe('refs/remotes/origin/medha/memory');
   });
 
   it('pulls from a path remote without invalid refspec errors', async () => {
@@ -269,4 +274,159 @@ describe('GitRefSyncAdapter', () => {
       rmSync(remoteRepo, { recursive: true, force: true });
     }
   }, 20000);
+
+  // GitHub #7: the scenarios below each used to report `ok` while doing nothing, or hid git's reason.
+  describe('remotes given as a path or URL, and failure reporting', () => {
+    let remoteRepo: string;
+
+    /** A bare repo holding one pushed entity on `ref`, pushed through a configured remote. */
+    async function seedBareRemote(id: string, ref?: string): Promise<void> {
+      const seeder = mkdtempSync(join(tmpdir(), 'medha-seeder-'));
+      try {
+        execFileSync('git', ['init'], { cwd: seeder });
+        execFileSync('git', ['remote', 'add', 'origin', remoteRepo], { cwd: seeder });
+        const store = createTestStore();
+        await store.open();
+        await store.append({
+          key: { namespace: '', kind: 'rule', id },
+          at: 1000,
+          type: 'signal',
+          spec: { name: 'APPLY', value: 1.0, countsAsTrial: true, countsAsSuccess: true },
+          ensure: true,
+        });
+        const adapter = new GitRefSyncAdapter({ store, rootDir: seeder, ref });
+        expect((await adapter.push({ now: 1000 })).ok).toBe(true);
+      } finally {
+        rmSync(seeder, { recursive: true, force: true });
+      }
+    }
+
+    beforeEach(() => {
+      remoteRepo = mkdtempSync(join(tmpdir(), 'medha-bare-remote-'));
+      execFileSync('git', ['init', '--bare'], { cwd: remoteRepo });
+    });
+
+    afterEach(() => {
+      rmSync(remoteRepo, { recursive: true, force: true });
+    });
+
+    it('pulls from an unconfigured path remote', async () => {
+      await seedBareRemote('from-path');
+      const store = createTestStore();
+      await store.open();
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, remote: remoteRepo });
+
+      const pulled = await adapter.pull({ now: 2000 });
+      expect(pulled).toMatchObject({ ok: true, updated: true, pulledCount: 1 });
+      expect((await store.list())[0]?.key.id).toBe('from-path');
+    }, 20000);
+
+    it('pushes to an unconfigured path remote', async () => {
+      const store = createTestStore();
+      await store.open();
+      await store.append({
+        key: { namespace: '', kind: 'rule', id: 'pushed-by-path' },
+        at: 1000,
+        type: 'signal',
+        spec: { name: 'APPLY', value: 1.0, countsAsTrial: true, countsAsSuccess: true },
+        ensure: true,
+      });
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, remote: remoteRepo });
+      expect((await adapter.push({ now: 1000 })).ok).toBe(true);
+      const onRemote = execFileSync('git', ['rev-parse', DEFAULT_MEDHA_REF], { cwd: remoteRepo })
+        .toString()
+        .trim();
+      expect(onRemote).toMatch(/^[0-9a-f]{40}$/);
+    }, 20000);
+
+    it('fails, naming the problem, for a remote name that is not configured', async () => {
+      const store = createTestStore();
+      await store.open();
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, remote: 'team' });
+
+      const pulled = await adapter.pull({ now: 2000 });
+      expect(pulled.ok).toBe(false);
+      expect(pulled.error).toContain('git remote add team <url>');
+      const pushed = await adapter.push({ now: 2000 });
+      expect(pushed.ok).toBe(false);
+      expect(pushed.error).toContain('git remote add team <url>');
+    });
+
+    it('fails for a path remote that is not a repository instead of reporting ok', async () => {
+      const store = createTestStore();
+      await store.open();
+      const missing = join(remoteRepo, 'does-not-exist.git');
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, remote: missing });
+
+      const pulled = await adapter.pull({ now: 2000 });
+      expect(pulled.ok).toBe(false);
+      expect(pulled.error).toContain('git fetch from');
+    }, 20000);
+
+    it('a remote that lacks the ref yet is an empty pull, not a failure', async () => {
+      const store = createTestStore();
+      await store.open();
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo, remote: remoteRepo });
+      expect(await adapter.pull({ now: 2000 })).toMatchObject({ ok: true, pulledCount: 0 });
+    }, 20000);
+
+    it("a push blocked by a hook reports git's own output", async () => {
+      execFileSync('git', ['remote', 'add', 'origin', remoteRepo], { cwd: tempRepo });
+      const hook = join(tempRepo, '.git', 'hooks', 'pre-push');
+      writeFileSync(hook, '#!/bin/sh\necho "BLOCKED by policy hook" >&2\nexit 1\n');
+      chmodSync(hook, 0o755);
+
+      const store = createTestStore();
+      await store.open();
+      await store.append({
+        key: { namespace: '', kind: 'rule', id: 'blocked' },
+        at: 1000,
+        type: 'signal',
+        spec: { name: 'APPLY', value: 1.0, countsAsTrial: true, countsAsSuccess: true },
+        ensure: true,
+      });
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo });
+      const pushed = await adapter.push({ now: 1000 });
+      expect(pushed.ok).toBe(false);
+      expect(pushed.error).toContain("git push to 'origin' failed");
+      expect(pushed.error).toContain('BLOCKED by policy hook');
+      expect(pushed.error).not.toContain('Unexpected failure');
+    }, 20000);
+
+    it('reads evidence an older medha pushed to the legacy ref, and writes the new one', async () => {
+      await seedBareRemote('from-legacy', LEGACY_MEDHA_REF);
+      execFileSync('git', ['remote', 'add', 'origin', remoteRepo], { cwd: tempRepo });
+      const store = createTestStore();
+      await store.open();
+      const adapter = new GitRefSyncAdapter({ store, rootDir: tempRepo });
+      expect(adapter.ref).toBe('refs/medha/memory');
+
+      const status = await adapter.status();
+      expect(status.ref).toBe(LEGACY_MEDHA_REF);
+      expect(status.state).toBe('behind');
+
+      expect(await adapter.pull({ now: 2000 })).toMatchObject({ ok: true, pulledCount: 1 });
+      expect((await store.list())[0]?.key.id).toBe('from-legacy');
+
+      expect((await adapter.push({ now: 3000 })).ok).toBe(true);
+      const heads = execFileSync('git', ['for-each-ref', '--format=%(refname)'], {
+        cwd: remoteRepo,
+      }).toString();
+      expect(heads).toContain(DEFAULT_MEDHA_REF);
+      expect((await adapter.status()).ref).toBe(DEFAULT_MEDHA_REF);
+    }, 20000);
+
+    it('an explicit ref does not read the legacy ref', async () => {
+      await seedBareRemote('legacy-only', LEGACY_MEDHA_REF);
+      const store = createTestStore();
+      await store.open();
+      const adapter = new GitRefSyncAdapter({
+        store,
+        rootDir: tempRepo,
+        remote: remoteRepo,
+        ref: 'refs/team/memory',
+      });
+      expect(await adapter.pull({ now: 2000 })).toMatchObject({ ok: true, pulledCount: 0 });
+    }, 20000);
+  });
 });
