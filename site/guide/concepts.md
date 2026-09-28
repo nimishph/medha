@@ -111,7 +111,7 @@ probation ──► active ──► trusted
 | `probation` | Seen, but not yet enough evidence to be useful. Where everything starts. |
 | `active` | trust ≥ 0.25 |
 | `trusted` | trust ≥ 0.6, **at least 5 uses**, and a passing guard |
-| `quarantined` | A guard failed, or the entity is drifting away from its own baseline. |
+| `quarantined` | A guard failed, or the entity is drifting **below** its own baseline. Drifting above it is out-performing, and does not quarantine. |
 | `retired` | Repeatedly rejected, or trust sustained below 0.1 over enough uses. |
 
 Drift down the graph is a normal outcome, not an error: a rule that used to be applied reliably and

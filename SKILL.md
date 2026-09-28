@@ -23,6 +23,30 @@ MCP server (register in `.mcp.json`): `{ "mcpServers": { "medha": { "command": "
 An entity is addressed by `namespace` (default empty), `kind` (`rule` | `recipe` | `tool`, default
 `rule`) and `id`. New entities start on **probation**.
 
+## Per-kind policy (kindSpecs)
+
+A kind can carry its own policy. Set it at init with `medha init --config <file>`:
+
+```json
+{ "kindSpecs": [
+  { "name": "lint", "thresholds": { "active": 0.15, "trusted": 0.4, "minUsesForTrusted": 3 },
+    "recency": { "halfLifeDays": 20 }, "evidenceWeighting": "signal-value" },
+  { "name": "rule", "signalLimits": { "maxSuccessesPerAuthor": 3 },
+    "decisionPolicy": { "requireHumanFor": ["apply"] } }
+] }
+```
+
+- Allowed keys: `name`, `description`, `thresholds` (`active`, `trusted`, `minUsesForTrusted`,
+  `retiredTrustThreshold`, `minUsesForRetired`, `unguardedCeiling`), `recency` (`halfLifeDays`,
+  `floor`), `evidenceWeighting` (`count` | `signal-value`), `signalLimits` (`minIntervalMs`,
+  `maxSuccessesPerAuthor`), `decisionPolicy` (`requireHumanFor`). An unknown key is an error.
+- A spec for a new kind registers it too; built-in kinds stay. Omitted fields keep their defaults.
+- After init, specs live in `.medha/config.json` under `registries.kindSpecs`, and a new kind's
+  name must also be listed in `registries.kinds`. Check with `medha maintain preflight`.
+- `decisionPolicy.requireHumanFor` means **a human must run that command**. If you get
+  `CORE_PERMISSION_DENIED`, do not retry with a `human:` author. You can set that label yourself,
+  so passing it proves nothing. Escalate to a human instead.
+
 ## Workflow
 
 1. **Read** before relying on a rule: MCP `hints` (pass `compact: true` for cheap output) or
@@ -35,6 +59,32 @@ An entity is addressed by `namespace` (default empty), `kind` (`rule` | `recipe`
    Without a passing guard, trust is capped at 0.5 — usage alone never makes a rule `trusted`.
 5. **Explain**: `medha explain-threshold --id <id>` lists each threshold with ok/no and the numbers.
 6. **Preview** with `simulate` (persists nothing) before recording a consequential signal.
+
+## Branching a rule (only when a rule is only good sometimes)
+
+A rule that holds in one situation and not another belongs in a decision tree, not in a single
+trust number. `record_decision` mints a branch and returns its `caseId`:
+
+```
+record_decision { id, condition: "in CI",          decision: { type: "apply" } }
+record_decision { id, condition: "on a laptop",    decision: { type: "ignore" }, parentId: <first> }
+```
+
+Then attribute evidence to the branch, not just the entity:
+
+```
+record_signal { id, signal: "APPLY", caseId: <branch> }
+```
+
+Read a branch's own trust with `show_entity` — `decisionTree` lists each branch with its `parentId`,
+condition, evidence and status. Branch evidence is *in addition to* the entity's aggregate, never a
+replacement for it, so an entity can be `probation` while one branch is `trusted`.
+
+- `caseId` must be a real branch of that entity; a typo is rejected, not filed against the entity.
+- Editing a branch by `caseId` without `parentId` leaves it exactly where it is. Pass `parentId` to
+  move it, or `detach: true` to make it a root.
+- Two branches with the same condition under the same parent are rejected — the same condition once
+  under each of two roots is fine.
 
 ## Lifecycle
 

@@ -115,6 +115,32 @@ Report the result with `medha guard --ok` or `--fail`.
 Entity state is a fold over that log, so it can always be rebuilt, audited, or corrected
 (`medha retract`, `medha remove-episode`).
 
+**Decision tree.** An entity can carry a tree of *branches*, each a condition plus a decision
+(`apply`, `ignore`, or a probability). Branches earn their own trust from their own evidence, which
+is what you want when a rule only holds in one situation: "always skip migration backups" can be
+excellent advice in CI and wrong on a laptop.
+
+```sh
+medha decision --id migration-notes --condition "in CI" --apply
+medha decision --id migration-notes --condition "on a laptop" --ignore --parent <case-id>
+```
+
+Evidence is then attributed to a branch as well as to the entity, so a branch can read `trusted`
+while the entity as a whole reads `probation`:
+
+```sh
+medha record --id migration-notes --signal APPLY --case-id <case-id>
+```
+
+`caseId` must name a branch of that entity — a typo is rejected rather than silently filed against
+the entity. Attributing evidence to a branch never *replaces* the entity-level fold; it is a second
+view of the same signal.
+
+Editing a branch (`medha decision --id .. --condition .. --case-id <case-id>`) changes its decision
+and leaves it where it is. Pass `--parent <case-id>` to move it, or `--detach` to promote it to the
+top level. Writes that name an unknown parent, a descendant of themselves, or a condition a sibling
+already uses are rejected.
+
 ### How trust is computed
 
 ```
@@ -163,7 +189,8 @@ Then copy [`SKILL.md`](SKILL.md) to
 | `hints` | Batch-fetch trust hints for the entities you are about to rely on. Returns `{ hints, unknown }`; treat `unknown` as probation. |
 | `list_entities` | Paginated search by kind, status, namespace or drift. |
 | `show_entity` | Full detail for one entity: components, temporal state, recent episodes. |
-| `record_signal` | Record `APPLY`, `REJECT_RULE`, `SKIP`, and so on. Returns `recorded: false` for an unknown entity unless `ensure` is set. |
+| `record_signal` | Record `APPLY`, `REJECT_RULE`, `SKIP`, and so on. Returns `recorded: false` for an unknown entity unless `ensure` is set. Pass `caseId` to also teach a decision-tree branch. |
+| `record_decision` | Create or edit a branch of an entity's decision tree. Pass `parentId` to nest it, or `detach: true` to promote it to the top level. Returns the minted `caseId`. |
 | `report_guard` | Record a guard result. |
 | `propose` | Submit a candidate entity. |
 | `drift` | List drifting entities. |
@@ -186,8 +213,56 @@ host can inject the most trusted guidance without overrunning its context.
 
 - **Kinds and signals.** Register your own in `.medha/config.json`. A kind can set its own trust
   thresholds and recency half-life, and can weight evidence by a signal's value (for example, a
-  timeout counts less against a tool than a crash).
+  timeout counts less against a tool than a crash). See [Kind specs](#kind-specs) below.
 - **Weight updaters.** Swap how evidence moves trust with `medha updater list` and `medha updater fork <name>`, which scaffolds a custom one.
+
+### Kind specs
+
+A **kind spec** gives one kind its own policy. Pass them to `medha init --config <file>`:
+
+```json
+{
+  "kindSpecs": [
+    {
+      "name": "lint",
+      "description": "linter rules: frequent, cheap evidence",
+      "thresholds": { "active": 0.15, "trusted": 0.4, "minUsesForTrusted": 3 },
+      "recency": { "halfLifeDays": 20, "floor": 0.2 },
+      "evidenceWeighting": "signal-value"
+    },
+    {
+      "name": "rule",
+      "signalLimits": { "maxSuccessesPerAuthor": 3 },
+      "decisionPolicy": { "requireHumanFor": ["apply"] }
+    }
+  ]
+}
+```
+
+```sh
+medha init --config medha.config.json
+```
+
+`--config` adds to the built-in kinds (`rule`, `recipe`, `tool`) rather than replacing them. A spec
+naming a new kind (`lint` above) also registers it, and a spec naming a built-in kind (`rule`) sets
+that kind's policy. Every field except `name` is optional, and a field you leave out keeps its
+default.
+
+| Field | Keys (default) | What it does |
+|---|---|---|
+| `thresholds` | `active` (0.25), `trusted` (0.6), `minUsesForTrusted` (5), `retiredTrustThreshold` (0.1), `minUsesForRetired` (3), `unguardedCeiling` (0.5) | Where the lifecycle transitions sit for this kind. `unguardedCeiling` caps trust while no guard has passed; no threshold lets an unguarded entity become `trusted`. |
+| `recency` | `halfLifeDays` (45), `floor` (0.3) | How fast old evidence fades, and the least it fades to. |
+| `evidenceWeighting` | `"count"` (default) or `"signal-value"` | Count each signal as one trial, or weight it by the signal's value. |
+| `signalLimits` | `minIntervalMs`, `maxSuccessesPerAuthor` (both off) | Limit how much one author can raise trust. Negative evidence is never limited. |
+| `decisionPolicy` | `requireHumanFor`: `"apply"` or a list of `apply`/`ignore`/`probability` (off) | Decision-tree branches of these types need a `human:` author. This is a label the caller sets, not verification: it stops an agent that follows instructions, not one that lies. |
+
+Config files are strict: an unknown key, such as `kindPolicies` or `thresholds.bogus`, is refused with
+the list of allowed keys, so a typo cannot quietly leave a policy switched off.
+
+To change specs after `init`, edit `.medha/config.json`. There they live under
+`registries.kindSpecs`, and a new kind's name must also be added to `registries.kinds`. Run
+`medha maintain preflight` to check the result. [Extending medha](https://nimishph.github.io/medha/guide/extending)
+covers kinds, signals and updaters in depth.
 
 ## Maintain it
 

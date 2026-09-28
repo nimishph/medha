@@ -116,7 +116,7 @@ medha sync status
 ```
 Sync Status: UNINITIALIZED
   Local entities:  2
-  Target ref/file: refs/sutra/medha/memory
+  Target ref/file: refs/medha/memory
   Note:            Directory is not a git repository
 ```
 
@@ -130,6 +130,11 @@ you have extended the model, that is handled for you.
 The reason this is not just `git commit` is merge semantics. The log is append-only, and medha's merge
 resolves concurrent appends; git would hand you a textual conflict in a store file and leave you to
 work it out. Using a dedicated ref keeps the evidence channel separate from the code channel.
+
+`--remote` takes a configured remote name (`origin`, `team`) or a path or URL to a repository
+directly. A name that is not configured is an error rather than a local-only sync. The ref is
+`refs/medha/memory`; medha 0.5 and earlier used `refs/sutra/medha/memory`, which `pull` and
+`status` still read, so an upgrade does not strand evidence pushed by an older version.
 
 See [the sync commands](/cli) for the full set of flags.
 
@@ -177,12 +182,13 @@ emergency repairs.
 
 ```sh
 medha retract --seq 12 --reason "recorded against the wrong entity"   # mask it
-medha remove-episode --seq 13                                        # drop it
+medha remove-episode --seq 13 --author human:you --reason "duplicate"  # drop it
 ```
 
 `retract` appends a masking episode and recomputes; `remove-episode` takes the entry out of the log
-entirely and resequences what follows. Both are themselves recorded, so the audit trail shows that a
-correction happened.
+entirely and resequences what follows. Both leave a trace: a retraction is itself an episode, and a
+removal is kept in the store's `audit:removedEpisodes` meta (who, why, when, and the episode that was
+removed), which `maintain backup` carries along.
 
 Over MCP these are the `retract_episode` and `remove_episode` tools.
 
