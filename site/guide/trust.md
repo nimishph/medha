@@ -76,7 +76,9 @@ ago scores lower than one that was reliably true last month. Old wins fade.
 
 The floor matters as much as the decay. Trust is not allowed to decay to nothing — an entity that was
 genuinely good and simply went quiet should stay moderately trusted rather than being erased. Time
-should lower a score, not zero it.
+should lower a score, not zero it. For the same reason age never *retires* an entity: retirement
+needs repeated evidence of failure, so a rule with one old success and nothing since stays on
+probation with a faded score.
 
 ### Durability — *how long it has held up*
 
@@ -139,8 +141,13 @@ report anything, because a single signal is not a trend.
 
 Drift and trust are complementary, and drift can catch you earlier. A rule's lifetime success rate
 can still look healthy while its last five applications were all rejections. Trust degrades slowly;
-drift notices immediately. When drift is flagged the entity is quarantined, and `medha drift` lists
-them most-drifted first.
+drift notices immediately. `medha drift` lists drifting entities most-drifted first, in either
+direction.
+
+Only drift **downward** quarantines. An entity whose recent behaviour is *better* than its baseline
+— a run of straight successes walks the average up past the threshold within about 16 signals — is
+reported as drifting but keeps its status: out-performing the prior is evidence for trust, not
+against it.
 
 ## Everything is derived, nothing is asserted
 

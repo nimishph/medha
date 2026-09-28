@@ -35,8 +35,13 @@ and it is the difference between an agent that uses medha deliberately and one t
 | `simulate` | Preview a signal's effect. Persists nothing. |
 | `status` | Engine health: preflight integrity, status distribution, drift count. |
 | `retract_episode` | Retract an erroneous episode by sequence number, appending a masking episode. |
-| `remove_episode` | Physically remove an episode from the log and resequence the rest. |
+| `remove_episode` | Hard-delete an episode from the log and resequence the rest. Requires `author` and `reason`, which are kept in the store's audit trail with the removed episode. |
 | `pack_context` | Pack active and probation entities into a context window within a token budget. |
+
+Every tool declares MCP annotations, so a client can tell reads from writes: `hints`, `list_entities`,
+`show_entity`, `drift`, `simulate`, `status` and `pack_context` are read-only; `remove_episode` is the
+only destructive one, and a client that confirms destructive tools will ask before it runs. The
+other writes append to the log.
 
 ## The loop that matters
 
