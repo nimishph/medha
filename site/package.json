@@ -1,0 +1,22 @@
+{
+  "name": "@cntxt-labs/medha-site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Public documentation site for medha. User-facing surface only: see README.md in this directory for the do-not-publish list.",
+  "scripts": {
+    "sync": "node scripts/sync-content.mjs",
+    "gen:cli": "bun run scripts/gen-cli-ref.ts",
+    "predev": "npm run sync && bun run gen:cli",
+    "dev": "vitepress dev",
+    "prebuild": "npm run sync && bun run gen:cli",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
+  }
+}

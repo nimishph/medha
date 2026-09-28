@@ -8,7 +8,8 @@
       "!**/dist",
       "!examples",
       "!docs/spec/vectors",
-      "!**/.beads"
+      "!**/.beads",
+      "!site"
     ]
   },
   "formatter": {

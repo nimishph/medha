@@ -24,7 +24,10 @@
     "build": "bun run tooling/package-release.ts",
     "smoke": "bun run tooling/smoke-package.ts && bun run tooling/smoke-npm.ts",
     "changelog": "git-cliff -o CHANGELOG.md",
-    "changelog:preview": "git-cliff --unreleased"
+    "changelog:preview": "git-cliff --unreleased",
+    "docs:dev": "npm --prefix site run dev",
+    "docs:build": "npm --prefix site run build",
+    "docs:preview": "npm --prefix site run preview"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
