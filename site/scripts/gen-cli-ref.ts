@@ -60,7 +60,15 @@ function resolveSubCommands(node: CommandNode): Promise<Record<string, CommandNo
 }
 
 function escapePipes(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim();
+  return escapeAngles(text.replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim());
+}
+
+/**
+ * VitePress compiles each page as a Vue template, so a bare `<dir>` in a table cell is read as an
+ * unclosed element and fails the build. Placeholders are text, so write them as entities.
+ */
+function escapeAngles(text: string): string {
+  return text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Render one argument as the form a user would actually type. */
@@ -81,7 +89,7 @@ function renderFlag(name: string, arg: ArgDef): string {
   // citty renders the placeholder as the arg name, and the enum's options for an enum
   // (`--dir=<dir>`, `--store=<sqlite|file|memory>`); mirror that so the table matches `--help`.
   const hint = arg.type === 'enum' && arg.options ? arg.options.join('\\|') : name;
-  return `${label} <${hint}>`;
+  return `${label} ${escapeAngles(`<${hint}>`)}`;
 }
 
 function renderDefault(arg: ArgDef): string {
@@ -163,7 +171,7 @@ if (import.meta.main === true) {
   // path aliases, which node cannot load.
   const { commands } = await import('../../cli/src/commands.ts');
   const markdown = await renderCommandTree(commands as unknown as CommandNode);
-  await mkdir(OUTPUT, { recursive: true });
+  await mkdir(new URL('./', OUTPUT), { recursive: true });
   await writeFile(OUTPUT, markdown, 'utf8');
   console.log(`wrote ${OUTPUT.pathname}`);
 }
