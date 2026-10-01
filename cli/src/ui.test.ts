@@ -303,7 +303,7 @@ describe('medha ui dashboard & report', () => {
           },
         ],
       },
-      version: '0.7.0',
+      version: '0.7.1',
       home: '/test/home',
     });
 

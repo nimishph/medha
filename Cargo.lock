@@ -276,7 +276,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "medha"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "medha-core",
  "medha-store",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "medha-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap",
  "medha",
@@ -301,7 +301,7 @@ dependencies = [
 
 [[package]]
 name = "medha-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "medha-napi"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "medha-core",
  "napi",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "medha-store"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "medha-core",
  "rusqlite",
@@ -334,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "medha-sync"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "medha-core",
  "medha-store",

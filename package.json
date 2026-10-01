@@ -21,7 +21,7 @@
     "test": "bun test",
     "spec:check": "python docs/spec/vectors/generate.py --check",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
-    "build": "bun run tooling/package-release.ts --rust",
+    "build": "bun run tooling/package-release.ts",
     "build:ts": "bun run tooling/package-release.ts",
     "build:rust": "cargo build --release -p medha-cli --bin medha",
     "build:napi": "cargo build --release -p medha-napi",
@@ -44,5 +44,5 @@
     "name": "nimishph",
     "url": "https://github.com/nimishph"
   },
-  "version": "0.7.0"
+  "version": "0.7.1"
 }

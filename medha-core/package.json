@@ -1,6 +1,6 @@
 {
   "name": "@cntxt-labs/medha-core",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "type": "module",
   "description": "Shared foundations: typed errors, limits and pagination conventions.",
