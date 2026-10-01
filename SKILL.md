@@ -43,7 +43,7 @@ You record evidence; **you** decide what to do with it.
 
 - **Fast Inner Loop**: Read `hints` (or `medha show`) before applying rules. Treat unknown entities as `probation`.
 - **Slow Outer Loop**: Report ground truth as events occur (`record_signal`, `report_guard`).
-- **Trust Formula**: $T = \min(\text{ceiling}, L \times G \times R \times D)$. Usage alone never exceeds 0.85; a passing guard is required to achieve `trusted`.
+- **Trust Formula**: $T = \min(\text{ceiling}, L \times G \times R \times D)$. Usage alone never exceeds 0.50 (customizable up to 0.85); a passing guard is required to achieve `trusted`.
 
 ## Setup
 
@@ -85,7 +85,8 @@ A kind can carry its own policy. Set it at init with `medha init --config <file>
   so passing it proves nothing. Escalate to a human instead.
 
 ## Workflow
-
+ 
+0. **Understand on demand**: Use MCP `primer` or `medha primer [topic]` for focused, token-frugal guidance on topics (`overview`, `mental-model`, `signals`, `guards`, `decisions`, `drift`, `config`, `sync`).
 1. **Read** before relying on a rule: MCP `hints` (pass `compact: true` for cheap output) or
    `medha show --id <id>`. `hints` returns `{ hints, unknown }` — treat `unknown` keys as probation.
 2. **Propose** a new rule: `propose` / `medha propose --id <id> --source <who> [--text ..]`.

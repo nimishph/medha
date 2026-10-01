@@ -34,8 +34,8 @@ Core philosophy: **Medha records evidence; you decide what to do with it.**
 - \`medha sync status|pull|push\` — Synchronize memory across git refs or shared files.
 - \`medha ui\` — Launch local real-time web dashboard.
 - \`medha primer [topic]\` — Read token-frugal agent guidance on a specific topic.
-- \`medha docs\` — Launch local documentation reader on http://localhost:3333.
-- \`medha issue [title]\` — Prepare prefilled GitHub issue with sanitized diagnostics.`,
+- \`medha issue [title]\` — Prepare prefilled GitHub issue with sanitized diagnostics.
+- Documentation: [nimishph.github.io/medha](https://nimishph.github.io/medha/) (or \`bun run docs:dev\` locally).`,
   },
 
   'mental-model': {

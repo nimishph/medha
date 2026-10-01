@@ -7,6 +7,7 @@ import { bindEnvironment, type Environment } from './environment.ts';
 import { runInit } from './init.ts';
 import { runReport } from './report.ts';
 import { generateDashboardHtml, startUiServer, type UiServerHandle } from './ui.ts';
+import { VERSION } from './version.ts';
 
 const NOW = 1_700_000_000_000;
 
@@ -303,7 +304,7 @@ describe('medha ui dashboard & report', () => {
           },
         ],
       },
-      version: '0.7.1',
+      version: VERSION,
       home: '/test/home',
     });
 

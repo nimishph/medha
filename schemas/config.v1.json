@@ -113,41 +113,41 @@
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.85,
-                    "description": "Trust score threshold to attain Trusted status (default 0.85)."
+                    "default": 0.6,
+                    "description": "Trust score threshold to attain Trusted status (default 0.60)."
                   },
                   "active": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.5,
-                    "description": "Trust score threshold to attain Active status (default 0.50)."
+                    "default": 0.25,
+                    "description": "Trust score threshold to attain Active status (default 0.25)."
                   },
                   "unguardedCeiling": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.85,
-                    "description": "Maximum trust score an unguarded entity can achieve (default 0.85)."
+                    "default": 0.5,
+                    "description": "Maximum trust score an unguarded entity can achieve (default 0.50)."
                   },
                   "minUsesForTrusted": {
                     "type": "integer",
                     "minimum": 1,
-                    "default": 3,
-                    "description": "Minimum trial count before an entity can become Trusted."
+                    "default": 5,
+                    "description": "Minimum trial count before an entity can become Trusted (default 5)."
                   },
                   "minUsesForRetired": {
                     "type": "integer",
                     "minimum": 1,
-                    "default": 5,
-                    "description": "Minimum trial count before low trust triggers retirement."
+                    "default": 3,
+                    "description": "Minimum trial count before low trust triggers retirement (default 3)."
                   },
                   "retiredTrustThreshold": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.2,
-                    "description": "Trust score below which an entity is retired (default 0.20)."
+                    "default": 0.1,
+                    "description": "Trust score below which an entity is retired (default 0.10)."
                   }
                 }
               },
@@ -159,23 +159,23 @@
                   "halfLifeDays": {
                     "type": "number",
                     "minimum": 1,
-                    "default": 30,
-                    "description": "Half-life in days for exponential recency decay (default 30)."
+                    "default": 45,
+                    "description": "Half-life in days for exponential recency decay (default 45)."
                   },
                   "floor": {
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1,
-                    "default": 0.2,
-                    "description": "Floor below which recency factor will not decay (default 0.20)."
+                    "default": 0.3,
+                    "description": "Floor below which recency factor will not decay (default 0.30)."
                   }
                 }
               },
               "evidenceWeighting": {
                 "type": "string",
-                "enum": ["unit", "signal-value"],
-                "default": "unit",
-                "description": "How trials and successes are accrued: 'unit' (+1 per event) or 'signal-value' (weighted by signal value)."
+                "enum": ["count", "signal-value"],
+                "default": "count",
+                "description": "How trials and successes are accrued: 'count' (+1 per event) or 'signal-value' (weighted by signal value)."
               },
               "signalLimits": {
                 "type": "object",

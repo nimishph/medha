@@ -63,9 +63,9 @@ Most memory tools store unstructured chat history or flat key-value assertions. 
   $$T = \min\big(\text{ceiling}, L \times G \times R \times D\big)$$
   - **$L$ (Wilson Lower Bound)**: 95% confidence interval on success rate $k/n$. Protects against small-sample overconfidence ($2/2 \ne 200/200$).
   - **$G$ (Guard Factor)**: 1.0 if verified by test/AST guard; penalized if failing or unverified.
-  - **$R$ (Recency Decay)**: Exponential decay based on time elapsed since last use (default 30-day half-life, floor 0.20).
+  - **$R$ (Recency Decay)**: Exponential decay based on time elapsed since last use (default 45-day half-life, floor 0.30).
   - **$D$ (Durability Factor)**: Logarithmic bonus for rules validated across multiple git commits, branches, or weeks.
-  - **Ceiling**: Unguarded entities cannot exceed 0.85, preventing unverified heuristics from becoming `trusted`.
+  - **Ceiling**: Unguarded entities cannot exceed 0.50 (customizable per kind up to 0.85), preventing unverified heuristics from becoming `trusted`.
 
 ## Install
 
@@ -251,11 +251,13 @@ host can inject the most trusted guidance without overrunning its context.
 
 ## Inspect and share
 
-- **`medha ui`** launches a local web dashboard over the store.
+- **`medha primer [topic]`** reads token-frugal agent guidance on specific topics (`overview`, `mental-model`, `signals`, `guards`, `decisions`, `drift`, `config`, `sync`).
+- **`medha ui`** launches a local real-time web dashboard over the store.
 - **`medha report`** writes a standalone, offline HTML snapshot you can attach to a review.
 - **`medha issue [title]`** prepares a GitHub issue prefilled with sanitized runtime and store diagnostics.
 - **`medha sync status|pull|push`** shares evidence between machines through a git ref or a file.
   Registries travel with the episodes, so custom kinds and signals do not have to be copied by hand.
+- **Documentation**: Complete guides and reference are published at [nimishph.github.io/medha](https://nimishph.github.io/medha/). In this repository, run `bun run docs:dev` to launch the local VitePress documentation reader.
 
 ## Extend it
 

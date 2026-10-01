@@ -27,6 +27,7 @@
     "build:napi": "cargo build --release -p medha-napi",
     "package:rust": "bun run tooling/package-release.ts --rust",
     "smoke": "bun run tooling/smoke-package.ts && bun run tooling/smoke-npm.ts",
+    "stress": "bun run tooling/benchmarks/stress_test_medha.ts",
     "changelog": "git-cliff -o CHANGELOG.md",
     "changelog:preview": "git-cliff --unreleased",
     "docs:dev": "npm --prefix site run dev",
@@ -44,5 +45,5 @@
     "name": "nimishph",
     "url": "https://github.com/nimishph"
   },
-  "version": "0.7.1"
+  "version": "0.7.2"
 }
