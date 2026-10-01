@@ -37,8 +37,11 @@ export const SQLITE_STORE_FILE = 'store.sqlite';
 export const FILE_STORE_DOCUMENT = 'state.jsonl';
 
 export const CONFIG_LAYOUT_VERSION = 1;
+export const CONFIG_SCHEMA_URL =
+  'https://raw.githubusercontent.com/nimishph/medha/main/schemas/config.v1.json';
 
 export interface MedhaConfigV1 {
+  readonly $schema?: string | undefined;
   readonly layoutVersion: 1;
   readonly backend: Backend;
   /**
@@ -138,8 +141,8 @@ export function storeForConfig(config: MedhaConfigV1): StorePort {
  * `{"thresholds": {"bogus": 1}}` produced a home whose policy was not the policy on disk, and the
  * only symptom was a policy that never took effect (nimishph/medha#5).
  */
-const CONFIG_KEYS = {
-  host: ['kinds', 'kindSpecs', 'signalSpecs', 'anchorKinds'],
+export const CONFIG_KEYS = {
+  host: ['$schema', 'kinds', 'kindSpecs', 'signalSpecs', 'anchorKinds'],
   kindSpec: [
     'name',
     'description',
@@ -476,6 +479,7 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     }
   }
   return {
+    ...(typeof candidate.$schema === 'string' ? { $schema: candidate.$schema } : {}),
     layoutVersion: CONFIG_LAYOUT_VERSION,
     backend: candidate.backend as Backend,
     path:
@@ -496,9 +500,13 @@ export function writeConfig(home: string, config: MedhaConfigV1): string {
   mkdirSync(home, { recursive: true });
   // config.path is absolute in memory (see the field's doc comment) but stored relative to `home`
   // on disk, so a committed config.json resolves correctly from any clone location.
-  const onDisk: MedhaConfigV1 = {
-    ...config,
+  const onDisk: Record<string, unknown> = {
+    $schema: config.$schema ?? CONFIG_SCHEMA_URL,
+    layoutVersion: config.layoutVersion,
+    backend: config.backend,
     path: config.path === null ? null : toStoredPath(home, config.path),
+    ...(config.namespaceScope === undefined ? {} : { namespaceScope: config.namespaceScope }),
+    registries: config.registries,
   };
   writeFileSync(path, `${JSON.stringify(onDisk, null, 2)}\n`, 'utf8');
   return path;

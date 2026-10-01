@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nimishph/medha/main/schemas/config.v1.json",
+  "title": "Medha Configuration Schema (v1)",
+  "description": "Configuration file for Medha evidential-memory engine (.medha/config.json). Defines backend storage, path, namespace isolation, and registries (kinds, kindSpecs, thresholds, recency, signalSpecs, anchorKinds).",
+  "type": "object",
+  "required": ["layoutVersion", "backend", "registries"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URI to the Medha config JSON Schema for editor autocomplete and validation."
+    },
+    "layoutVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Layout version of Medha configuration (currently 1)."
+    },
+    "backend": {
+      "type": "string",
+      "enum": ["sqlite", "file", "memory"],
+      "description": "Storage backend: 'sqlite' (high performance WAL db), 'file' (human-readable state.jsonl), or 'memory' (ephemeral in-process)."
+    },
+    "path": {
+      "type": ["string", "null"],
+      "description": "Path to the store file, relative to .medha/ (e.g., 'store.sqlite' or 'state.jsonl') or null for memory backend."
+    },
+    "namespaceScope": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Optional list of namespaces this project/agent is restricted to for isolation."
+    },
+    "registries": {
+      "type": "object",
+      "description": "Single source of truth for kinds, signal definitions, thresholds, recency decay, and anchor kinds.",
+      "required": ["kinds", "signalSpecs", "anchorKinds"],
+      "additionalProperties": false,
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Allowed entity kinds (e.g., 'rule', 'recipe', 'tool')."
+        },
+        "anchorKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Allowed durability anchor dimensions (e.g., 'git-head', 'week')."
+        },
+        "signalSpecs": {
+          "type": "array",
+          "description": "Definitions for signals observed by the engine.",
+          "items": {
+            "type": "object",
+            "required": ["name", "value", "countsAsTrial", "countsAsSuccess"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Signal name (e.g., 'APPLY', 'REJECT_RULE', 'SKIP', 'REJECT_CONTEXT')."
+              },
+              "value": {
+                "type": "number",
+                "minimum": -1,
+                "maximum": 1,
+                "description": "Signal numerical weight (-1.0 to 1.0) applied to EMA and evidence."
+              },
+              "countsAsTrial": {
+                "type": "boolean",
+                "description": "Whether this signal increments the total trial count (n)."
+              },
+              "countsAsSuccess": {
+                "type": "boolean",
+                "description": "Whether this signal increments the success count (k)."
+              },
+              "description": {
+                "type": "string",
+                "description": "Human-readable description of this signal's meaning."
+              }
+            }
+          }
+        },
+        "kindSpecs": {
+          "type": "array",
+          "description": "Per-kind policy overrides for thresholds, recency decay, and durability.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The entity kind this spec applies to (must match a name in 'kinds')."
+              },
+              "description": {
+                "type": "string",
+                "description": "Documentation for this entity kind's purpose and lifecycle."
+              },
+              "thresholds": {
+                "type": "object",
+                "description": "Trust score thresholds and trial count requirements for status promotion.",
+                "additionalProperties": false,
+                "properties": {
+                  "trusted": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.85,
+                    "description": "Trust score threshold to attain Trusted status (default 0.85)."
+                  },
+                  "active": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.5,
+                    "description": "Trust score threshold to attain Active status (default 0.50)."
+                  },
+                  "unguardedCeiling": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.85,
+                    "description": "Maximum trust score an unguarded entity can achieve (default 0.85)."
+                  },
+                  "minUsesForTrusted": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 3,
+                    "description": "Minimum trial count before an entity can become Trusted."
+                  },
+                  "minUsesForRetired": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 5,
+                    "description": "Minimum trial count before low trust triggers retirement."
+                  },
+                  "retiredTrustThreshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.2,
+                    "description": "Trust score below which an entity is retired (default 0.20)."
+                  }
+                }
+              },
+              "recency": {
+                "type": "object",
+                "description": "Exponential decay settings based on time elapsed since last observed signal.",
+                "additionalProperties": false,
+                "properties": {
+                  "halfLifeDays": {
+                    "type": "number",
+                    "minimum": 1,
+                    "default": 30,
+                    "description": "Half-life in days for exponential recency decay (default 30)."
+                  },
+                  "floor": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "default": 0.2,
+                    "description": "Floor below which recency factor will not decay (default 0.20)."
+                  }
+                }
+              },
+              "evidenceWeighting": {
+                "type": "string",
+                "enum": ["unit", "signal-value"],
+                "default": "unit",
+                "description": "How trials and successes are accrued: 'unit' (+1 per event) or 'signal-value' (weighted by signal value)."
+              },
+              "signalLimits": {
+                "type": "object",
+                "description": "Anti-spam limits on signal frequency and author diversity.",
+                "additionalProperties": false,
+                "properties": {
+                  "minIntervalMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Minimum milliseconds required between signals from the same author."
+                  },
+                  "maxSuccessesPerAuthor": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Cap on successes a single author can contribute to evidence."
+                  }
+                }
+              },
+              "decisionPolicy": {
+                "type": "object",
+                "description": "Human approval gating policy for decision trees.",
+                "additionalProperties": false,
+                "properties": {
+                  "requireHumanFor": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "List of actions/tags requiring human approval before execution."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
