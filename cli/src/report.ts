@@ -1,8 +1,7 @@
 import { resolve } from 'node:path';
 import type { Environment } from './environment.ts';
 import { openHome } from './open.ts';
-import { LIFECYCLE_STATUSES, pageAll, paramsReport, type StatusReport } from './read.ts';
-import { generateDashboardHtml } from './ui.ts';
+import { collectDashboardData, generateDashboardHtml } from './ui.ts';
 import { VERSION } from './version.ts';
 
 export interface ReportOptions {
@@ -28,35 +27,13 @@ export async function runReport(
     const dest = resolve(options.dir ?? environment.cwd, options.out ?? 'medha-report.html');
     const now = environment.now();
 
-    const [preflight, hints, episodes] = await Promise.all([
-      opened.adminEngine.preflight({ now }),
-      pageAll(opened.adminEngine, now),
-      opened.store.episodes(),
-    ]);
-
-    const byStatus = Object.fromEntries(
-      LIFECYCLE_STATUSES.map((status) => [
-        status,
-        hints.filter((hint) => hint.status === status).length,
-      ]),
-    ) as Record<(typeof LIFECYCLE_STATUSES)[number], number>;
-    const drifting = hints.filter((hint) => hint.temporal.isDrifting).length;
-
-    const status: StatusReport = {
-      home: opened.home,
-      asOf: now,
-      backend: opened.config.backend,
-      path: opened.config.path,
-      preflight,
-      byStatus,
-      drifting,
-      params: paramsReport(now),
-    };
+    const { status, hints, episodes, decisionTrees } = await collectDashboardData(opened, now);
 
     const html = generateDashboardHtml({
       status,
       entities: hints,
       episodes,
+      decisionTrees,
       version: VERSION,
       home: opened.home,
     });

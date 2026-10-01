@@ -217,7 +217,13 @@ describe('medha ui dashboard & report', () => {
       const episodesJson = await episodesRes.json();
       expect(Array.isArray(episodesJson)).toBe(true);
 
-      // 5. API Pack (POST)
+      // 5. API: Decision Trees
+      const treesRes = await fetch(`${server.url}/api/decision-trees`);
+      expect(treesRes.status).toBe(200);
+      const treesJson = await treesRes.json();
+      expect(typeof treesJson).toBe('object');
+
+      // 6. API Pack (POST)
       const packRes = await fetch(`${server.url}/api/pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -230,6 +236,81 @@ describe('medha ui dashboard & report', () => {
     } finally {
       await server.close();
     }
+  });
+
+  test('generateDashboardHtml embeds and renders decision trees and decision episodes', () => {
+    const html = generateDashboardHtml({
+      status: {
+        asOf: NOW,
+        home: '/test/home',
+        backend: 'sqlite',
+        path: null,
+        byStatus: { active: 1, trusted: 0, probation: 0, quarantined: 0, retired: 0 },
+        drifting: 0,
+        preflight: {
+          asOf: NOW,
+          status: 'ok',
+          location: null,
+          episodeCount: 1,
+          entityCount: 1,
+          integrity: 'ok',
+          danglingRetractions: [],
+          lastSweep: null,
+          registries: { kinds: 1, signals: 1, anchors: 1 },
+        },
+        params: { asOf: NOW, note: '', params: [] },
+      },
+      entities: [
+        {
+          asOf: NOW,
+          key: { namespace: '', kind: 'rule', id: 'rule-branch' },
+          status: 'active',
+          trustScore: 0.8,
+          components: { wilson: 0.8, guard: 1.0, recency: 1.0, durability: 1.0, ceiling: 1.0 },
+          evidence: { successes: 4, totalTrials: 5, lowerBound: 0.4 },
+          temporal: {
+            emaWeight: 0.8,
+            baselineWeight: 0.5,
+            driftDelta: 0,
+            isDrifting: false,
+            driftDirection: 'up',
+          },
+          clearsThreshold: { trusted: false, active: true },
+        },
+      ],
+      episodes: [
+        {
+          type: 'decision',
+          seq: 1,
+          key: { namespace: '', kind: 'rule', id: 'rule-branch' },
+          at: NOW,
+          caseId: 'case-root',
+          condition: 'env === "prod"',
+          decision: { type: 'apply' },
+          author: 'alice',
+        },
+      ],
+      decisionTrees: {
+        'rule-branch': [
+          {
+            id: 'case-root',
+            condition: 'env === "prod"',
+            decision: { type: 'apply' },
+            evidence: { k: 4, n: 5, contextRejects: 0 },
+            ema: { mu: 0.8, theta0: 0.5, updatedAt: NOW },
+            status: 'active',
+            trust: 0.8,
+          },
+        ],
+      },
+      version: '0.6.0',
+      home: '/test/home',
+    });
+
+    expect(html).toContain('Decision Tree &amp; Branch Governance');
+    expect(html).toContain('case-root');
+    expect(html).toContain('env === \\"prod\\"');
+    expect(html).toContain('renderDecisionForest');
   });
 
   test('runReport writes standalone HTML report to disk', async () => {

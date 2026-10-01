@@ -1,6 +1,12 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
-import type { EntityKey, Episode, EvidentialHint } from '@cntxt-labs/medha-core';
+import {
+  type EntityKey,
+  type Episode,
+  type EvidentialHint,
+  entityKeyString,
+  type ScoredDecisionCase,
+} from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
 import { type OpenedHome, openHome } from './open.ts';
 import { LIFECYCLE_STATUSES, pageAll, paramsReport, type StatusReport } from './read.ts';
@@ -44,8 +50,12 @@ export function generateDashboardHtml(data: {
   readonly episodes: readonly Episode[];
   readonly version: string;
   readonly home: string;
+  readonly decisionTrees?: Record<string, readonly ScoredDecisionCase[]> | undefined;
 }): string {
-  const initialDataJson = JSON.stringify(data).replace(/</g, '\\u003c');
+  const initialDataJson = JSON.stringify({
+    ...data,
+    decisionTrees: data.decisionTrees ?? {},
+  }).replace(/</g, '\\u003c');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -669,6 +679,19 @@ export function generateDashboardHtml(data: {
           <div id="simulationResult" style="display: none; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1rem;"></div>
         </div>
       </div>
+
+      <div class="card" style="margin-top: 1.5rem;" id="decomposerTreeCard">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div>
+            <h3 style="font-weight: 700; margin: 0;">Decision Tree &amp; Branch Governance</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">
+              Hierarchical conditional branches with isolated Wilson evidence, decisions, and scored status:
+            </p>
+          </div>
+          <span id="decomposerTreeBadge" class="badge badge-secondary">0 branches</span>
+        </div>
+        <div id="decomposerTreeForest" style="margin-top: 1rem;"></div>
+      </div>
     </section>
 
     <!-- TAB 3: CONTEXT BUDGET PACKER -->
@@ -798,11 +821,16 @@ export function generateDashboardHtml(data: {
 
       tbody.innerHTML = filtered.map(e => {
         const keyLabel = e.key.namespace ? \`\${e.key.namespace}/\${e.key.kind}/\${e.key.id}\` : \`\${e.key.kind}/\${e.key.id}\`;
+        const keyStr = e.key.namespace ? \`\${e.key.namespace}\\u0000\${e.key.kind}\\u0000\${e.key.id}\` : \`\\u0000\${e.key.kind}\\u0000\${e.key.id}\`;
+        const tree = (state.decisionTrees && (state.decisionTrees[e.key.id] || state.decisionTrees[keyStr])) || [];
+        const treeBadge = tree.length > 0
+          ? \` <span class="badge badge-primary" style="margin-left: 6px; font-size: 0.68rem; cursor: pointer;" title="Entity has \${tree.length} decision branches" data-inspect-id="\${escapeHtml(e.key.id)}">🌳 \${tree.length}</span>\`
+          : '';
         const pct = Math.round(e.trustScore * 100);
         return \`
           <tr>
             <td><span class="pill pill-\${escapeHtml(e.status)}">\${escapeHtml(e.status)}</span></td>
-            <td><span class="entity-id">\${escapeHtml(keyLabel)}</span></td>
+            <td><span class="entity-id">\${escapeHtml(keyLabel)}</span>\${treeBadge}</td>
             <td>
               <div class="trust-meter">
                 <span style="font-family: var(--font-mono); font-size: 0.8rem; width: 42px;">\${e.trustScore.toFixed(3)}</span>
@@ -834,7 +862,10 @@ export function generateDashboardHtml(data: {
       const ents = state.entities || [];
       sel.innerHTML = ents.map(e => {
         const keyLabel = e.key.namespace ? \`\${e.key.namespace}/\${e.key.kind}/\${e.key.id}\` : \`\${e.key.kind}/\${e.key.id}\`;
-        return \`<option value="\${escapeHtml(e.key.id)}">\${escapeHtml(keyLabel)} (\${escapeHtml(e.status)}, T=\${e.trustScore.toFixed(3)})</option>\`;
+        const keyStr = e.key.namespace ? \`\${e.key.namespace}\\u0000\${e.key.kind}\\u0000\${e.key.id}\` : \`\\u0000\${e.key.kind}\\u0000\${e.key.id}\`;
+        const tree = (state.decisionTrees && (state.decisionTrees[e.key.id] || state.decisionTrees[keyStr])) || [];
+        const treeSuffix = tree.length > 0 ? \` [🌳 \${tree.length}]\` : '';
+        return \`<option value="\${escapeHtml(e.key.id)}">\${escapeHtml(keyLabel)} (\${escapeHtml(e.status)}, T=\${e.trustScore.toFixed(3)})\${treeSuffix}</option>\`;
       }).join('');
       updateDecomposer();
     }
@@ -846,13 +877,78 @@ export function generateDashboardHtml(data: {
       updateDecomposer();
     }
 
+    function renderDecisionForest(tree) {
+      if (!tree || tree.length === 0) {
+        return '<div style="padding: 1.25rem; text-align: center; color: var(--text-faint); font-size: 0.82rem; background: rgba(0,0,0,0.15); border-radius: var(--radius-sm); border: 1px dashed var(--border-subtle);">No decision branches recorded for this entity.</div>';
+      }
+
+      const byParent = new Map();
+      for (const kase of tree) {
+        const p = kase.parentId || '__root__';
+        if (!byParent.has(p)) byParent.set(p, []);
+        byParent.get(p).push(kase);
+      }
+
+      const knownIds = new Set(tree.map(c => c.id));
+      const roots = tree.filter(c => !c.parentId || !knownIds.has(c.parentId));
+
+      function renderBranch(kase, level) {
+        const children = byParent.get(kase.id) || [];
+        const decType = kase.decision ? kase.decision.type : 'apply';
+        const decVal = decType === 'probability' ? \`probability(\${kase.decision.value})\` : decType;
+        const badgeClass = decType === 'apply' ? 'badge-success' : (decType === 'ignore' ? 'badge-secondary' : 'badge-primary');
+        const indentPx = level * 24;
+
+        let html = \`
+          <div style="margin-left: \${indentPx}px; position: relative; margin-bottom: 8px;">
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-left: 3px solid \${level === 0 ? 'var(--primary)' : 'var(--info)'}; border-radius: var(--radius-sm); padding: 10px 14px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                \${level > 0 ? '<span style="color: var(--text-faint); font-family: var(--font-mono);">└─</span>' : ''}
+                <code style="font-family: var(--font-mono); color: #e2e8f0; font-size: 0.84rem; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">\${escapeHtml(kase.condition)}</code>
+                <span style="color: var(--text-faint);">➔</span>
+                <span class="badge \${badgeClass}">\${escapeHtml(decVal)}</span>
+                <span class="pill pill-\${escapeHtml(kase.status)}" style="font-size: 0.68rem; padding: 2px 6px;">\${escapeHtml(kase.status)}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 0.78rem;">
+                <span style="color: var(--text-muted);">k=\${kase.evidence ? kase.evidence.k : 0} n=\${kase.evidence ? kase.evidence.n : 0}</span>
+                <span style="color: #818cf8; font-weight: 700;">T: \${(kase.trust ?? 0).toFixed(3)}</span>
+                <span style="color: var(--text-faint); font-size: 0.72rem;">(\${escapeHtml(kase.id)})</span>
+              </div>
+            </div>
+          </div>
+        \`;
+
+        for (const child of children) {
+          html += renderBranch(child, level + 1);
+        }
+        return html;
+      }
+
+      return roots.map(r => renderBranch(r, 0)).join('');
+    }
+
     function updateDecomposer() {
       const id = document.getElementById('decomposerSelect').value;
       const entity = (state.entities || []).find(e => e.key.id === id);
       const container = document.getElementById('decomposerFactors');
+      const treeForest = document.getElementById('decomposerTreeForest');
+      const treeBadge = document.getElementById('decomposerTreeBadge');
+
       if (!entity) {
         container.innerHTML = '<p style="color: var(--text-faint)">Select an entity above.</p>';
+        if (treeForest) treeForest.innerHTML = '';
+        if (treeBadge) treeBadge.textContent = '0 branches';
         return;
+      }
+
+      const keyStr = entity.key.namespace ? \`\${entity.key.namespace}\\u0000\${entity.key.kind}\\u0000\${entity.key.id}\` : \`\\u0000\${entity.key.kind}\\u0000\${entity.key.id}\`;
+      const tree = (state.decisionTrees && (state.decisionTrees[entity.key.id] || state.decisionTrees[keyStr])) || [];
+      if (treeBadge) {
+        treeBadge.textContent = \`\${tree.length} branch\${tree.length === 1 ? '' : 'es'}\`;
+        treeBadge.className = tree.length > 0 ? 'badge badge-primary' : 'badge badge-secondary';
+      }
+      if (treeForest) {
+        treeForest.innerHTML = renderDecisionForest(tree);
       }
 
       const c = entity.components;
@@ -1000,17 +1096,42 @@ export function generateDashboardHtml(data: {
 
       container.innerHTML = filtered.map(ep => {
         const isRetracted = ep.type === 'retract';
+        const isDecision = ep.type === 'decision';
         const keyLabel = ep.key.namespace ? \`\${ep.key.namespace}/\${ep.key.kind}/\${ep.key.id}\` : \`\${ep.key.kind}/\${ep.key.id}\`;
         const timeStr = new Date(ep.at).toLocaleString();
+
+        let extraDetails = '';
+        if (isDecision) {
+          const decType = ep.decision ? ep.decision.type : 'apply';
+          const decVal = decType === 'probability' ? \`probability(\${ep.decision.value})\` : decType;
+          const badgeClass = decType === 'apply' ? 'badge-success' : (decType === 'ignore' ? 'badge-secondary' : 'badge-primary');
+          extraDetails = \`
+            <div style="background: rgba(99, 102, 241, 0.08); border-left: 3px solid #6366f1; padding: 8px 12px; border-radius: 0 6px 6px 0; font-size: 0.82rem; margin-top: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+              <span style="color: var(--text-muted);">Condition:</span>
+              <code style="font-family: var(--font-mono); color: #f8fafc; font-weight: 600; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">\${escapeHtml(ep.condition)}</code>
+              <span style="color: var(--text-faint);">➔</span>
+              <span class="badge \${badgeClass}">\${escapeHtml(decVal)}</span>
+              <span style="font-size: 0.74rem; color: var(--text-faint); font-family: var(--font-mono); margin-left: auto;">case: \${escapeHtml(ep.caseId)}\${ep.parentId ? ' · parent: ' + escapeHtml(ep.parentId) : ''}</span>
+            </div>
+          \`;
+        } else if (ep.type === 'signal' && ep.caseId) {
+          extraDetails = \`
+            <div style="font-size: 0.76rem; color: #93c5fd; margin-top: 4px; font-family: var(--font-mono);">
+              🎯 Attributed to branch: <strong>\${escapeHtml(ep.caseId)}</strong>
+            </div>
+          \`;
+        }
+
         return \`
-          <div class="timeline-item \${isRetracted ? 'retracted' : ''}">
+          <div class="timeline-item \${isRetracted ? 'retracted' : ''}" style="\${isDecision ? 'border-left: 3px solid var(--primary);' : ''}">
             <div class="timeline-meta">
               <span class="badge" style="font-weight: 700;">#\${ep.seq}</span>
-              <span class="pill pill-active" style="padding: 2px 6px; font-size: 0.68rem;">\${escapeHtml(ep.type)}</span>
+              <span class="pill pill-\${isDecision ? 'active' : (isRetracted ? 'quarantined' : 'active')}" style="padding: 2px 6px; font-size: 0.68rem;">\${escapeHtml(ep.type)}</span>
               <span class="entity-id">\${escapeHtml(keyLabel)}</span>
               <span>• \${timeStr}</span>
               \${ep.author ? '<span class="badge" style="color: #93c5fd;">@' + escapeHtml(ep.author) + '</span>' : ''}
             </div>
+            \${extraDetails}
             \${ep.note ? '<div class="note-box">"' + escapeHtml(ep.note) + '"</div>' : ''}
             \${isRetracted ? '<div style="color: var(--quarantined); font-size: 0.8rem;">Retracted sequence #' + escapeHtml(String(ep.targetSeq)) + ' — Reason: ' + escapeHtml(ep.reason) + '</div>' : ''}
           </div>
@@ -1020,14 +1141,16 @@ export function generateDashboardHtml(data: {
 
     async function refreshData() {
       try {
-        const [statusRes, entitiesRes, episodesRes] = await Promise.all([
+        const [statusRes, entitiesRes, episodesRes, treesRes] = await Promise.all([
           fetch('/api/status').then(r => r.json()),
           fetch('/api/entities').then(r => r.json()),
-          fetch('/api/episodes').then(r => r.json())
+          fetch('/api/episodes').then(r => r.json()),
+          fetch('/api/decision-trees').then(r => r.json()).catch(() => ({})),
         ]);
-        state = { ...state, status: statusRes, entities: entitiesRes, episodes: episodesRes };
+        state = { ...state, status: statusRes, entities: entitiesRes, episodes: episodesRes, decisionTrees: treesRes };
         renderMetrics();
         renderEntitiesTable();
+        updateDecomposer();
         renderTimeline();
       } catch (err) {
         console.error('Refresh error:', err);
@@ -1043,19 +1166,45 @@ export function generateDashboardHtml(data: {
 `;
 }
 
-async function collectDashboardData(
+export async function collectDashboardData(
   opened: OpenedHome,
   now: number,
 ): Promise<{
   readonly status: StatusReport;
   readonly hints: readonly EvidentialHint[];
   readonly episodes: readonly Episode[];
+  readonly decisionTrees: Record<string, readonly ScoredDecisionCase[]>;
 }> {
   const [preflight, hints, episodes] = await Promise.all([
     opened.adminEngine.preflight({ now }),
     pageAll(opened.adminEngine, now),
     opened.store.episodes(),
   ]);
+
+  const decisionKeyMap = new Map<string, EntityKey>();
+  for (const hint of hints) {
+    decisionKeyMap.set(entityKeyString(hint.key), hint.key);
+  }
+  for (const ep of episodes) {
+    if (ep.type === 'decision') {
+      decisionKeyMap.set(entityKeyString(ep.key), ep.key);
+    }
+  }
+
+  const details = await Promise.all(
+    Array.from(decisionKeyMap.values()).map(async (key) => {
+      const detail = await opened.adminEngine.show(key, { now });
+      return [entityKeyString(key), key.id, detail.decisionTree ?? []] as const;
+    }),
+  );
+
+  const decisionTrees: Record<string, readonly ScoredDecisionCase[]> = {};
+  for (const [keyStr, id, tree] of details) {
+    if (tree.length > 0) {
+      decisionTrees[keyStr] = tree;
+      decisionTrees[id] = tree;
+    }
+  }
 
   const byStatus = Object.fromEntries(
     LIFECYCLE_STATUSES.map((status) => [
@@ -1076,7 +1225,7 @@ async function collectDashboardData(
     params: paramsReport(now),
   };
 
-  return { status, hints, episodes };
+  return { status, hints, episodes, decisionTrees };
 }
 
 export async function startUiServer(
@@ -1105,11 +1254,15 @@ export async function startUiServer(
     try {
       // 1. Root: Serves Interactive SPA Dashboard
       if (url.pathname === '/' || url.pathname === '/index.html') {
-        const { status, hints, episodes } = await collectDashboardData(opened, environment.now());
+        const { status, hints, episodes, decisionTrees } = await collectDashboardData(
+          opened,
+          environment.now(),
+        );
         const html = generateDashboardHtml({
           status,
           entities: hints,
           episodes,
+          decisionTrees,
           version: VERSION,
           home: opened.home,
         });
@@ -1121,11 +1274,15 @@ export async function startUiServer(
 
       // 2. Standalone Downloadable Report
       if (url.pathname === '/report') {
-        const { status, hints, episodes } = await collectDashboardData(opened, environment.now());
+        const { status, hints, episodes, decisionTrees } = await collectDashboardData(
+          opened,
+          environment.now(),
+        );
         const html = generateDashboardHtml({
           status,
           entities: hints,
           episodes,
+          decisionTrees,
           version: VERSION,
           home: opened.home,
         });
@@ -1159,6 +1316,14 @@ export async function startUiServer(
         const episodes = await opened.store.episodes();
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(toJson(episodes));
+        return;
+      }
+
+      // 6. API: Decision Trees
+      if (url.pathname === '/api/decision-trees') {
+        const { decisionTrees } = await collectDashboardData(opened, environment.now());
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(toJson(decisionTrees));
         return;
       }
 
