@@ -8,6 +8,43 @@ description: Evidential memory for rules, recipes and tools. Use when deciding h
 Medha remembers how well rules, recipes and tools have actually worked and returns **trust hints**.
 You record evidence; **you** decide what to do with it.
 
+## Mental Model: Dual-Loop Architecture
+
+```text
+                    THE DUAL-LOOP MENTAL MODEL
+ 
+  ┌──────────────────────────────────────────────────────────────┐
+  │                 FAST INNER LOOP: EXECUTION                   │
+  │                                                              │
+  │   Agent Task ──► Query Trust Hints ──► Context Injection     │
+  │                         │                                    │
+  │                         ▼                                    │
+  │               Should I apply this rule?                      │
+  │              (Agent / Human Decision)                        │
+  └────────────────────────┬─────────────────────────────────────┘
+                           │ Outcomes observed
+                           ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │                 SLOW OUTER LOOP: EVIDENCE                    │
+  │                                                              │
+  │   Record Signals & Guard Checks (APPLY, REJECT, PASS/FAIL)   │
+  │                         │                                    │
+  │                         ▼                                    │
+  │              Evidential Trust Engine                         │
+  │        T = min(Ceiling, L × G × R × D)                       │
+  │     Wilson Lower Bound (L) × Guard Factor (G)                │
+  │     × Recency Decay (R) × Durability (D)                     │
+  │                         │                                    │
+  │                         ▼                                    │
+  │       Calibrated Status: Probation ──► Active ──► Trusted    │
+  │                                 └──► Quarantined / Retired   │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+- **Fast Inner Loop**: Read `hints` (or `medha show`) before applying rules. Treat unknown entities as `probation`.
+- **Slow Outer Loop**: Report ground truth as events occur (`record_signal`, `report_guard`).
+- **Trust Formula**: $T = \min(\text{ceiling}, L \times G \times R \times D)$. Usage alone never exceeds 0.85; a passing guard is required to achieve `trusted`.
+
 ## Setup
 
 Run once per project (creates `.medha/`; add it to `.gitignore` or commit it deliberately):

@@ -16,9 +16,53 @@ decides an action; you and your agent decide what to do with it.
   treated like 200 out of 200.
 - **Explainable.** Every number can be traced: `medha show` splits trust into its components and
   `medha explain-threshold` says which bars were cleared and which were not.
-- **Safe to try.** `medha simulate` shows what a signal would do without recording anything.
 - **One binary, no server.** CLI and MCP server in a single executable. State is an append-only
   episode log you can back up, compact, sync, or replay.
+
+## Mental Model: The Dual-Loop Architecture
+
+Most memory tools store unstructured chat history or flat key-value assertions. Medha acts as an **evidential calibration loop**:
+
+```text
+                    THE DUAL-LOOP MENTAL MODEL
+ 
+  ┌──────────────────────────────────────────────────────────────┐
+  │                 FAST INNER LOOP: EXECUTION                   │
+  │                                                              │
+  │   Agent Task ──► Query Trust Hints ──► Context Injection     │
+  │                         │                                    │
+  │                         ▼                                    │
+  │               Should I apply this rule?                      │
+  │              (Agent / Human Decision)                        │
+  └────────────────────────┬─────────────────────────────────────┘
+                           │ Outcomes observed
+                           ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │                 SLOW OUTER LOOP: EVIDENCE                    │
+  │                                                              │
+  │   Record Signals & Guard Checks (APPLY, REJECT, PASS/FAIL)   │
+  │                         │                                    │
+  │                         ▼                                    │
+  │              Evidential Trust Engine                         │
+  │        T = min(Ceiling, L × G × R × D)                       │
+  │     Wilson Lower Bound (L) × Guard Factor (G)                │
+  │     × Recency Decay (R) × Durability (D)                     │
+  │                         │                                    │
+  │                         ▼                                    │
+  │       Calibrated Status: Probation ──► Active ──► Trusted    │
+  │                                 └──► Quarantined / Retired   │
+  └──────────────────────────────────────────────────────────────┘
+```
+
+- **The Fast Inner Loop**: When starting a task, agents query `hints` or `medha show`. Entities with high trust are injected into active context; probation or quarantined entities are discounted or ignored. **Medha reports evidence; you decide.**
+- **The Slow Outer Loop**: As actions execute, the agent or test runner reports ground truth: did the rule work (`APPLY`), did a human reject it (`REJECT_RULE`), did an automated test pass (`guard --ok`)?
+- **Trust Formula ($T$)**:
+  $$T = \min\big(\text{ceiling}, L \times G \times R \times D\big)$$
+  - **$L$ (Wilson Lower Bound)**: 95% confidence interval on success rate $k/n$. Protects against small-sample overconfidence ($2/2 \ne 200/200$).
+  - **$G$ (Guard Factor)**: 1.0 if verified by test/AST guard; penalized if failing or unverified.
+  - **$R$ (Recency Decay)**: Exponential decay based on time elapsed since last use (default 30-day half-life, floor 0.20).
+  - **$D$ (Durability Factor)**: Logarithmic bonus for rules validated across multiple git commits, branches, or weeks.
+  - **Ceiling**: Unguarded entities cannot exceed 0.85, preventing unverified heuristics from becoming `trusted`.
 
 ## Install
 
