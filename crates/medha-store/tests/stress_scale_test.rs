@@ -13,7 +13,11 @@ fn make_signal(id: &str, at: i64, success: bool) -> EpisodeInput {
         author: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
-                name: if success { "APPLY".to_string() } else { "REJECT_RULE".to_string() },
+                name: if success {
+                    "APPLY".to_string()
+                } else {
+                    "REJECT_RULE".to_string()
+                },
                 value: if success { 1.0 } else { -1.0 },
                 counts_as_trial: true,
                 counts_as_success: success,
@@ -38,13 +42,18 @@ fn test_stress_100k_entities_fold_and_query() {
     store.open().expect("open store");
 
     let count = 100_000;
-    println!("Generating and appending {} distinct entity episodes...", count);
+    println!(
+        "Generating and appending {} distinct entity episodes...",
+        count
+    );
     let start_append = Instant::now();
 
     for i in 0..count {
         let id = format!("rule-stress-{:06}", i);
         let success = i % 3 != 0;
-        store.append(make_signal(&id, 1000 + i as i64, success)).unwrap();
+        store
+            .append(make_signal(&id, 1000 + i as i64, success))
+            .unwrap();
     }
 
     let append_duration = start_append.elapsed();
@@ -62,7 +71,8 @@ fn test_stress_100k_entities_fold_and_query() {
     assert_eq!(entities.len(), count);
     println!(
         "✓ Listed {} projected entities in {:.2?}",
-        entities.len(), query_duration
+        entities.len(),
+        query_duration
     );
 
     // Rebuild projection over 100k log
@@ -75,7 +85,10 @@ fn test_stress_100k_entities_fold_and_query() {
     );
 
     // Verify mathematical bounds on sample entities
-    let sample = store.get(&EntityKey::new("", "rule", "rule-stress-000000")).unwrap().unwrap();
+    let sample = store
+        .get(&EntityKey::new("", "rule", "rule-stress-000000"))
+        .unwrap()
+        .unwrap();
     assert_eq!(sample.evidence.n, 1.0);
     assert_eq!(sample.status, LifecycleStatus::Probation);
 }
@@ -93,35 +106,47 @@ fn test_stress_deep_10k_episodes_single_entity() {
     for i in 0..total_signals {
         // 90% success rate
         let success = i % 10 != 0;
-        store.append(make_signal("deep-entity", 1000 + i as i64, success)).unwrap();
+        store
+            .append(make_signal("deep-entity", 1000 + i as i64, success))
+            .unwrap();
     }
 
     let duration = start.elapsed();
     println!(
         "✓ Appended {} deep signals to single entity in {:.2?} ({:.0} eps/sec)",
-        total_signals, duration, (total_signals as f64) / duration.as_secs_f64()
+        total_signals,
+        duration,
+        (total_signals as f64) / duration.as_secs_f64()
     );
 
-    let state_unguarded = store.get(&EntityKey::new("", "rule", "deep-entity")).unwrap().unwrap();
+    let state_unguarded = store
+        .get(&EntityKey::new("", "rule", "deep-entity"))
+        .unwrap()
+        .unwrap();
     assert_eq!(state_unguarded.evidence.n, 10_000.0);
     assert_eq!(state_unguarded.evidence.k, 9_000.0);
     // Invariant: Without guard, entity cannot exceed unguarded ceiling, so it remains Active
     assert_eq!(state_unguarded.status, LifecycleStatus::Active);
 
     // Now append a passing guard episode
-    store.append(EpisodeInput {
-        key: EntityKey::new("", "rule", "deep-entity"),
-        at: 1000 + total_signals as i64,
-        author: None,
-        payload: EpisodePayload::Guard {
-            ok: true,
-            kind: Some("ast".to_string()),
-            ensure: true,
-            note: None,
-        },
-    }).unwrap();
+    store
+        .append(EpisodeInput {
+            key: EntityKey::new("", "rule", "deep-entity"),
+            at: 1000 + total_signals as i64,
+            author: None,
+            payload: EpisodePayload::Guard {
+                ok: true,
+                kind: Some("ast".to_string()),
+                ensure: true,
+                note: None,
+            },
+        })
+        .unwrap();
 
-    let state_guarded = store.get(&EntityKey::new("", "rule", "deep-entity")).unwrap().unwrap();
+    let state_guarded = store
+        .get(&EntityKey::new("", "rule", "deep-entity"))
+        .unwrap()
+        .unwrap();
     // With guard passing, ceiling lifts to 1.0 and entity reaches Trusted!
     assert_eq!(state_guarded.status, LifecycleStatus::Trusted);
 }
@@ -147,13 +172,17 @@ fn test_stress_sqlite_wal_10k_batch_and_recovery() {
     for i in 0..count {
         let id = format!("sqlite-rule-{:04}", i % 500); // 500 distinct entities with 20 updates each
         let success = i % 4 != 0;
-        store.append(make_signal(&id, 1000 + i as i64, success)).unwrap();
+        store
+            .append(make_signal(&id, 1000 + i as i64, success))
+            .unwrap();
     }
 
     let duration = start.elapsed();
     println!(
         "✓ Ingested {} SQLite WAL episodes across 500 entities in {:.2?} ({:.0} eps/sec)",
-        count, duration, (count as f64) / duration.as_secs_f64()
+        count,
+        duration,
+        (count as f64) / duration.as_secs_f64()
     );
 
     // Close SQLite database

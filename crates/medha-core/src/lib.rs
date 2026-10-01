@@ -10,7 +10,9 @@ pub mod thresholds;
 pub mod types;
 pub mod wilson;
 
-pub use decision::{is_human_author, score_decision_case, Decision, DecisionCase, ScoredDecisionCase};
+pub use decision::{
+    is_human_author, score_decision_case, Decision, DecisionCase, ScoredDecisionCase,
+};
 pub use drift::{compute_drift, ema_step, DriftReport};
 pub use durability::{durability_factor, raw_durability_factor};
 pub use fold::{

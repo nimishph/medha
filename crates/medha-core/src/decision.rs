@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
 use crate::formula::compute_trust_and_status;
 use crate::types::{
     CoreError, EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,
     TrustScoreBreakdown,
 };
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]

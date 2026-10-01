@@ -46,7 +46,9 @@ fn test_file_sync_uninitialized_when_file_missing() {
 fn test_file_sync_push_and_synced_status() {
     let mut store = MemoryStore::new(None);
     store.open().expect("open ok");
-    store.append(sample_signal("rule-1", 1000)).expect("append ok");
+    store
+        .append(sample_signal("rule-1", 1000))
+        .expect("append ok");
 
     let dir = tempdir().expect("tempdir");
     let file_path = dir.path().join("sync.json");
@@ -72,11 +74,15 @@ fn test_file_sync_push_and_synced_status() {
 fn test_file_sync_reconcile_and_convergence() {
     let mut store_a = MemoryStore::new(None);
     store_a.open().expect("open ok");
-    store_a.append(sample_signal("rule-a", 1000)).expect("append ok");
+    store_a
+        .append(sample_signal("rule-a", 1000))
+        .expect("append ok");
 
     let mut store_b = MemoryStore::new(None);
     store_b.open().expect("open ok");
-    store_b.append(sample_signal("rule-b", 2000)).expect("append ok");
+    store_b
+        .append(sample_signal("rule-b", 2000))
+        .expect("append ok");
 
     let dir = tempdir().expect("tempdir");
     let file_path = dir.path().join("shared-sync.json");

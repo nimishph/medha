@@ -28,7 +28,9 @@ pub struct TrustComputationResult {
     pub breakdown: TrustScoreBreakdown,
 }
 
-pub fn compute_trust_and_status(input: TrustComputationInput) -> Result<TrustComputationResult, CoreError> {
+pub fn compute_trust_and_status(
+    input: TrustComputationInput,
+) -> Result<TrustComputationResult, CoreError> {
     let k = input.evidence.k;
     let n = input.evidence.n;
     let trials_u64 = n.round() as u64;
@@ -94,6 +96,8 @@ pub fn compute_trust_and_status(input: TrustComputationInput) -> Result<TrustCom
     })
 }
 
+// Mirrors the spec §6 status derivation, whose inputs are separate state fields.
+#[allow(clippy::too_many_arguments)]
 fn derive_status(
     status_override: Option<LifecycleStatus>,
     stored_status: LifecycleStatus,

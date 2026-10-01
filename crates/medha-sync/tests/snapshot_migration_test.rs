@@ -1,5 +1,5 @@
-use medha_sync::snapshot::{migrate_snapshot, serialize_snapshot, CURRENT_MEMORY_SCHEMA_VERSION};
 use medha_sync::errors::SyncError;
+use medha_sync::snapshot::{migrate_snapshot, serialize_snapshot, CURRENT_MEMORY_SCHEMA_VERSION};
 use std::fs;
 use std::path::PathBuf;
 
@@ -48,7 +48,10 @@ fn test_migrate_v1_sage_fixture() {
     assert!(reg.kinds.contains(&"prompt".to_string()));
     assert!(snapshot.meta.is_some());
     let meta = snapshot.meta.unwrap();
-    assert_eq!(meta.get("sweep:lastRun").map(|s| s.as_str()), Some("1727100000000"));
+    assert_eq!(
+        meta.get("sweep:lastRun").map(|s| s.as_str()),
+        Some("1727100000000")
+    );
 }
 
 #[test]

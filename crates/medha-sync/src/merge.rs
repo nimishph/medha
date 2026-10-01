@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::round::round6;
 use medha_core::thresholds::{DEFAULT_THETA0, RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS};
 use medha_core::types::{Anchor, CoreError, EntityKey, LifecycleStatus, RecencyConfig, Thresholds};
 use medha_store::{EntityState, Episode, EpisodeInput, EpisodePayload};
+use std::collections::{HashMap, HashSet};
 
 pub fn canonical_episode_key(episode: &Episode) -> String {
     let retract_target = match &episode.payload {
@@ -21,12 +21,7 @@ pub fn canonical_episode_input_key(episode: &EpisodeInput) -> String {
     content_key(&episode.key, episode.at, &episode.payload, &retract_target)
 }
 
-fn content_key(
-    key: &EntityKey,
-    at: i64,
-    payload: &EpisodePayload,
-    retract_target: &str,
-) -> String {
+fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_target: &str) -> String {
     let type_str = match payload {
         EpisodePayload::Signal { .. } => "signal",
         EpisodePayload::Guard { .. } => "guard",
@@ -171,11 +166,23 @@ fn compute_identities(log: &[Episode]) -> HashMap<u64, Identity> {
                 let fallback = dangling_target(*target_seq);
                 let stand_in = target_key.as_deref().unwrap_or(&fallback);
                 let id = content_key(&ep.key, ep.at, &ep.payload, stand_in);
-                by_seq.insert(ep.seq, Identity { id, target_id: target_key });
+                by_seq.insert(
+                    ep.seq,
+                    Identity {
+                        id,
+                        target_id: target_key,
+                    },
+                );
             }
             _ => {
                 let id = content_key(&ep.key, ep.at, &ep.payload, "");
-                by_seq.insert(ep.seq, Identity { id, target_id: None });
+                by_seq.insert(
+                    ep.seq,
+                    Identity {
+                        id,
+                        target_id: None,
+                    },
+                );
             }
         }
     }
@@ -190,7 +197,10 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
         for ep in log {
             if let Some(identity) = ids.get(&ep.seq) {
                 if !map.contains_key(&identity.id) {
-                    map.insert(identity.id.clone(), (ep.clone(), identity.target_id.clone()));
+                    map.insert(
+                        identity.id.clone(),
+                        (ep.clone(), identity.target_id.clone()),
+                    );
                 }
             }
         }
@@ -292,7 +302,7 @@ pub fn merge_entity_states(
     }
 
     let mut result: Vec<EntityState> = map.into_values().collect();
-    result.sort_by(|a, b| a.key.to_string_repr().cmp(&b.key.to_string_repr()));
+    result.sort_by_key(|a| a.key.to_string_repr());
     Ok(result)
 }
 
@@ -364,38 +374,39 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
 
     let status_override = s1.status_override.or(s2.status_override);
 
-    let status = if s1.status == LifecycleStatus::Quarantined || s2.status == LifecycleStatus::Quarantined {
-        LifecycleStatus::Quarantined
-    } else if s1.status == LifecycleStatus::Retired && s2.status == LifecycleStatus::Retired {
-        LifecycleStatus::Retired
-    } else {
-        let thresholds = Thresholds::default();
-        let recency_config = RecencyConfig {
-            half_life_days: RECENCY_HALF_LIFE_DAYS,
-            floor: RECENCY_FLOOR,
+    let status =
+        if s1.status == LifecycleStatus::Quarantined || s2.status == LifecycleStatus::Quarantined {
+            LifecycleStatus::Quarantined
+        } else if s1.status == LifecycleStatus::Retired && s2.status == LifecycleStatus::Retired {
+            LifecycleStatus::Retired
+        } else {
+            let thresholds = Thresholds::default();
+            let recency_config = RecencyConfig {
+                half_life_days: RECENCY_HALF_LIFE_DAYS,
+                floor: RECENCY_FLOOR,
+            };
+            let computation = compute_trust_and_status(TrustComputationInput {
+                evidence: &medha_core::types::Evidence {
+                    k: total_k,
+                    n: total_n,
+                    context_rejects: total_context_rejects,
+                },
+                guard: &guard,
+                distinct_anchor_count: merged_anchors.len(),
+                ema: &medha_core::types::EmaState {
+                    mu: merged_mu,
+                    theta0,
+                    sample_count: (total_n.round() as u64),
+                },
+                last_signal_at,
+                now: updated_at.unwrap_or(0),
+                stored_status: LifecycleStatus::Probation,
+                status_override,
+                thresholds: &thresholds,
+                recency_config: &recency_config,
+            })?;
+            computation.status
         };
-        let computation = compute_trust_and_status(TrustComputationInput {
-            evidence: &medha_core::types::Evidence {
-                k: total_k,
-                n: total_n,
-                context_rejects: total_context_rejects,
-            },
-            guard: &guard,
-            distinct_anchor_count: merged_anchors.len(),
-            ema: &medha_core::types::EmaState {
-                mu: merged_mu,
-                theta0,
-                sample_count: (total_n.round() as u64),
-            },
-            last_signal_at,
-            now: updated_at.unwrap_or(0),
-            stored_status: LifecycleStatus::Probation,
-            status_override,
-            thresholds: &thresholds,
-            recency_config: &recency_config,
-        })?;
-        computation.status
-    };
 
     Ok(EntityState {
         key: s1.key.clone(),

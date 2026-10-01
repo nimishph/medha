@@ -1,6 +1,8 @@
 use crate::errors::SyncError;
 use crate::merge::merge_episodes;
-use crate::snapshot::{migrate_snapshot, serialize_snapshot, MemorySnapshotV1, CURRENT_MEMORY_SCHEMA_VERSION};
+use crate::snapshot::{
+    migrate_snapshot, serialize_snapshot, MemorySnapshotV1, CURRENT_MEMORY_SCHEMA_VERSION,
+};
 use crate::traits::{PullResult, PushResult, ReconcileResult, SyncPort, SyncState, SyncStatus};
 use medha_store::StorePort;
 use std::fs;
@@ -75,7 +77,10 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
                 remote_head: None,
                 ref_name: Some(ref_str),
                 remote_url: None,
-                message: Some(format!("Sync file does not exist: {}", self.file_path.display())),
+                message: Some(format!(
+                    "Sync file does not exist: {}",
+                    self.file_path.display()
+                )),
             });
         }
 

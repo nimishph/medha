@@ -1,6 +1,6 @@
 use medha_core::{
-    canonical_signals, compute_trust_and_status, fold_guard_step, fold_signal_step, EntityFoldState,
-    KindSpec, LifecycleStatus, SignalLimits, TrustComputationInput,
+    canonical_signals, compute_trust_and_status, fold_guard_step, fold_signal_step,
+    EntityFoldState, KindSpec, LifecycleStatus, SignalLimits, TrustComputationInput,
 };
 use serde_json::Value;
 use std::fs;

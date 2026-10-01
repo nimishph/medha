@@ -1,6 +1,8 @@
 use crate::errors::SyncError;
 use crate::merge::merge_episodes;
-use crate::snapshot::{migrate_snapshot, serialize_snapshot, MemorySnapshotV1, CURRENT_MEMORY_SCHEMA_VERSION};
+use crate::snapshot::{
+    migrate_snapshot, serialize_snapshot, MemorySnapshotV1, CURRENT_MEMORY_SCHEMA_VERSION,
+};
 use crate::traits::{PullResult, PushResult, ReconcileResult, SyncPort, SyncState, SyncStatus};
 use medha_store::StorePort;
 use std::io::Write;
@@ -57,7 +59,11 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
         self.store
     }
 
-    pub fn run_git(&self, args: &[&str], stdin_data: Option<&str>) -> Result<(String, String), SyncError> {
+    pub fn run_git(
+        &self,
+        args: &[&str],
+        stdin_data: Option<&str>,
+    ) -> Result<(String, String), SyncError> {
         let mut cmd = Command::new("git");
         cmd.current_dir(&self.root_dir);
         cmd.args(args);
@@ -167,22 +173,24 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
     }
 
     fn get_tracking_ref(&self, remote: &str, ref_name: &str) -> String {
-        let suffix = if ref_name.starts_with("refs/") {
-            &ref_name["refs/".len()..]
-        } else {
-            ref_name
-        };
+        let suffix = ref_name.strip_prefix("refs/").unwrap_or(ref_name);
         format!("refs/remotes/{}/{}", remote, suffix)
     }
 
-    pub fn fetch_remote_ref(&self, remote: &str, ref_name: &str) -> Result<Option<String>, SyncError> {
+    pub fn fetch_remote_ref(
+        &self,
+        remote: &str,
+        ref_name: &str,
+    ) -> Result<Option<String>, SyncError> {
         let tracking = self.get_tracking_ref(remote, ref_name);
         let ref_spec = format!("{}:{}", ref_name, tracking);
         match self.run_git(&["fetch", remote, &ref_spec], None) {
             Ok(_) => Ok(self.get_ref_commit(&tracking)),
             Err(e) => {
                 let err_str = e.to_string();
-                if err_str.contains("couldn't find remote ref") || err_str.contains("fatal: couldn't find") {
+                if err_str.contains("couldn't find remote ref")
+                    || err_str.contains("fatal: couldn't find")
+                {
                     Ok(None)
                 } else {
                     Err(e)
@@ -191,7 +199,12 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
         }
     }
 
-    pub fn push_remote_ref(&self, remote: &str, ref_name: &str, force: bool) -> Result<(), SyncError> {
+    pub fn push_remote_ref(
+        &self,
+        remote: &str,
+        ref_name: &str,
+        force: bool,
+    ) -> Result<(), SyncError> {
         let spec = if force {
             format!("+{}:{}", ref_name, ref_name)
         } else {
@@ -227,7 +240,9 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         let mut active_ref = self.ref_name.clone();
         for candidate in std::iter::once(&self.ref_name).chain(self.read_refs.iter()) {
             if self.get_ref_commit(candidate).is_some()
-                || self.get_remote_ref_commit(&self.remote, candidate).is_some()
+                || self
+                    .get_remote_ref_commit(&self.remote, candidate)
+                    .is_some()
             {
                 active_ref = candidate.clone();
                 break;

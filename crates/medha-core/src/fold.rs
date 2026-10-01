@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use crate::drift::ema_step;
 use crate::formula::{compute_trust_and_status, TrustComputationInput};
 use crate::round::round6;
@@ -7,6 +6,7 @@ use crate::types::{
     CoreError, EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, SignalSpec,
     Thresholds,
 };
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthorLedger {
@@ -179,8 +179,16 @@ pub fn fold_signal_step(
     }
 
     if kind_spec.evidence_weighting.as_deref() == Some("signal-value") {
-        let tw = if spec.counts_as_trial { spec.value.abs() } else { 0.0 };
-        let sw = if spec.counts_as_success { spec.value.max(0.0) } else { 0.0 };
+        let tw = if spec.counts_as_trial {
+            spec.value.abs()
+        } else {
+            0.0
+        };
+        let sw = if spec.counts_as_success {
+            spec.value.max(0.0)
+        } else {
+            0.0
+        };
         state.evidence.k = round6(state.evidence.k + sw)?;
         state.evidence.n = round6(state.evidence.n + tw)?;
     } else {

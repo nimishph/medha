@@ -79,9 +79,30 @@ fn test_merge_episodes_commutativity() {
 
 #[test]
 fn test_merge_episodes_associativity() {
-    let log_a = vec![create_signal_episode(1, "r1", 100, canonical_apply(), None, None)];
-    let log_b = vec![create_signal_episode(1, "r2", 200, canonical_apply(), None, None)];
-    let log_c = vec![create_signal_episode(1, "r3", 300, canonical_apply(), None, None)];
+    let log_a = vec![create_signal_episode(
+        1,
+        "r1",
+        100,
+        canonical_apply(),
+        None,
+        None,
+    )];
+    let log_b = vec![create_signal_episode(
+        1,
+        "r2",
+        200,
+        canonical_apply(),
+        None,
+        None,
+    )];
+    let log_c = vec![create_signal_episode(
+        1,
+        "r3",
+        300,
+        canonical_apply(),
+        None,
+        None,
+    )];
 
     let left = merge_episodes(&merge_episodes(&log_a, &log_b), &log_c);
     let right = merge_episodes(&log_a, &merge_episodes(&log_b, &log_c));
@@ -220,7 +241,8 @@ fn test_merge_entity_states() {
         decision_tree: Vec::new(),
     };
 
-    let merged_12 = merge_entity_states(&[s1.clone()], &[s2.clone()]).expect("merge ok");
+    let merged_12 = merge_entity_states(std::slice::from_ref(&s1), std::slice::from_ref(&s2))
+        .expect("merge ok");
     let merged_21 = merge_entity_states(&[s2], &[s1]).expect("merge ok");
 
     assert_eq!(merged_12, merged_21);

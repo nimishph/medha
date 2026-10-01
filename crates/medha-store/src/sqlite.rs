@@ -52,11 +52,15 @@ impl SqliteStore {
     }
 
     fn require_conn(&self) -> Result<&Connection, StoreError> {
-        self.conn.as_ref().ok_or(StoreError::StoreClosed("operation"))
+        self.conn
+            .as_ref()
+            .ok_or(StoreError::StoreClosed("operation"))
     }
 
     fn require_conn_mut(&mut self) -> Result<&mut Connection, StoreError> {
-        self.conn.as_mut().ok_or(StoreError::StoreClosed("operation"))
+        self.conn
+            .as_mut()
+            .ok_or(StoreError::StoreClosed("operation"))
     }
 
     fn assert_open(&self, op: &'static str) -> Result<(), StoreError> {
@@ -104,8 +108,9 @@ impl StorePort for SqliteStore {
 
         if self.path != ":memory:" {
             if let Some(parent) = Path::new(&self.path).parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| StoreError::Database(format!("Failed to create parent dir: {}", e)))?;
+                fs::create_dir_all(parent).map_err(|e| {
+                    StoreError::Database(format!("Failed to create parent dir: {}", e))
+                })?;
             }
         }
 
@@ -207,7 +212,10 @@ impl StorePort for SqliteStore {
             return Err(StoreError::CorruptStore {
                 store_path: self.path.clone(),
                 at_seq: bad_seq,
-                reason: format!("Cannot append to corrupt store: unrecoverable from seq {}", bad_seq),
+                reason: format!(
+                    "Cannot append to corrupt store: unrecoverable from seq {}",
+                    bad_seq
+                ),
             });
         }
 
@@ -264,7 +272,7 @@ impl StorePort for SqliteStore {
     fn list(&self) -> Result<Vec<EntityState>, StoreError> {
         self.assert_open("list")?;
         let mut states: Vec<EntityState> = self.projection.values().cloned().collect();
-        states.sort_by(|a, b| a.key.to_string_repr().cmp(&b.key.to_string_repr()));
+        states.sort_by_key(|a| a.key.to_string_repr());
         Ok(states)
     }
 
@@ -272,7 +280,7 @@ impl StorePort for SqliteStore {
         self.assert_open("rebuild")?;
         self.projection = fold_log(&self.log);
         let mut states: Vec<EntityState> = self.projection.values().cloned().collect();
-        states.sort_by(|a, b| a.key.to_string_repr().cmp(&b.key.to_string_repr()));
+        states.sort_by_key(|a| a.key.to_string_repr());
         Ok(states)
     }
 
@@ -287,7 +295,11 @@ impl StorePort for SqliteStore {
         }
 
         let from = 0;
-        let to = if self.log.is_empty() { 0 } else { self.log.len() as u64 - 1 };
+        let to = if self.log.is_empty() {
+            0
+        } else {
+            self.log.len() as u64 - 1
+        };
 
         let conn = self.require_conn_mut()?;
         let tx = conn.transaction()?;

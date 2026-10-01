@@ -10,7 +10,11 @@ fn sample_signal(id: &str, at: i64, value: f64, success: bool) -> EpisodeInput {
         author: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
-                name: if success { "APPLY".to_string() } else { "REJECT_RULE".to_string() },
+                name: if success {
+                    "APPLY".to_string()
+                } else {
+                    "REJECT_RULE".to_string()
+                },
                 value,
                 counts_as_trial: true,
                 counts_as_success: success,
@@ -45,25 +49,47 @@ fn test_distributed_5_node_gossip_mesh_convergence() {
         .collect();
 
     // Node 0 logs signals for rule-A and rule-B
-    replicas[0].append(sample_signal("rule-A", 1000, 1.0, true)).unwrap();
-    replicas[0].append(sample_signal("rule-B", 1050, 1.0, true)).unwrap();
+    replicas[0]
+        .append(sample_signal("rule-A", 1000, 1.0, true))
+        .unwrap();
+    replicas[0]
+        .append(sample_signal("rule-B", 1050, 1.0, true))
+        .unwrap();
 
     // Node 1 logs signals for rule-B and rule-C
-    replicas[1].append(sample_signal("rule-B", 1100, -1.0, false)).unwrap();
-    replicas[1].append(sample_signal("rule-C", 1150, 1.0, true)).unwrap();
+    replicas[1]
+        .append(sample_signal("rule-B", 1100, -1.0, false))
+        .unwrap();
+    replicas[1]
+        .append(sample_signal("rule-C", 1150, 1.0, true))
+        .unwrap();
 
     // Node 2 logs signals for rule-A, rule-C, rule-D
-    replicas[2].append(sample_signal("rule-A", 1200, 1.0, true)).unwrap();
-    replicas[2].append(sample_signal("rule-C", 1250, 1.0, true)).unwrap();
-    replicas[2].append(sample_signal("rule-D", 1300, -1.0, false)).unwrap();
+    replicas[2]
+        .append(sample_signal("rule-A", 1200, 1.0, true))
+        .unwrap();
+    replicas[2]
+        .append(sample_signal("rule-C", 1250, 1.0, true))
+        .unwrap();
+    replicas[2]
+        .append(sample_signal("rule-D", 1300, -1.0, false))
+        .unwrap();
 
     // Node 3 logs signals for rule-D and rule-E
-    replicas[3].append(sample_signal("rule-D", 1350, 1.0, true)).unwrap();
-    replicas[3].append(sample_signal("rule-E", 1400, 1.0, true)).unwrap();
+    replicas[3]
+        .append(sample_signal("rule-D", 1350, 1.0, true))
+        .unwrap();
+    replicas[3]
+        .append(sample_signal("rule-E", 1400, 1.0, true))
+        .unwrap();
 
     // Node 4 logs signals for rule-A and rule-E
-    replicas[4].append(sample_signal("rule-A", 1450, -1.0, false)).unwrap();
-    replicas[4].append(sample_signal("rule-E", 1500, 1.0, true)).unwrap();
+    replicas[4]
+        .append(sample_signal("rule-A", 1450, -1.0, false))
+        .unwrap();
+    replicas[4]
+        .append(sample_signal("rule-E", 1500, 1.0, true))
+        .unwrap();
 
     // Chaotic Pairwise Gossip Schedule
     let gossip_pairs = [
@@ -96,15 +122,31 @@ fn test_distributed_5_node_gossip_mesh_convergence() {
     let reference_log = replicas[0].episodes(None, None).unwrap();
     let reference_states = replicas[0].list().unwrap();
 
-    assert_eq!(reference_log.len(), 11, "All 11 unique episodes must be present");
-    assert_eq!(reference_states.len(), 5, "All 5 unique entities (A, B, C, D, E) must be present");
+    assert_eq!(
+        reference_log.len(),
+        11,
+        "All 11 unique episodes must be present"
+    );
+    assert_eq!(
+        reference_states.len(),
+        5,
+        "All 5 unique entities (A, B, C, D, E) must be present"
+    );
 
-    for idx in 1..5 {
-        let ep = replicas[idx].episodes(None, None).unwrap();
-        let st = replicas[idx].list().unwrap();
+    for (idx, replica) in replicas.iter().enumerate().skip(1) {
+        let ep = replica.episodes(None, None).unwrap();
+        let st = replica.list().unwrap();
 
-        assert_eq!(ep, reference_log, "Replica {} log must match reference replica 0 byte-for-byte", idx);
-        assert_eq!(st, reference_states, "Replica {} states must match reference replica 0 byte-for-byte", idx);
+        assert_eq!(
+            ep, reference_log,
+            "Replica {} log must match reference replica 0 byte-for-byte",
+            idx
+        );
+        assert_eq!(
+            st, reference_states,
+            "Replica {} states must match reference replica 0 byte-for-byte",
+            idx
+        );
     }
 }
 
@@ -125,7 +167,8 @@ fn test_distributed_cross_replica_retraction_resolution() {
     r3.open().unwrap();
 
     // R1 creates rule-bad at t=100
-    r1.append(sample_signal("rule-bad", 100, 1.0, true)).unwrap();
+    r1.append(sample_signal("rule-bad", 100, 1.0, true))
+        .unwrap();
 
     // R2 pulls from R1
     let r1_log = r1.episodes(None, None).unwrap();
@@ -145,9 +188,12 @@ fn test_distributed_cross_replica_retraction_resolution() {
     r2.append(retract_ep).unwrap();
 
     // Concurrently, R3 logged other rules BEFORE seeing rule-bad, so rule-bad would get a different seq
-    r3.append(sample_signal("rule-innocent-1", 50, 1.0, true)).unwrap();
-    r3.append(sample_signal("rule-innocent-2", 75, 1.0, true)).unwrap();
-    r3.append(sample_signal("rule-bad", 100, 1.0, true)).unwrap(); // Same episode as R1
+    r3.append(sample_signal("rule-innocent-1", 50, 1.0, true))
+        .unwrap();
+    r3.append(sample_signal("rule-innocent-2", 75, 1.0, true))
+        .unwrap();
+    r3.append(sample_signal("rule-bad", 100, 1.0, true))
+        .unwrap(); // Same episode as R1
 
     // Merge R2 and R3
     let log_r2 = r2.episodes(None, None).unwrap();
@@ -165,12 +211,21 @@ fn test_distributed_cross_replica_retraction_resolution() {
     // 2. innocent rules were NOT retracted (trials n == 1 each)
     let states = r3.list().unwrap();
     let bad_state = states.iter().find(|s| s.key.id == "rule-bad").unwrap();
-    assert_eq!(bad_state.evidence.n, 0.0, "Retracted episode must not contribute to trials");
+    assert_eq!(
+        bad_state.evidence.n, 0.0,
+        "Retracted episode must not contribute to trials"
+    );
 
-    let inn1 = states.iter().find(|s| s.key.id == "rule-innocent-1").unwrap();
+    let inn1 = states
+        .iter()
+        .find(|s| s.key.id == "rule-innocent-1")
+        .unwrap();
     assert_eq!(inn1.evidence.n, 1.0, "Innocent rule 1 must remain active");
 
-    let inn2 = states.iter().find(|s| s.key.id == "rule-innocent-2").unwrap();
+    let inn2 = states
+        .iter()
+        .find(|s| s.key.id == "rule-innocent-2")
+        .unwrap();
     assert_eq!(inn2.evidence.n, 1.0, "Innocent rule 2 must remain active");
 }
 
@@ -202,13 +257,20 @@ fn test_distributed_network_partition_and_split_brain_healing() {
     for i in 0..500 {
         let ts = 200 + i;
         if i % 2 == 0 {
-            node_a.append(sample_signal("shared-rule", ts, 1.0, true)).unwrap();
+            node_a
+                .append(sample_signal("shared-rule", ts, 1.0, true))
+                .unwrap();
         } else {
-            node_b.append(sample_signal("shared-rule", ts, 1.0, true)).unwrap();
+            node_b
+                .append(sample_signal("shared-rule", ts, 1.0, true))
+                .unwrap();
         }
     }
     // Sync within Partition 1
-    let merged_ab = merge_episodes(&node_a.episodes(None, None).unwrap(), &node_b.episodes(None, None).unwrap());
+    let merged_ab = merge_episodes(
+        &node_a.episodes(None, None).unwrap(),
+        &node_b.episodes(None, None).unwrap(),
+    );
     node_a.replace_log(&merged_ab).unwrap();
     node_b.replace_log(&merged_ab).unwrap();
 
@@ -218,28 +280,44 @@ fn test_distributed_network_partition_and_split_brain_healing() {
         let success = i % 5 != 0;
         let val = if success { 1.0 } else { -1.0 };
         if i % 2 == 0 {
-            node_c.append(sample_signal("shared-rule", ts, val, success)).unwrap();
+            node_c
+                .append(sample_signal("shared-rule", ts, val, success))
+                .unwrap();
         } else {
-            node_d.append(sample_signal("shared-rule", ts, val, success)).unwrap();
+            node_d
+                .append(sample_signal("shared-rule", ts, val, success))
+                .unwrap();
         }
     }
     // Sync within Partition 2
-    let merged_cd = merge_episodes(&node_c.episodes(None, None).unwrap(), &node_d.episodes(None, None).unwrap());
+    let merged_cd = merge_episodes(
+        &node_c.episodes(None, None).unwrap(),
+        &node_d.episodes(None, None).unwrap(),
+    );
     node_c.replace_log(&merged_cd).unwrap();
     node_d.replace_log(&merged_cd).unwrap();
 
     // --- PARTITION HEALS ---
     // Cross-partition bridge: Node B syncs with Node C
-    let cross_bc = merge_episodes(&node_b.episodes(None, None).unwrap(), &node_c.episodes(None, None).unwrap());
+    let cross_bc = merge_episodes(
+        &node_b.episodes(None, None).unwrap(),
+        &node_c.episodes(None, None).unwrap(),
+    );
     node_b.replace_log(&cross_bc).unwrap();
     node_c.replace_log(&cross_bc).unwrap();
 
     // Gossip propagates to A and D
-    let full_a = merge_episodes(&node_a.episodes(None, None).unwrap(), &node_b.episodes(None, None).unwrap());
+    let full_a = merge_episodes(
+        &node_a.episodes(None, None).unwrap(),
+        &node_b.episodes(None, None).unwrap(),
+    );
     node_a.replace_log(&full_a).unwrap();
     node_a.rebuild().unwrap();
 
-    let full_d = merge_episodes(&node_d.episodes(None, None).unwrap(), &node_c.episodes(None, None).unwrap());
+    let full_d = merge_episodes(
+        &node_d.episodes(None, None).unwrap(),
+        &node_c.episodes(None, None).unwrap(),
+    );
     node_d.replace_log(&full_d).unwrap();
     node_d.rebuild().unwrap();
 
@@ -247,8 +325,14 @@ fn test_distributed_network_partition_and_split_brain_healing() {
     let state_a = node_a.list().unwrap();
     let state_d = node_d.list().unwrap();
 
-    assert_eq!(state_a[0].evidence.n, 1001.0, "Total trials must equal 1 initial + 500 from P1 + 500 from P2");
-    assert_eq!(state_a, state_d, "Partition 1 and Partition 2 must achieve identical belief state");
+    assert_eq!(
+        state_a[0].evidence.n, 1001.0,
+        "Total trials must equal 1 initial + 500 from P1 + 500 from P2"
+    );
+    assert_eq!(
+        state_a, state_d,
+        "Partition 1 and Partition 2 must achieve identical belief state"
+    );
 }
 
 /// Distributed Test 4: CAS Divergence & Safe Concurrent Push via File Adapter
@@ -266,7 +350,10 @@ fn test_distributed_cas_contention_and_recovery() {
     let mut adapter_2 = FileSyncAdapter::new(replica_2, &sync_file);
 
     // Initial push from Replica 1
-    adapter_1.store_mut().append(sample_signal("rule-1", 100, 1.0, true)).unwrap();
+    adapter_1
+        .store_mut()
+        .append(sample_signal("rule-1", 100, 1.0, true))
+        .unwrap();
     let push_1 = adapter_1.push(Some(100)).unwrap();
     assert!(push_1.ok);
 
@@ -275,8 +362,14 @@ fn test_distributed_cas_contention_and_recovery() {
     assert!(pull_2.ok);
 
     // Concurrent race: Both replicas append new local signals
-    adapter_1.store_mut().append(sample_signal("rule-2", 200, 1.0, true)).unwrap();
-    adapter_2.store_mut().append(sample_signal("rule-3", 300, 1.0, true)).unwrap();
+    adapter_1
+        .store_mut()
+        .append(sample_signal("rule-2", 200, 1.0, true))
+        .unwrap();
+    adapter_2
+        .store_mut()
+        .append(sample_signal("rule-3", 300, 1.0, true))
+        .unwrap();
 
     // Replica 1 pushes first -> SUCCEEDS
     let push_race_1 = adapter_1.push(Some(200)).unwrap();
@@ -284,8 +377,14 @@ fn test_distributed_cas_contention_and_recovery() {
 
     // Replica 2 attempts to push stale snapshot -> REFUSED with CAS divergence error
     let push_race_2 = adapter_2.push(Some(300)).unwrap();
-    assert!(!push_race_2.ok, "Concurrent push without pulling must be refused");
-    assert!(push_race_2.error.unwrap().contains("changed since last pull"));
+    assert!(
+        !push_race_2.ok,
+        "Concurrent push without pulling must be refused"
+    );
+    assert!(push_race_2
+        .error
+        .unwrap()
+        .contains("changed since last pull"));
 
     // Replica 2 recovers via reconcile() (pulls latest, merges CRDT, pushes merged result)
     let rec_2 = adapter_2.reconcile(Some(400)).unwrap();

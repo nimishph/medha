@@ -7,10 +7,7 @@ pub enum CoreError {
     NonFiniteNumber(f64),
 
     #[error("Invalid argument for '{name}': {reason}")]
-    InvalidArgument {
-        name: &'static str,
-        reason: String,
-    },
+    InvalidArgument { name: &'static str, reason: String },
 
     #[error("Invalid evidence counts: successes={successes}, trials={trials}")]
     InvalidCounts { successes: f64, trials: f64 },
@@ -42,7 +39,11 @@ fn default_kind() -> String {
 }
 
 impl EntityKey {
-    pub fn new(namespace: impl Into<String>, kind: impl Into<String>, id: impl Into<String>) -> Self {
+    pub fn new(
+        namespace: impl Into<String>,
+        kind: impl Into<String>,
+        id: impl Into<String>,
+    ) -> Self {
         Self {
             namespace: namespace.into(),
             kind: kind.into(),

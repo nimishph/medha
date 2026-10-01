@@ -22,10 +22,7 @@ pub enum StoreError {
     Serialization(String),
 
     #[error("Invalid argument for '{name}': {reason}")]
-    InvalidArgument {
-        name: &'static str,
-        reason: String,
-    },
+    InvalidArgument { name: &'static str, reason: String },
 
     #[error("Core error: {0}")]
     Core(#[from] medha_core::types::CoreError),

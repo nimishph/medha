@@ -123,7 +123,7 @@ impl StorePort for MemoryStore {
     fn list(&self) -> Result<Vec<EntityState>, StoreError> {
         self.assert_open("list")?;
         let mut states: Vec<EntityState> = self.projection.values().cloned().collect();
-        states.sort_by(|a, b| a.key.to_string_repr().cmp(&b.key.to_string_repr()));
+        states.sort_by_key(|a| a.key.to_string_repr());
         Ok(states)
     }
 
@@ -131,14 +131,18 @@ impl StorePort for MemoryStore {
         self.assert_open("rebuild")?;
         self.projection = fold_log(&self.log);
         let mut states: Vec<EntityState> = self.projection.values().cloned().collect();
-        states.sort_by(|a, b| a.key.to_string_repr().cmp(&b.key.to_string_repr()));
+        states.sort_by_key(|a| a.key.to_string_repr());
         Ok(states)
     }
 
     fn replace_log(&mut self, episodes: &[Episode]) -> Result<ReplaceLogResult, StoreError> {
         self.assert_open("replace_log")?;
         let from = 0;
-        let to = if self.log.is_empty() { 0 } else { self.log.len() as u64 - 1 };
+        let to = if self.log.is_empty() {
+            0
+        } else {
+            self.log.len() as u64 - 1
+        };
 
         self.log.clear();
         self.projection.clear();

@@ -41,7 +41,10 @@ pub fn migrate_snapshot(raw: serde_json::Value) -> Result<MemorySnapshotV1, Sync
 
     if version.is_none() {
         if let Some(fmt) = obj.get("format").and_then(|v| v.as_str()) {
-            if let Some(v_str) = fmt.strip_prefix("sutras.medha/v").or_else(|| fmt.strip_prefix("sutras.sage/v")) {
+            if let Some(v_str) = fmt
+                .strip_prefix("sutras.medha/v")
+                .or_else(|| fmt.strip_prefix("sutras.sage/v"))
+            {
                 if let Ok(parsed) = v_str.parse::<u32>() {
                     version = Some(parsed);
                 }
@@ -59,14 +62,15 @@ pub fn migrate_snapshot(raw: serde_json::Value) -> Result<MemorySnapshotV1, Sync
     }
 
     // Extract entities
-    let entities: Vec<EntityState> = if let Some(arr) = obj.get("entities").and_then(|v| v.as_array()) {
-        serde_json::from_value(serde_json::Value::Array(arr.clone()))?
-    } else if let Some(rules_obj) = obj.get("rules").and_then(|v| v.as_object()) {
-        let vals: Vec<serde_json::Value> = rules_obj.values().cloned().collect();
-        serde_json::from_value(serde_json::Value::Array(vals))?
-    } else {
-        Vec::new()
-    };
+    let entities: Vec<EntityState> =
+        if let Some(arr) = obj.get("entities").and_then(|v| v.as_array()) {
+            serde_json::from_value(serde_json::Value::Array(arr.clone()))?
+        } else if let Some(rules_obj) = obj.get("rules").and_then(|v| v.as_object()) {
+            let vals: Vec<serde_json::Value> = rules_obj.values().cloned().collect();
+            serde_json::from_value(serde_json::Value::Array(vals))?
+        } else {
+            Vec::new()
+        };
 
     let as_of = obj
         .get("exportedAt")
@@ -92,7 +96,9 @@ pub fn migrate_snapshot(raw: serde_json::Value) -> Result<MemorySnapshotV1, Sync
                 for item in &mut normalized_arr {
                     normalize_episode_value(item);
                 }
-                Some(serde_json::from_value(serde_json::Value::Array(normalized_arr))?)
+                Some(serde_json::from_value(serde_json::Value::Array(
+                    normalized_arr,
+                ))?)
             } else {
                 None
             }
@@ -149,15 +155,22 @@ fn normalize_episode_value(ep: &mut serde_json::Value) {
                         "SKIP" | "REJECT_CONTEXT" => false,
                         _ => val != 0.0,
                     };
-                    spec.insert("countsAsTrial".to_string(), serde_json::json!(counts_as_trial));
+                    spec.insert(
+                        "countsAsTrial".to_string(),
+                        serde_json::json!(counts_as_trial),
+                    );
                 }
 
-                if !spec.contains_key("countsAsSuccess") && !spec.contains_key("counts_as_success") {
+                if !spec.contains_key("countsAsSuccess") && !spec.contains_key("counts_as_success")
+                {
                     let counts_as_success = match normalized_name.as_str() {
                         "SKIP" | "REJECT_CONTEXT" | "REJECT_RULE" => false,
                         _ => val > 0.0,
                     };
-                    spec.insert("countsAsSuccess".to_string(), serde_json::json!(counts_as_success));
+                    spec.insert(
+                        "countsAsSuccess".to_string(),
+                        serde_json::json!(counts_as_success),
+                    );
                 }
             }
         }

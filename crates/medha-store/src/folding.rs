@@ -1,11 +1,11 @@
 use crate::types::{EntityState, Episode, EpisodePayload};
+use medha_core::decision::DecisionCase;
 use medha_core::drift::ema_step;
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::thresholds::{DEFAULT_EMA_ALPHA, DEFAULT_THETA0, WEEK_MS};
 use medha_core::types::{
     EmaState, EntityKey, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,
 };
-use medha_core::decision::DecisionCase;
 use std::collections::HashMap;
 
 pub fn fresh_state(key: EntityKey) -> EntityState {
@@ -48,7 +48,8 @@ pub fn fold_episode_into_state(
                     if spec.counts_as_trial {
                         branch.evidence.n += 1.0;
                     }
-                    if let Ok(new_mu) = ema_step(Some(branch.ema.mu), spec.value, DEFAULT_EMA_ALPHA) {
+                    if let Ok(new_mu) = ema_step(Some(branch.ema.mu), spec.value, DEFAULT_EMA_ALPHA)
+                    {
                         branch.ema.mu = new_mu;
                     }
                 }
@@ -165,22 +166,20 @@ pub fn fold_episode_into_state(
             }
             Some(state)
         }
-        EpisodePayload::Sweep { action, .. } => {
-            match action.as_str() {
-                "purge" => None,
-                "quarantine" => {
-                    state.status_override = Some(LifecycleStatus::Quarantined);
-                    state.status = LifecycleStatus::Quarantined;
-                    Some(state)
-                }
-                "retire" => {
-                    state.status_override = Some(LifecycleStatus::Retired);
-                    state.status = LifecycleStatus::Retired;
-                    Some(state)
-                }
-                _ => Some(state),
+        EpisodePayload::Sweep { action, .. } => match action.as_str() {
+            "purge" => None,
+            "quarantine" => {
+                state.status_override = Some(LifecycleStatus::Quarantined);
+                state.status = LifecycleStatus::Quarantined;
+                Some(state)
             }
-        }
+            "retire" => {
+                state.status_override = Some(LifecycleStatus::Retired);
+                state.status = LifecycleStatus::Retired;
+                Some(state)
+            }
+            _ => Some(state),
+        },
         EpisodePayload::Baseline { state: b_state } => Some(b_state.clone()),
         EpisodePayload::Decision {
             case_id,

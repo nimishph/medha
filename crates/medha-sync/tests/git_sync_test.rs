@@ -50,7 +50,11 @@ fn test_git_sync_lifecycle_and_ref_push() {
     // Init real git repository
     run_cmd(repo_path, "git", &["init"]);
     run_cmd(repo_path, "git", &["config", "user.name", "Medha Test"]);
-    run_cmd(repo_path, "git", &["config", "user.email", "test@medha.local"]);
+    run_cmd(
+        repo_path,
+        "git",
+        &["config", "user.email", "test@medha.local"],
+    );
     run_cmd(
         repo_path,
         "git",
@@ -70,7 +74,9 @@ fn test_git_sync_lifecycle_and_ref_push() {
 
     // Append and push
     let mut store = adapter.store().clone(); // Or take store back
-    store.append(sample_signal("rule-git-1", 1000)).expect("append ok");
+    store
+        .append(sample_signal("rule-git-1", 1000))
+        .expect("append ok");
 
     let mut adapter = GitRefSyncAdapter::new(store, repo_path);
     let push_res = adapter.push(Some(1000)).expect("push ok");
@@ -119,7 +125,9 @@ fn test_git_sync_two_repos_reconcile() {
     // Store A records rule-a and pushes to ref
     let mut store_a = MemoryStore::new(None);
     store_a.open().expect("open a");
-    store_a.append(sample_signal("rule-a", 1000)).expect("append a");
+    store_a
+        .append(sample_signal("rule-a", 1000))
+        .expect("append a");
     let mut adapter_a = GitRefSyncAdapter::new(store_a, repo_a);
     let push_a = adapter_a.push(Some(1000)).expect("push a");
     assert!(push_a.ok);
@@ -127,7 +135,9 @@ fn test_git_sync_two_repos_reconcile() {
     // Store B records rule-b
     let mut store_b = MemoryStore::new(None);
     store_b.open().expect("open b");
-    store_b.append(sample_signal("rule-b", 2000)).expect("append b");
+    store_b
+        .append(sample_signal("rule-b", 2000))
+        .expect("append b");
     let mut adapter_b = GitRefSyncAdapter::new(store_b, repo_b);
 
     // B reconciles with A (fetches remote ref, merges episodes, writes ref)
@@ -139,4 +149,3 @@ fn test_git_sync_two_repos_reconcile() {
     ids_b.sort();
     assert_eq!(ids_b, vec!["rule-a", "rule-b"]);
 }
-
