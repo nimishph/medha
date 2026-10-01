@@ -400,6 +400,20 @@ export const reportCommandArgs: ArgsDef = {
   },
 };
 
+export const issueCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  title: {
+    type: 'positional',
+    description: 'Title or summary for the issue.',
+    required: false,
+  },
+  open: {
+    type: 'boolean',
+    description: 'Open the issue URL in your default browser.',
+    default: true,
+  },
+};
+
 export const primerCommandArgs: ArgsDef = {
   topic: {
     type: 'positional',

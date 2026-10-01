@@ -250,6 +250,7 @@ host can inject the most trusted guidance without overrunning its context.
 
 - **`medha ui`** launches a local web dashboard over the store.
 - **`medha report`** writes a standalone, offline HTML snapshot you can attach to a review.
+- **`medha issue [title]`** prepares a GitHub issue prefilled with sanitized runtime and store diagnostics.
 - **`medha sync status|pull|push`** shares evidence between machines through a git ref or a file.
   Registries travel with the episodes, so custom kinds and signals do not have to be copied by hand.
 

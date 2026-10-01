@@ -2461,4 +2461,40 @@ describe('extensibility and resilient kind scoping (TASK-EXT-04 & TASK-EXT-05)',
     const listOutput = repoB.out().slice(beforeList);
     expect(listOutput).toContain('service/auth-api');
   });
+
+  describe('medha issue command', () => {
+    test('issue prepares a GitHub issue with sanitized diagnostics (--json)', async () => {
+      const repo = fresh();
+      expect(await runCli(['init'], repo.env)).toBe(0);
+
+      const before = repo.out().length;
+      expect(
+        await runCli(['issue', 'Fix unexpected drift warning', '--no-open', '--json'], repo.env),
+      ).toBe(0);
+      const output = repo.out().slice(before);
+      const data = JSON.parse(output);
+
+      expect(data.title).toBe('Fix unexpected drift warning');
+      expect(data.url).toContain('https://github.com/nimishph/medha/issues/new');
+      expect(data.body).toContain('### Diagnostics (Sanitized)');
+      expect(data.body).toContain('Medha Version');
+      expect(data.body).toContain('Platform');
+      expect(data.body).toContain('backend: sqlite');
+      expect(data.body).not.toContain(repo.env.cwd);
+    });
+
+    test('issue works without initialized home and renders text output', async () => {
+      const repo = fresh();
+
+      const before = repo.out().length;
+      expect(await runCli(['issue', 'Bug', 'report', 'uninitialized', '--no-open'], repo.env)).toBe(
+        0,
+      );
+      const output = repo.out().slice(before);
+
+      expect(output).toContain('medha: prepared issue on GitHub:');
+      expect(output).toContain('title: Bug report uninitialized');
+      expect(output).toContain('url:   https://github.com/nimishph/medha/issues/new');
+    });
+  });
 });

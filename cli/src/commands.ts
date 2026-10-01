@@ -15,6 +15,7 @@ import {
   explainThresholdCommandArgs,
   guardCommandArgs,
   initCommandArgs,
+  issueCommandArgs,
   listCommandArgs,
   maintainBackupArgs,
   maintainCompactArgs,
@@ -355,6 +356,30 @@ export const reportCommand = defineCommand({
       environment,
     );
     environment.stdout(args.json === true ? toJson(outcome) : renderReport(outcome));
+  },
+});
+
+export const issueCommand = defineCommand({
+  meta: {
+    name: 'issue',
+    description: 'Raise an issue on GitHub with sanitized diagnostics.',
+  },
+  args: issueCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runIssue, renderIssue } = await import('./issue.ts');
+    const report = await runIssue(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.title === undefined ? {} : { title: args.title }),
+        ...(args.open === undefined ? {} : { open: args.open }),
+        ...(args.json === undefined ? {} : { json: args.json }),
+        _: (args as { _: string[] })._,
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderIssue(report));
   },
 });
 
@@ -891,6 +916,7 @@ export const commands = defineCommand({
     primer: primerCommand,
     ui: uiCommand,
     report: reportCommand,
+    issue: issueCommand,
     maintain: maintainCommand,
     updater: updaterCommand,
     mcp: mcpCommand,
