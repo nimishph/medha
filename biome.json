@@ -6,6 +6,8 @@
       "**",
       "!**/node_modules",
       "!**/dist",
+      "!**/target",
+      "!crates",
       "!examples",
       "!docs/spec/vectors",
       "!**/.beads",
