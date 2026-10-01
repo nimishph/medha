@@ -23,3 +23,31 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - run: bun run check
+  # The committed conformance vectors must match what the independent Python reference generates.
+  spec:
+    name: spec vectors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python docs/spec/vectors/generate.py --check
+
+  # The native Rust port (crates/) is checked against the same spec vectors as the TypeScript kernel.
+  rust:
+    name: rust (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
