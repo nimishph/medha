@@ -96,7 +96,7 @@ export function applySignal(
       updatedAt: context.now,
     },
     anchors: mapAnchors(state, applied, context.now),
-    lastSignalAt: applied.spec.name === 'SKIP' ? state.lastSignalAt : context.now,
+    lastSignalAt: applied.spec.countsAsSuccess ? context.now : state.lastSignalAt,
   };
   const status = statusFor(next, context.now, context.kindSpec);
   return { state: { ...next, status }, status };

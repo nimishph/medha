@@ -1,5 +1,5 @@
 {
-  "specVersion": "1.4.0",
+  "specVersion": "1.5.0",
   "scenarios": [
     {
       "name": "fresh-unguarded",
@@ -1255,11 +1255,11 @@
       "guardKind": "ci",
       "theta0": 0.9,
       "expected": {
-        "trust": 0.673043,
+        "trust": 0.673042,
         "components": {
           "wilson": 0.609657,
           "guard": 1,
-          "recency": 0.999998,
+          "recency": 0.999997,
           "durability": 1.103972,
           "ceiling": 1
         },
@@ -1324,7 +1324,7 @@
         "components": {
           "wilson": 0.0,
           "guard": 1,
-          "recency": 0.999999,
+          "recency": 0.3,
           "durability": 1,
           "ceiling": 1
         },
@@ -1434,7 +1434,7 @@
         "components": {
           "wilson": 0.0,
           "guard": 1,
-          "recency": 0.999999,
+          "recency": 0.3,
           "durability": 1,
           "ceiling": 1
         },
@@ -3117,11 +3117,11 @@
         "evidenceWeighting": "signal-value"
       },
       "expected": {
-        "trust": 0.592549,
+        "trust": 0.592548,
         "components": {
           "wilson": 0.536743,
           "guard": 1,
-          "recency": 1.0,
+          "recency": 0.999998,
           "durability": 1.103972,
           "ceiling": 1
         },

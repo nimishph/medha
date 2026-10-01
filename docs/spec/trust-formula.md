@@ -92,6 +92,10 @@ with `+ margin`, capped at 1, and `width = round6(max(0, upper − lower))` (wid
 
 ### 4.3 Recency `R`
 
+`lastSignalAt` records the timestamp of the last *successful* signal (`countsAsSuccess: true`).
+Signals that do not count as a success (`REJECT_RULE`, `SKIP`, `REJECT_CONTEXT`) do not refresh `lastSignalAt`,
+ensuring that observing a failure on a dormant entity does not reset the recency decay floor and artificially inflate its trust score (spec decision medha-s7z.6).
+
 ```
 lastSignalAt == null -> floor
 ageDays = max(0, (now - lastSignalAt) / DAY_MS)
@@ -406,5 +410,6 @@ fields or new signals that leave existing vectors unchanged are **minor**. Wordi
 
 | Version | Change |
 | --- | --- |
+| 1.5.0 | Recency refresh is gated on `countsAsSuccess: true`; `REJECT_RULE` no longer resets `lastSignalAt`, preserving trust monotonicity on dormant entities upon failure (medha-s7z.6). |
 | 1.4.0 | Decision-tree write-time validation is now normative (§11a.2): an explicitly supplied `caseId` must exist, and a `parentId` that is unknown, self-referential, or a descendant is refused, as is a sibling-duplicate condition. `detach` promotes a branch to the root, and an omitted `parentId` on an edit inherits rather than clears. Added `parentInheritance` vectors. §11a.4 states that the `human:` gate is advisory and that writer-facing text must not instruct a writer to pass it. No vector's expected trust/status output changed — hence minor. |
 | 1.3.0 | Drift gained an explicit direction; quarantine is gated on drift **down** only, so an entity that is diverging *upward* is no longer quarantined. `medha sweep` no longer retires on age or recency alone. |

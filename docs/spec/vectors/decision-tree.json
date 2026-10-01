@@ -1,5 +1,5 @@
 {
-  "specVersion": "1.4.0",
+  "specVersion": "1.5.0",
   "note": "medha-arj.8: definitions/decision-tree conformance vectors, trust-formula.md §11a. caseRef labels are resolved to real case ids by the runner (via newDecisionCaseId or equivalent) before folding — case ids are locally minted, not portable literals, so only the fold's *behavior* is a cross-port vector here.",
   "parentInheritance": [
     {

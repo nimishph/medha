@@ -280,14 +280,14 @@ describe('documented non-monotonicities (pinned: changing these is a spec decisi
     expect(trustOf(state, now).trust).toBe(0);
   });
 
-  test('a rejection refreshes recency, so it can raise the score of a stale entity', () => {
+  test('a rejection does not refresh recency, preserving trust monotonicity for stale entities', () => {
     const state = guarded(0.9, 20);
     const later = T0 + 300 * DAY_MS;
     const before = trustOf(state, later).trust;
     const rejected = applySignal(state, { spec: REJECT_RULE }, { now: later }).state;
     const after = trustOf(rejected, later).trust;
-    // Evidence got worse (20/21 < 20/20) yet recency reset from the floor to 1.
+    // Evidence got worse (20/21 < 20/20) and recency is not reset, so trust monotonically decreases.
     expect(wilsonLowerBound(20, 21)).toBeLessThan(wilsonLowerBound(20, 20));
-    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThanOrEqual(before);
   });
 });

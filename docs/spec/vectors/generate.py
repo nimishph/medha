@@ -15,7 +15,7 @@ import math
 import pathlib
 import sys
 
-SPEC_VERSION = "1.4.0"
+SPEC_VERSION = "1.5.0"
 DAY_MS = 86_400_000
 WEEK_MS = 7 * DAY_MS
 
@@ -224,7 +224,7 @@ def fold_signal(st, step, ks):
             if not any(a[0] == b[0] and a[1] == b[1] for b in anchors):
                 anchors.append(list(a))
         st["anchors"] = anchors
-    if step["signal"] != "SKIP":
+    if spec["success"]:
         st["last"] = at
     # Status lag: the status is recomputed on the state that still carries the PREVIOUS status.
     t, comps, _ = trust_of(st, at, ks)
