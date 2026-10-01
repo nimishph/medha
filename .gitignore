@@ -1,6 +1,7 @@
 dist/
 node_modules/
 target/
+*.node
 
 # Copies of the root files that tooling/package-release.ts stages into cli/ for the npm publish.
 # Byte-identical to the originals and never committed; the release workflow re-copies them anyway.

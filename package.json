@@ -21,7 +21,11 @@
     "test": "bun test",
     "spec:check": "python docs/spec/vectors/generate.py --check",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
-    "build": "bun run tooling/package-release.ts",
+    "build": "bun run tooling/package-release.ts --rust",
+    "build:ts": "bun run tooling/package-release.ts",
+    "build:rust": "cargo build --release -p medha-cli --bin medha",
+    "build:napi": "cargo build --release -p medha-napi",
+    "package:rust": "bun run tooling/package-release.ts --rust",
     "smoke": "bun run tooling/smoke-package.ts && bun run tooling/smoke-npm.ts",
     "changelog": "git-cliff -o CHANGELOG.md",
     "changelog:preview": "git-cliff --unreleased",
@@ -40,5 +44,5 @@
     "name": "nimishph",
     "url": "https://github.com/nimishph"
   },
-  "version": "0.6.0"
+  "version": "0.7.0"
 }

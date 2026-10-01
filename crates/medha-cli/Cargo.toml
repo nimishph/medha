@@ -1,0 +1,22 @@
+[package]
+name = "medha-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native command-line interface and MCP server for Medha."
+
+[[bin]]
+name = "medha"
+path = "src/main.rs"
+
+[dependencies]
+medha = { path = "../medha" }
+clap = { version = "4.5", features = ["derive", "env"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"

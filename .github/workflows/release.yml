@@ -29,13 +29,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'darwin-arm64' && 'x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
       - run: bun run check
       - run: bun run build
       - run: bun run smoke
       - name: Cross-compile darwin-x64 on macOS runner
         if: matrix.platform == 'darwin-arm64'
-        run: bun run tooling/package-release.ts --target darwin-x64
+        run: bun run tooling/package-release.ts --rust --target darwin-x64
       - uses: actions/upload-artifact@v4
         with:
           name: medha-${{ matrix.platform }}

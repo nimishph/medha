@@ -1,6 +1,6 @@
 {
   "name": "@cntxt-labs/medha-cli",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Evidential memory for rules, recipes and tools: records what happened and returns trust hints. CLI and MCP server.",
   "keywords": [
     "mcp",
@@ -40,11 +40,11 @@
     "node": ">=18"
   },
   "optionalDependencies": {
-    "@cntxt-labs/medha-linux-x64": "0.6.0",
-    "@cntxt-labs/medha-linux-arm64": "0.6.0",
-    "@cntxt-labs/medha-darwin-arm64": "0.6.0",
-    "@cntxt-labs/medha-darwin-x64": "0.6.0",
-    "@cntxt-labs/medha-win32-x64": "0.6.0"
+    "@cntxt-labs/medha-linux-x64": "0.7.0",
+    "@cntxt-labs/medha-linux-arm64": "0.7.0",
+    "@cntxt-labs/medha-darwin-arm64": "0.7.0",
+    "@cntxt-labs/medha-darwin-x64": "0.7.0",
+    "@cntxt-labs/medha-win32-x64": "0.7.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

@@ -1,0 +1,10 @@
+{
+  "name": "@cntxt-labs/medha-napi",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "NAPI-RS native Node/Bun bindings for medha-core",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT"
+}

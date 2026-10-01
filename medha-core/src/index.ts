@@ -1,3 +1,8 @@
+/**
+ * Core mathematical and algorithmic foundation of Medha.
+ * Exposes core algorithms in TypeScript and bridges to native Rust acceleration via NAPI-RS (`crates/medha-napi`).
+ */
+
 export * from './context.ts';
 export * from './decision.ts';
 export * from './definition.ts';
@@ -17,6 +22,7 @@ export * from './packer.ts';
 export * from './recency.ts';
 export * from './rng.ts';
 export * from './rounding.ts';
+export * from './rust-bridge.ts';
 export * from './signals.ts';
 export * from './store-port.ts';
 export * from './sync-port.ts';

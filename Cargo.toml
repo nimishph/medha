@@ -3,11 +3,14 @@ members = [
     "crates/medha-core",
     "crates/medha-store",
     "crates/medha-sync",
+    "crates/medha",
+    "crates/medha-cli",
+    "crates/medha-napi",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["Nimish Phalnikar <https://github.com/nimishph>"]
 license = "MIT"

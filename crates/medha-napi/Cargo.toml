@@ -1,0 +1,23 @@
+[package]
+name = "medha-napi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "NAPI-RS adapter bridging native Rust medha-core to TypeScript / Node / Bun."
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+napi = { version = "2.16", default-features = false, features = ["napi4", "serde-json"] }
+napi-derive = "2.16"
+medha-core = { path = "../medha-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+napi-build = "2.1"

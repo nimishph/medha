@@ -1,3 +1,7 @@
+/**
+ * medha: the engine facade — read/write/maintenance planes, session-start sweep, exploration
+ * helper, plus the CLI and MCP servers.
+ */
 export * from '@cntxt-labs/medha-core';
 /**
  * medha: the engine facade — read/write/maintenance planes, session-start sweep, exploration

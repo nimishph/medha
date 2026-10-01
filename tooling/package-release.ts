@@ -17,6 +17,7 @@ const { values } = parseArgs({
   options: {
     out: { type: 'string' },
     target: { type: 'string' },
+    rust: { type: 'boolean' },
   },
 });
 const out = resolve(baseRoot, values.out ?? 'dist');
@@ -37,25 +38,98 @@ const program = isWin ? 'medha.exe' : 'medha';
 const targetPath = join(folder, program);
 const canonicalPath = join(canonicalFolder, program);
 
-process.stdout.write(`Compiling medha CLI/MCP binary for ${target}...\n`);
+const RUST_TARGET_MAP: Record<string, string> = {
+  'darwin-x64': 'x86_64-apple-darwin',
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'linux-x64': 'x86_64-unknown-linux-gnu',
+  'linux-arm64': 'aarch64-unknown-linux-gnu',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+};
+const rustTarget = RUST_TARGET_MAP[target];
+const isCross =
+  values.target !== undefined && values.target !== `${process.platform}-${process.arch}`;
 
-const compileArgs = ['bun', 'build', '--compile', '--minify', '--sourcemap=none'];
-if (values.target) {
-  compileArgs.push(`--target=bun-${values.target}`);
+const cargoEnv: Record<string, string | undefined> = { ...process.env };
+if (process.platform === 'win32') {
+  const winlibs =
+    'C:\\Users\\nimis\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.MSVCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin';
+  if (existsSync(winlibs)) {
+    cargoEnv.PATH = `${winlibs};${cargoEnv.PATH ?? ''}`;
+  }
 }
-compileArgs.push('./src/bin.ts', '--outfile', targetPath);
 
-const child = Bun.spawn({
-  cmd: compileArgs,
-  cwd: join(baseRoot, 'cli'),
-  stdout: 'inherit',
-  stderr: 'inherit',
-});
+if (values.rust) {
+  if (!isCross) {
+    process.stdout.write('Compiling native Rust medha-napi binding via Cargo...\n');
+    const napiChild = Bun.spawn({
+      cmd: ['cargo', 'build', '--release', '-p', 'medha-napi'],
+      cwd: baseRoot,
+      env: cargoEnv,
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    const napiCode = await napiChild.exited;
+    if (napiCode !== 0) {
+      process.stderr.write(
+        `cargo build --release -p medha-napi failed with exit code ${napiCode}\n`,
+      );
+      process.exit(napiCode ?? 1);
+    }
+    const libName = isWin
+      ? 'medha_napi.dll'
+      : process.platform === 'darwin'
+        ? 'libmedha_napi.dylib'
+        : 'libmedha_napi.so';
+    const builtLib = join(baseRoot, 'target', 'release', libName);
+    if (existsSync(builtLib)) {
+      cpSync(builtLib, join(baseRoot, 'target', 'release', 'medha_napi.node'), { force: true });
+      cpSync(builtLib, join(baseRoot, 'crates', 'medha-napi', 'medha_napi.node'), { force: true });
+    }
+  }
 
-const code = await child.exited;
-if (code !== 0) {
-  process.stderr.write(`bun build --compile failed with exit code ${code}\n`);
-  process.exit(code ?? 1);
+  process.stdout.write(`Compiling native Rust medha CLI/MCP binary for ${target} via Cargo...\n`);
+  const cargoArgs = ['cargo', 'build', '--release', '-p', 'medha-cli', '--bin', 'medha'];
+  if (isCross && rustTarget) {
+    cargoArgs.push('--target', rustTarget);
+  }
+  const child = Bun.spawn({
+    cmd: cargoArgs,
+    cwd: baseRoot,
+    env: cargoEnv,
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  const code = await child.exited;
+  if (code !== 0) {
+    process.stderr.write(`cargo build --release failed with exit code ${code}\n`);
+    process.exit(code ?? 1);
+  }
+  const builtBinary =
+    isCross && rustTarget
+      ? join(baseRoot, 'target', rustTarget, 'release', program)
+      : join(baseRoot, 'target', 'release', program);
+  cpSync(builtBinary, targetPath, { force: true });
+} else {
+  process.stdout.write(`Compiling medha CLI/MCP binary for ${target}...\n`);
+
+  const compileArgs = ['bun', 'build', '--compile', '--minify', '--sourcemap=none'];
+  if (values.target) {
+    compileArgs.push(`--target=bun-${values.target}`);
+  }
+  compileArgs.push('./src/bin.ts', '--outfile', targetPath);
+
+  const child = Bun.spawn({
+    cmd: compileArgs,
+    cwd: join(baseRoot, 'cli'),
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+
+  const code = await child.exited;
+  if (code !== 0) {
+    process.stderr.write(`bun build --compile failed with exit code ${code}\n`);
+    process.exit(code ?? 1);
+  }
 }
 
 // Copy license, readme and agent skill if present

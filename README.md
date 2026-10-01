@@ -19,6 +19,9 @@ decides an action; you and your agent decide what to do with it.
 - **One binary, no server.** CLI and MCP server in a single executable. State is an append-only
   episode log you can back up, compact, sync, or replay.
 
+> [!NOTE]
+> **Rust Core & TypeScript Hybrid Acceleration**: Medha provides both an active, full-featured TypeScript CLI/library ecosystem and a high-performance native Rust core. The native algorithms and trust computations are directly bridged to TypeScript and Node.js/Bun through our NAPI-RS adapter (`@cntxt-labs/medha-napi` / `crates/medha-napi`), providing native execution speeds while keeping the TypeScript CLI and npm packages fully supported. Standalone Rust binaries are also available (`crates/medha-cli`).
+
 ## Mental Model: The Dual-Loop Architecture
 
 Most memory tools store unstructured chat history or flat key-value assertions. Medha acts as an **evidential calibration loop**:
