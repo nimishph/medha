@@ -623,6 +623,25 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }),
   );
 
+  server.tool(
+    'primer',
+    'Get concise, token-frugal guidance on Medha concepts, architecture, signals, guards, decisions, drift, config, or sync.',
+    {
+      topic: z
+        .string()
+        .optional()
+        .describe(
+          'Topic to view: overview, mental-model, signals, guards, decisions, drift, config, sync. If omitted, returns an overview and topic index.',
+        ),
+    },
+    READ_ONLY,
+    async ({ topic }) =>
+      respond(async () => {
+        const { getPrimer } = await import('./primer.ts');
+        return getPrimer(topic);
+      }),
+  );
+
   return server;
 }
 

@@ -399,3 +399,18 @@ export const reportCommandArgs: ArgsDef = {
     description: 'Output HTML file path (default: medha-report.html).',
   },
 };
+
+export const primerCommandArgs: ArgsDef = {
+  topic: {
+    type: 'positional',
+    description:
+      'Primer topic (overview, mental-model, signals, guards, decisions, drift, config, sync).',
+    required: false,
+  },
+  json: { type: 'boolean', description: 'Emit the primer report as JSON.', default: false },
+  compact: {
+    type: 'boolean',
+    description: 'Emit plain text without extra headers or footers.',
+    default: false,
+  },
+};

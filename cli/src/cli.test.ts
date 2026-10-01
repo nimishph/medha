@@ -1944,7 +1944,7 @@ describe('medha mcp server', () => {
     try {
       const { client } = session;
       const tools = (await client.listTools()).tools.map((t) => t.name);
-      expect(tools).toHaveLength(13);
+      expect(tools).toHaveLength(14);
       expect(tools).toEqual(
         expect.arrayContaining([
           'hints',
@@ -1960,6 +1960,7 @@ describe('medha mcp server', () => {
           'retract_episode',
           'remove_episode',
           'pack_context',
+          'primer',
         ]),
       );
 
@@ -2111,6 +2112,12 @@ describe('medha mcp server', () => {
       expect(packRes.isError).toBe(false);
       expect(packRes.body.totalCost).toBeDefined();
       expect(packRes.body.contextText).toBeDefined();
+
+      // 13. primer
+      const primerRes = await call(client, 'primer', { topic: 'signals' });
+      expect(primerRes.isError).toBe(false);
+      expect(primerRes.body.topic).toBe('signals');
+      expect(primerRes.body.content).toContain('APPLY');
     } finally {
       await session.close();
     }
@@ -2151,7 +2158,7 @@ describe('medha mcp server', () => {
           );
         } else if (msg.id === 2) {
           sawTools = true;
-          expect(msg.result?.tools).toHaveLength(13);
+          expect(msg.result?.tools).toHaveLength(14);
           proc.stdin.end();
         }
       }

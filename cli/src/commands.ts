@@ -23,6 +23,7 @@ import {
   mcpCommandArgs,
   packCommandArgs,
   paramsCommandArgs,
+  primerCommandArgs,
   proposeCommandArgs,
   recordCommandArgs,
   removeEpisodeCommandArgs,
@@ -842,6 +843,28 @@ export const syncCommand = defineCommand({
   },
 });
 
+export const primerCommand = defineCommand({
+  meta: {
+    name: 'primer',
+    description: 'Paginated, token-frugal primer on Medha concepts for agents and developers.',
+  },
+  args: primerCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { getPrimer, renderPrimer } = await import('./primer.ts');
+    try {
+      const result = getPrimer(args.topic as string | undefined);
+      environment.stdout(
+        args.json === true ? toJson(result) : `${renderPrimer(result, args.compact === true)}\n`,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      environment.stderr(`Error: ${message}\n`);
+      environment.exitCode = 1;
+    }
+  },
+});
+
 export const commands = defineCommand({
   meta: {
     name: 'medha',
@@ -865,6 +888,7 @@ export const commands = defineCommand({
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
     pack: packCommand,
+    primer: primerCommand,
     ui: uiCommand,
     report: reportCommand,
     maintain: maintainCommand,
