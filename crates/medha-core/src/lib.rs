@@ -4,6 +4,7 @@ pub mod durability;
 pub mod fold;
 pub mod formula;
 pub mod guard;
+pub mod packer;
 pub mod recency;
 pub mod round;
 pub mod thresholds;
@@ -21,10 +22,15 @@ pub use fold::{
 };
 pub use formula::{compute_trust_and_status, TrustComputationInput, TrustComputationResult};
 pub use guard::{guard_factor, is_guarded};
+pub use packer::{
+    pack_entities, Mulberry32, PackCandidate, PackOutcome, PackPolicy, PackedEntity,
+    DEFAULT_EXPLORATION_RATIO,
+};
 pub use recency::recency_factor;
 pub use round::round6;
 pub use thresholds::*;
 pub use types::*;
 pub use wilson::{
-    default_wilson_lower, default_wilson_upper, wilson_lower_bound, wilson_upper_bound,
+    default_wilson_lower, default_wilson_upper, default_wilson_width, wilson_lower_bound,
+    wilson_upper_bound, wilson_width,
 };

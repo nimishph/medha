@@ -2,6 +2,8 @@ use crate::errors::SyncError;
 use crate::snapshot::MemorySnapshotV1;
 use crate::traits::{PullResult, PushResult, ReconcileResult, SyncPort, SyncState, SyncStatus};
 
+use medha_store::StorePort;
+
 pub struct NoopSyncAdapter;
 
 impl SyncPort for NoopSyncAdapter {
@@ -9,7 +11,7 @@ impl SyncPort for NoopSyncAdapter {
         "noop"
     }
 
-    fn status(&self) -> Result<SyncStatus, SyncError> {
+    fn status(&self, _store: &dyn StorePort) -> Result<SyncStatus, SyncError> {
         Ok(SyncStatus {
             state: SyncState::Synced,
             local_count: 0,
@@ -26,7 +28,7 @@ impl SyncPort for NoopSyncAdapter {
         Ok(None)
     }
 
-    fn pull(&mut self) -> Result<PullResult, SyncError> {
+    fn pull(&mut self, _store: &mut dyn StorePort) -> Result<PullResult, SyncError> {
         Ok(PullResult {
             ok: true,
             updated: false,
@@ -36,7 +38,7 @@ impl SyncPort for NoopSyncAdapter {
         })
     }
 
-    fn push(&mut self, _now: Option<i64>) -> Result<PushResult, SyncError> {
+    fn push(&mut self, _store: &dyn StorePort, _now: Option<i64>) -> Result<PushResult, SyncError> {
         Ok(PushResult {
             ok: true,
             pushed_count: 0,
@@ -45,7 +47,11 @@ impl SyncPort for NoopSyncAdapter {
         })
     }
 
-    fn reconcile(&mut self, _now: Option<i64>) -> Result<ReconcileResult, SyncError> {
+    fn reconcile(
+        &mut self,
+        _store: &mut dyn StorePort,
+        _now: Option<i64>,
+    ) -> Result<ReconcileResult, SyncError> {
         Ok(ReconcileResult {
             ok: true,
             pulled_count: 0,

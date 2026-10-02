@@ -62,11 +62,17 @@ pub struct ReconcileResult {
     pub error: Option<String>,
 }
 
-pub trait SyncPort {
+use medha_store::StorePort;
+
+pub trait SyncPort: Send + Sync {
     fn name(&self) -> &str;
-    fn status(&self) -> Result<SyncStatus, SyncError>;
-    fn pull(&mut self) -> Result<PullResult, SyncError>;
-    fn push(&mut self, now: Option<i64>) -> Result<PushResult, SyncError>;
-    fn reconcile(&mut self, now: Option<i64>) -> Result<ReconcileResult, SyncError>;
+    fn status(&self, store: &dyn StorePort) -> Result<SyncStatus, SyncError>;
+    fn pull(&mut self, store: &mut dyn StorePort) -> Result<PullResult, SyncError>;
+    fn push(&mut self, store: &dyn StorePort, now: Option<i64>) -> Result<PushResult, SyncError>;
+    fn reconcile(
+        &mut self,
+        store: &mut dyn StorePort,
+        now: Option<i64>,
+    ) -> Result<ReconcileResult, SyncError>;
     fn peek(&self) -> Result<Option<MemorySnapshotV1>, SyncError>;
 }

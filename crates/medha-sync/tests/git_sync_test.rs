@@ -64,22 +64,20 @@ fn test_git_sync_lifecycle_and_ref_push() {
     let mut store = MemoryStore::new(None);
     store.open().expect("open ok");
 
-    let adapter = GitRefSyncAdapter::new(store, repo_path);
+    let mut adapter = GitRefSyncAdapter::new(repo_path);
     assert!(adapter.is_git_repo());
 
     // Initially uninitialized
-    let status = adapter.status().expect("status ok");
+    let status = adapter.status(&store).expect("status ok");
     assert_eq!(status.state, SyncState::Uninitialized);
     assert_eq!(status.ref_name, Some(DEFAULT_MEDHA_REF.to_string()));
 
     // Append and push
-    let mut store = adapter.store().clone(); // Or take store back
     store
         .append(sample_signal("rule-git-1", 1000))
         .expect("append ok");
 
-    let mut adapter = GitRefSyncAdapter::new(store, repo_path);
-    let push_res = adapter.push(Some(1000)).expect("push ok");
+    let push_res = adapter.push(&store, Some(1000)).expect("push ok");
     assert!(push_res.ok);
     assert!(push_res.commit.is_some());
 
@@ -96,7 +94,7 @@ fn test_git_sync_lifecycle_and_ref_push() {
     assert_eq!(snapshot.entities[0].key.id, "rule-git-1");
 
     // Status is now Synced / Ahead
-    let status = adapter.status().expect("status ok");
+    let status = adapter.status(&store).expect("status ok");
     assert!(status.state == SyncState::Synced || status.state == SyncState::Ahead);
     assert_eq!(status.local_count, 1);
 }
@@ -128,8 +126,8 @@ fn test_git_sync_two_repos_reconcile() {
     store_a
         .append(sample_signal("rule-a", 1000))
         .expect("append a");
-    let mut adapter_a = GitRefSyncAdapter::new(store_a, repo_a);
-    let push_a = adapter_a.push(Some(1000)).expect("push a");
+    let mut adapter_a = GitRefSyncAdapter::new(repo_a);
+    let push_a = adapter_a.push(&store_a, Some(1000)).expect("push a");
     assert!(push_a.ok);
 
     // Store B records rule-b
@@ -138,13 +136,15 @@ fn test_git_sync_two_repos_reconcile() {
     store_b
         .append(sample_signal("rule-b", 2000))
         .expect("append b");
-    let mut adapter_b = GitRefSyncAdapter::new(store_b, repo_b);
+    let mut adapter_b = GitRefSyncAdapter::new(repo_b);
 
     // B reconciles with A (fetches remote ref, merges episodes, writes ref)
-    let rec_b = adapter_b.reconcile(Some(2000)).expect("reconcile b");
+    let rec_b = adapter_b
+        .reconcile(&mut store_b, Some(2000))
+        .expect("reconcile b");
     assert!(rec_b.ok);
 
-    let list_b = adapter_b.store().list().expect("list b");
+    let list_b = store_b.list().expect("list b");
     let mut ids_b: Vec<String> = list_b.iter().map(|e| e.key.id.clone()).collect();
     ids_b.sort();
     assert_eq!(ids_b, vec!["rule-a", "rule-b"]);

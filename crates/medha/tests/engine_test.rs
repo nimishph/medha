@@ -1,4 +1,6 @@
+use medha::config::MedhaConfig;
 use medha::core::types::{EntityKey, LifecycleStatus};
+use medha::store::{MemoryStore, StorePort};
 use medha::{GuardInput, MedhaEngine, RecordInput};
 use tempfile::NamedTempFile;
 
@@ -112,4 +114,120 @@ fn test_medha_engine_sqlite_persistence() {
         assert_eq!(fetched.evidence.k, 1.0);
         assert_eq!(fetched.evidence.n, 1.0);
     }
+}
+
+#[test]
+fn test_medha_engine_pack_and_remove_episode() {
+    let mut engine = MedhaEngine::open_in_memory().expect("open memory");
+    let key1 = EntityKey::new("", "rule", "rule-first");
+    let key2 = EntityKey::new("", "rule", "rule-second");
+
+    let rec1 = engine
+        .record(RecordInput {
+            key: key1.clone(),
+            signal: "APPLY".to_string(),
+            at: 1000,
+            author: None,
+            anchors: None,
+            run_ref: None,
+            note: None,
+            case_id: None,
+        })
+        .expect("rec1");
+    assert_eq!(rec1.episode.seq, 0);
+
+    let rec2 = engine
+        .record(RecordInput {
+            key: key2.clone(),
+            signal: "APPLY".to_string(),
+            at: 2000,
+            author: None,
+            anchors: None,
+            run_ref: None,
+            note: None,
+            case_id: None,
+        })
+        .expect("rec2");
+    assert_eq!(rec2.episode.seq, 1);
+
+    // Test pack
+    let pack_opts = medha::EnginePackOptions {
+        budget: 500,
+        kind: Some("rule".to_string()),
+        namespace: None,
+        exploration_ratio: 0.15,
+        seed: None,
+        min_trust: 0.0,
+        allow_quarantined: false,
+        allow_retired: false,
+    };
+    let outcome = engine.pack(pack_opts, 3000).expect("pack");
+    assert_eq!(outcome.selected.len(), 2);
+    assert!(outcome.total_cost <= 500);
+
+    // Test remove_episode
+    engine.remove_episode(0).expect("remove ep 0");
+    let eps = engine.store().episodes(None, None).expect("episodes");
+    assert_eq!(eps.len(), 1);
+    assert_eq!(eps[0].seq, 0);
+    assert_eq!(eps[0].key, key2);
+}
+
+#[test]
+fn test_medha_engine_file_sync_reconcile() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sync_path = dir.path().join("sync-shared.json");
+
+    let mut engine1 =
+        MedhaEngine::with_file_sync(MemoryStore::new(None), &sync_path, MedhaConfig::default());
+    let mut engine2 =
+        MedhaEngine::with_file_sync(MemoryStore::new(None), &sync_path, MedhaConfig::default());
+
+    let key_a = EntityKey::new("", "rule", "rule-a");
+    let key_b = EntityKey::new("", "rule", "rule-b");
+
+    engine1
+        .record(RecordInput {
+            key: key_a.clone(),
+            signal: "APPLY".to_string(),
+            at: 1000,
+            author: None,
+            anchors: None,
+            run_ref: None,
+            note: None,
+            case_id: None,
+        })
+        .expect("record on 1");
+
+    let push_res = engine1.sync_push(Some(1000)).expect("push 1");
+    assert!(push_res.ok);
+
+    let pull_res = engine2.sync_pull().expect("pull 2");
+    assert!(pull_res.ok);
+    assert_eq!(pull_res.pulled_count, 1);
+
+    engine2
+        .record(RecordInput {
+            key: key_b.clone(),
+            signal: "APPLY".to_string(),
+            at: 2000,
+            author: None,
+            anchors: None,
+            run_ref: None,
+            note: None,
+            case_id: None,
+        })
+        .expect("record on 2");
+
+    let rec_res = engine2.sync_reconcile(Some(2000)).expect("reconcile 2");
+    assert!(rec_res.ok);
+
+    let pull_1 = engine1.sync_pull().expect("pull 1");
+    assert!(pull_1.ok);
+
+    // Both engines now have both entities
+    let list1 = engine1.list().expect("list 1");
+    let list2 = engine2.list().expect("list 2");
+    assert_eq!(list1.len(), 2);
+    assert_eq!(list2.len(), 2);
 }

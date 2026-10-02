@@ -2,9 +2,9 @@ use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::types::{
     EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,
 };
+use medha_core::types::{EntityKey, SignalSpec};
 use medha_core::wilson::wilson_lower_bound;
 use medha_store::{EpisodeInput, EpisodePayload, MemoryStore, StorePort};
-use medha_core::types::{EntityKey, SignalSpec};
 use std::time::Instant;
 
 fn make_signal(id: &str, at: i64, success: bool) -> EpisodeInput {
@@ -127,5 +127,5 @@ fn main() {
         }
     });
 
-    println!("{}", output.to_string());
+    println!("{}", output);
 }

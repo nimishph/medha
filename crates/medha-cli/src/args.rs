@@ -67,6 +67,20 @@ pub enum Commands {
     #[command(about = "Verify store integrity and monotonic sequence order")]
     Preflight(PreflightArgs),
 
+    #[command(about = "Token-frugal guidance on Medha concepts, architecture, and commands")]
+    Primer(PrimerArgs),
+
+    #[command(about = "Canonical model parameters and configured kind thresholds")]
+    Params(ParamsArgs),
+
+    #[command(about = "Prepare prefilled GitHub issue with sanitized diagnostics")]
+    Issue(IssueArgs),
+
+    #[command(
+        about = "Pack active and probation entities into an evidential context window within token budget"
+    )]
+    Pack(PackArgs),
+
     #[command(about = "Run Model Context Protocol (MCP) server over stdio")]
     Mcp(McpArgs),
 }
@@ -347,3 +361,55 @@ pub struct CompactArgs {
 
 #[derive(Args, Debug)]
 pub struct PreflightArgs {}
+
+#[derive(Args, Debug, Default)]
+pub struct PrimerArgs {
+    #[arg(
+        value_name = "TOPIC",
+        help = "Topic to explain (overview, mental-model, signals, guards, decisions, drift, config, sync)"
+    )]
+    pub topic: Option<String>,
+
+    #[arg(long, help = "Render compact output without header or footer")]
+    pub compact: bool,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct ParamsArgs {}
+
+#[derive(Args, Debug, Default)]
+pub struct IssueArgs {
+    #[arg(value_name = "TITLE", help = "Optional title for the issue")]
+    pub title: Option<String>,
+
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, help = "Open the issue in the default web browser")]
+    pub open: bool,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct PackArgs {
+    #[arg(long, required = true, help = "Maximum token/cost budget")]
+    pub budget: usize,
+
+    #[arg(long, help = "Filter by kind (default: rule)")]
+    pub kind: Option<String>,
+
+    #[arg(long, help = "Filter by namespace")]
+    pub namespace: Option<String>,
+
+    #[arg(
+        long,
+        help = "Proportion of budget for exploring probation entities (default: 0.15)"
+    )]
+    pub exploration: Option<f64>,
+
+    #[arg(long, help = "Seed for deterministic exploration sampling")]
+    pub seed: Option<u64>,
+
+    #[arg(
+        long,
+        default_value = "markdown",
+        help = "Output format: markdown, compact, or json"
+    )]
+    pub format: String,
+}

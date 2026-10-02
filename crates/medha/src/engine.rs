@@ -7,6 +7,9 @@ use crate::maintenance::{
 };
 use medha_core::decision::Decision;
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
+use medha_core::packer::{
+    pack_entities, PackCandidate, PackOutcome, PackPolicy, DEFAULT_EXPLORATION_RATIO,
+};
 use medha_core::round::round6;
 use medha_core::thresholds::{
     ACTIVE_THRESHOLD, MIN_USES_FOR_RETIRED, MIN_USES_FOR_TRUSTED, RETIRED_TRUST_THRESHOLD,
@@ -26,6 +29,29 @@ use medha_sync::{
     SyncPort, SyncStatus,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EnginePackOptions {
+    pub budget: usize,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default = "default_pack_exploration_ratio")]
+    pub exploration_ratio: f64,
+    #[serde(default)]
+    pub seed: Option<u64>,
+    #[serde(default)]
+    pub min_trust: f64,
+    #[serde(default)]
+    pub allow_quarantined: bool,
+    #[serde(default)]
+    pub allow_retired: bool,
+}
+
+fn default_pack_exploration_ratio() -> f64 {
+    DEFAULT_EXPLORATION_RATIO
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordInput {
@@ -97,14 +123,14 @@ pub struct SimulationReport {
     pub status_changed: bool,
 }
 
-pub struct MedhaEngine<S: StorePort, Y: SyncPort> {
+pub struct MedhaEngine<S: StorePort> {
     store: S,
-    sync: Y,
+    sync: Box<dyn SyncPort>,
     config: MedhaConfig,
     signals: HashMap<String, SignalSpec>,
 }
 
-impl MedhaEngine<SqliteStore, NoopSyncAdapter> {
+impl MedhaEngine<SqliteStore> {
     pub fn open_sqlite(db_path: impl Into<String>) -> Result<Self, MedhaError> {
         let path = db_path.into();
         let mut store = SqliteStore::new(SqliteStoreOptions {
@@ -123,14 +149,37 @@ impl MedhaEngine<SqliteStore, NoopSyncAdapter> {
 
         Ok(Self {
             store,
-            sync: NoopSyncAdapter,
+            sync: Box::new(NoopSyncAdapter),
             config,
             signals,
         })
     }
+
+    pub fn open_sqlite_with_sync(
+        db_path: impl Into<String>,
+        home_dir: impl AsRef<std::path::Path>,
+    ) -> Result<Self, MedhaError> {
+        let mut engine = Self::open_sqlite(db_path)?;
+        let home = home_dir.as_ref();
+        let repo_candidate = if home.file_name().map(|n| n == ".medha").unwrap_or(false) {
+            home.parent().unwrap_or(home)
+        } else {
+            home
+        };
+        let git_adapter = GitRefSyncAdapter::new(repo_candidate);
+        if git_adapter.is_git_repo() {
+            engine.sync = Box::new(git_adapter);
+        } else {
+            let direct_adapter = GitRefSyncAdapter::new(home);
+            if direct_adapter.is_git_repo() {
+                engine.sync = Box::new(direct_adapter);
+            }
+        }
+        Ok(engine)
+    }
 }
 
-impl MedhaEngine<MemoryStore, NoopSyncAdapter> {
+impl MedhaEngine<MemoryStore> {
     pub fn open_in_memory() -> Result<Self, MedhaError> {
         let mut store = MemoryStore::new(None);
         store.open()?;
@@ -145,22 +194,21 @@ impl MedhaEngine<MemoryStore, NoopSyncAdapter> {
 
         Ok(Self {
             store,
-            sync: NoopSyncAdapter,
+            sync: Box::new(NoopSyncAdapter),
             config,
             signals,
         })
     }
 }
 
-impl<S: StorePort> MedhaEngine<S, FileSyncAdapter<MemoryStore>> {
+impl<S: StorePort> MedhaEngine<S> {
     pub fn with_file_sync(
-        store: S,
+        mut store: S,
         file_path: impl AsRef<std::path::Path>,
         config: MedhaConfig,
     ) -> Self {
-        let mut temp_store = MemoryStore::new(None);
-        let _ = temp_store.open();
-        let sync = FileSyncAdapter::new(temp_store, file_path);
+        let _ = store.open();
+        let sync = Box::new(FileSyncAdapter::new(file_path));
         let signals = medha_core::canonical_signals();
         Self {
             store,
@@ -169,17 +217,14 @@ impl<S: StorePort> MedhaEngine<S, FileSyncAdapter<MemoryStore>> {
             signals,
         }
     }
-}
 
-impl<S: StorePort> MedhaEngine<S, GitRefSyncAdapter<MemoryStore>> {
     pub fn with_git_sync(
-        store: S,
+        mut store: S,
         repo_dir: impl AsRef<std::path::Path>,
         config: MedhaConfig,
     ) -> Self {
-        let mut temp_store = MemoryStore::new(None);
-        let _ = temp_store.open();
-        let sync = GitRefSyncAdapter::new(temp_store, repo_dir);
+        let _ = store.open();
+        let sync = Box::new(GitRefSyncAdapter::new(repo_dir));
         let signals = medha_core::canonical_signals();
         Self {
             store,
@@ -188,10 +233,8 @@ impl<S: StorePort> MedhaEngine<S, GitRefSyncAdapter<MemoryStore>> {
             signals,
         }
     }
-}
 
-impl<S: StorePort, Y: SyncPort> MedhaEngine<S, Y> {
-    pub fn new(store: S, sync: Y, config: MedhaConfig) -> Self {
+    pub fn new(store: S, sync: Box<dyn SyncPort>, config: MedhaConfig) -> Self {
         let signals = medha_core::canonical_signals();
         Self {
             store,
@@ -199,6 +242,10 @@ impl<S: StorePort, Y: SyncPort> MedhaEngine<S, Y> {
             config,
             signals,
         }
+    }
+
+    pub fn set_sync(&mut self, sync: Box<dyn SyncPort>) {
+        self.sync = sync;
     }
 
     pub fn store(&self) -> &S {
@@ -209,12 +256,12 @@ impl<S: StorePort, Y: SyncPort> MedhaEngine<S, Y> {
         &mut self.store
     }
 
-    pub fn sync(&self) -> &Y {
-        &self.sync
+    pub fn sync(&self) -> &dyn SyncPort {
+        self.sync.as_ref()
     }
 
-    pub fn sync_mut(&mut self) -> &mut Y {
-        &mut self.sync
+    pub fn sync_mut(&mut self) -> &mut dyn SyncPort {
+        self.sync.as_mut()
     }
 
     pub fn config(&self) -> &MedhaConfig {
@@ -542,6 +589,32 @@ impl<S: StorePort, Y: SyncPort> MedhaEngine<S, Y> {
         Ok(self.store.append(episode_input)?)
     }
 
+    pub fn remove_episode(&mut self, seq: u64) -> Result<(), MedhaError> {
+        let episodes = self.store.episodes(None, None)?;
+        let mut filtered = Vec::new();
+        let mut found = false;
+        let mut new_seq = 0;
+        for ep in episodes {
+            if ep.seq == seq {
+                found = true;
+                continue;
+            }
+            let mut updated = ep;
+            updated.seq = new_seq;
+            new_seq += 1;
+            filtered.push(updated);
+        }
+        if !found {
+            return Err(MedhaError::NotFound(format!(
+                "Episode with sequence {}",
+                seq
+            )));
+        }
+        self.store.replace_log(&filtered)?;
+        self.store.rebuild()?;
+        Ok(())
+    }
+
     pub fn propose(
         &mut self,
         key: &EntityKey,
@@ -707,21 +780,59 @@ impl<S: StorePort, Y: SyncPort> MedhaEngine<S, Y> {
         })
     }
 
+    pub fn pack(&self, options: EnginePackOptions, now: i64) -> Result<PackOutcome, MedhaError> {
+        let entities = self.store.list()?;
+        let mut candidates = Vec::new();
+        for state in entities {
+            if let Some(ref k) = options.kind {
+                if &state.key.kind != k {
+                    continue;
+                }
+            }
+            if let Some(ref ns) = options.namespace {
+                if &state.key.namespace != ns {
+                    continue;
+                }
+            }
+            let hint = self.hint(&state.key, now)?;
+            let key_str_len = state.key.to_string_repr().len();
+            let cost = std::cmp::max(10, key_str_len.div_ceil(3) + 20);
+            candidates.push(PackCandidate {
+                key: state.key,
+                hint,
+                cost,
+                mandatory: false,
+                payload: None,
+            });
+        }
+
+        let policy = PackPolicy {
+            budget: options.budget,
+            exploration_ratio: options.exploration_ratio,
+            seed: options.seed,
+            min_trust: options.min_trust,
+            allow_quarantined: options.allow_quarantined,
+            allow_retired: options.allow_retired,
+        };
+
+        Ok(pack_entities(&candidates, &policy)?)
+    }
+
     // --- SYNC PLANE ---
 
     pub fn sync_status(&self) -> Result<SyncStatus, MedhaError> {
-        Ok(self.sync.status()?)
+        Ok(self.sync.status(&self.store)?)
     }
 
     pub fn sync_pull(&mut self) -> Result<PullResult, MedhaError> {
-        Ok(self.sync.pull()?)
+        Ok(self.sync.pull(&mut self.store)?)
     }
 
     pub fn sync_push(&mut self, now: Option<i64>) -> Result<PushResult, MedhaError> {
-        Ok(self.sync.push(now)?)
+        Ok(self.sync.push(&self.store, now)?)
     }
 
     pub fn sync_reconcile(&mut self, now: Option<i64>) -> Result<ReconcileResult, MedhaError> {
-        Ok(self.sync.reconcile(now)?)
+        Ok(self.sync.reconcile(&mut self.store, now)?)
     }
 }

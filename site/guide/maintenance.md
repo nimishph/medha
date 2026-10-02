@@ -12,15 +12,15 @@ machines, and looking at it.
 
 ```
 .medha/
-â”œâ”€â”€ config.json     # the registries â€” small, human-authored, meant to be committed
-â”œâ”€â”€ store.sqlite    # the append-only episode log â€” gitignored by default
-â”œâ”€â”€ .gitignore      # written by init; safe to edit or delete
-â””â”€â”€ README.md       # a short orientation note, also written by init
+├── config.json     # the registries — small, human-authored, meant to be committed
+├── store.sqlite    # the append-only episode log — gitignored by default
+├── .gitignore      # written by init; safe to edit or delete
+└── README.md       # a short orientation note, also written by init
 ```
 
 The split is deliberate. `config.json` is configuration: review it in a pull request, commit it like
 any other project file. The store is data, and it has its own sync channel (below) with its own
-conflict resolution â€” which is *not* git's. Committing the store directly is supported, but expect
+conflict resolution — which is *not* git's. Committing the store directly is supported, but expect
 merge conflicts that a normal `git merge` cannot resolve intelligently.
 
 `medha init` writes a `.gitignore` that excludes the store and its SQLite journal files, with a
@@ -44,7 +44,7 @@ medha: preflight for /your/project/.medha
 ```
 
 This verifies store integrity and that the registries match. Run it after editing
-[the configuration](/guide/extending), and any time you want to know whether a store is still sound â€”
+[the configuration](/guide/extending), and any time you want to know whether a store is still sound —
 it is cheap and it gates `medha init` too.
 
 `medha status` is the broader view: preflight, the distribution of entities across lifecycle statuses,
@@ -53,12 +53,12 @@ the drift count, and the registry sizes.
 ```
 medha: status for /your/project/.medha
   store:      /your/project/.medha/store.sqlite
-  preflight:  ok â€” 6 episodes, 2 entities, integrity ok
+  preflight:  ok — 6 episodes, 2 entities, integrity ok
   last sweep: 2026-09-28T05:57:31.194Z
   by status:  probation 1, active 1, trusted 0, quarantined 0, retired 0
   drifting:   0
   registries: 4 kinds, 4 signals, 1 anchors
-  params:     read-only canonical defaults â€” run `medha params` to see them
+  params:     read-only canonical defaults — run `medha params` to see them
 ```
 
 ## Compact the log
@@ -79,7 +79,7 @@ medha: compaction for /your/project/.medha
   older than (days):   90
 ```
 
-`folded range: none` is the expected result on a young store â€” there is nothing old enough yet. The
+`folded range: none` is the expected result on a young store — there is nothing old enough yet. The
 defaults are 90 days for folding and 90 days of retention afterwards.
 
 Compaction is safe because state is a fold over the log: folding replaces a run of old episodes with
@@ -157,7 +157,7 @@ medha: generated evidential report snapshot at /your/project/report.html
   entities: 2  episodes: 6
 ```
 
-`report` writes a single self-contained offline file â€” no server, no assets, no network. It is meant
+`report` writes a single self-contained offline file — no server, no assets, no network. It is meant
 to be attached to a review or a ticket, so the trust state at a point in time can be discussed by
 people who do not have medha installed.
 
@@ -194,5 +194,5 @@ Over MCP these are the `retract_episode` and `remove_episode` tools.
 
 ## Next
 
-- [Extending medha](/guide/extending) â€” custom kinds, signals, and thresholds.
-- [CLI reference](/cli) â€” every command and flag.
+- [Extending medha](/guide/extending) — custom kinds, signals, and thresholds.
+- [CLI reference](/cli) — every command and flag.

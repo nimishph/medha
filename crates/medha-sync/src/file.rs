@@ -8,31 +8,21 @@ use medha_store::StorePort;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub struct FileSyncAdapter<S: StorePort> {
-    store: S,
+pub struct FileSyncAdapter {
     file_path: PathBuf,
     last_observed_content: Option<Option<String>>,
 }
 
-impl<S: StorePort> FileSyncAdapter<S> {
-    pub fn new(store: S, file_path: impl AsRef<Path>) -> Self {
+impl FileSyncAdapter {
+    pub fn new(file_path: impl AsRef<Path>) -> Self {
         Self {
-            store,
             file_path: file_path.as_ref().to_path_buf(),
             last_observed_content: None,
         }
     }
 
-    pub fn store(&self) -> &S {
-        &self.store
-    }
-
-    pub fn store_mut(&mut self) -> &mut S {
-        &mut self.store
-    }
-
-    pub fn into_store(self) -> S {
-        self.store
+    pub fn file_path(&self) -> &Path {
+        &self.file_path
     }
 
     fn read_raw_file(&self) -> Option<String> {
@@ -58,13 +48,13 @@ impl<S: StorePort> FileSyncAdapter<S> {
     }
 }
 
-impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
+impl SyncPort for FileSyncAdapter {
     fn name(&self) -> &str {
         "file"
     }
 
-    fn status(&self) -> Result<SyncStatus, SyncError> {
-        let local_states = self.store.list()?;
+    fn status(&self, store: &dyn StorePort) -> Result<SyncStatus, SyncError> {
+        let local_states = store.list()?;
         let local_count = local_states.len();
         let ref_str = self.file_path.to_string_lossy().to_string();
 
@@ -163,8 +153,8 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
         Ok(Some(snapshot))
     }
 
-    fn pull(&mut self) -> Result<PullResult, SyncError> {
-        let local_states = self.store.list()?;
+    fn pull(&mut self, store: &mut dyn StorePort) -> Result<PullResult, SyncError> {
+        let local_states = store.list()?;
         let local_total = local_states.len();
 
         let raw = self.read_raw_file();
@@ -186,15 +176,15 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
         let snapshot = migrate_snapshot(val)?;
         self.last_observed_content = Some(Some(raw_str));
 
-        let local_episodes = self.store.episodes(None, None)?;
+        let local_episodes = store.episodes(None, None)?;
 
         if let Some(incoming_eps) = snapshot.episodes {
             if !incoming_eps.is_empty() {
                 let merged = merge_episodes(&local_episodes, &incoming_eps);
                 if merged.len() != local_episodes.len() {
-                    self.store.replace_log(&merged)?;
-                    self.store.rebuild()?;
-                    let updated_states = self.store.list()?;
+                    store.replace_log(&merged)?;
+                    store.rebuild()?;
+                    let updated_states = store.list()?;
                     return Ok(PullResult {
                         ok: true,
                         updated: true,
@@ -215,7 +205,7 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
         })
     }
 
-    fn push(&mut self, now: Option<i64>) -> Result<PushResult, SyncError> {
+    fn push(&mut self, store: &dyn StorePort, now: Option<i64>) -> Result<PushResult, SyncError> {
         // CAS check
         if let Some(ref expected) = self.last_observed_content {
             let current = self.read_raw_file();
@@ -232,8 +222,8 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
             }
         }
 
-        let entities = self.store.list()?;
-        let episodes = self.store.episodes(None, None)?;
+        let entities = store.list()?;
+        let episodes = store.episodes(None, None)?;
         let as_of = now.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -244,7 +234,7 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
         let snapshot = MemorySnapshotV1 {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             as_of,
-            registries: Some(self.store.registries().clone()),
+            registries: Some(store.registries().clone()),
             entities: entities.clone(),
             episodes: if episodes.is_empty() {
                 None
@@ -266,8 +256,12 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
         })
     }
 
-    fn reconcile(&mut self, now: Option<i64>) -> Result<ReconcileResult, SyncError> {
-        let pull_res = self.pull()?;
+    fn reconcile(
+        &mut self,
+        store: &mut dyn StorePort,
+        now: Option<i64>,
+    ) -> Result<ReconcileResult, SyncError> {
+        let pull_res = self.pull(store)?;
         if !pull_res.ok {
             return Ok(ReconcileResult {
                 ok: false,
@@ -279,8 +273,8 @@ impl<S: StorePort> SyncPort for FileSyncAdapter<S> {
             });
         }
 
-        let push_res = self.push(now)?;
-        let final_count = self.store.list()?.len();
+        let push_res = self.push(store, now)?;
+        let final_count = store.list()?.len();
 
         Ok(ReconcileResult {
             ok: push_res.ok,

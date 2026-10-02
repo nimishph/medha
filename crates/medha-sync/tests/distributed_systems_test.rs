@@ -346,37 +346,34 @@ fn test_distributed_cas_contention_and_recovery() {
     let mut replica_2 = MemoryStore::new(None);
     replica_2.open().unwrap();
 
-    let mut adapter_1 = FileSyncAdapter::new(replica_1, &sync_file);
-    let mut adapter_2 = FileSyncAdapter::new(replica_2, &sync_file);
+    let mut adapter_1 = FileSyncAdapter::new(&sync_file);
+    let mut adapter_2 = FileSyncAdapter::new(&sync_file);
 
     // Initial push from Replica 1
-    adapter_1
-        .store_mut()
+    replica_1
         .append(sample_signal("rule-1", 100, 1.0, true))
         .unwrap();
-    let push_1 = adapter_1.push(Some(100)).unwrap();
+    let push_1 = adapter_1.push(&replica_1, Some(100)).unwrap();
     assert!(push_1.ok);
 
     // Replica 2 pulls the initial state
-    let pull_2 = adapter_2.pull().unwrap();
+    let pull_2 = adapter_2.pull(&mut replica_2).unwrap();
     assert!(pull_2.ok);
 
     // Concurrent race: Both replicas append new local signals
-    adapter_1
-        .store_mut()
+    replica_1
         .append(sample_signal("rule-2", 200, 1.0, true))
         .unwrap();
-    adapter_2
-        .store_mut()
+    replica_2
         .append(sample_signal("rule-3", 300, 1.0, true))
         .unwrap();
 
     // Replica 1 pushes first -> SUCCEEDS
-    let push_race_1 = adapter_1.push(Some(200)).unwrap();
+    let push_race_1 = adapter_1.push(&replica_1, Some(200)).unwrap();
     assert!(push_race_1.ok);
 
     // Replica 2 attempts to push stale snapshot -> REFUSED with CAS divergence error
-    let push_race_2 = adapter_2.push(Some(300)).unwrap();
+    let push_race_2 = adapter_2.push(&replica_2, Some(300)).unwrap();
     assert!(
         !push_race_2.ok,
         "Concurrent push without pulling must be refused"
@@ -387,16 +384,16 @@ fn test_distributed_cas_contention_and_recovery() {
         .contains("changed since last pull"));
 
     // Replica 2 recovers via reconcile() (pulls latest, merges CRDT, pushes merged result)
-    let rec_2 = adapter_2.reconcile(Some(400)).unwrap();
+    let rec_2 = adapter_2.reconcile(&mut replica_2, Some(400)).unwrap();
     assert!(rec_2.ok);
 
     // Replica 1 pulls merged result
-    let pull_1 = adapter_1.pull().unwrap();
+    let pull_1 = adapter_1.pull(&mut replica_1).unwrap();
     assert!(pull_1.ok);
 
     // Both replicas now hold all 3 rules
-    let list_1 = adapter_1.store().list().unwrap();
-    let list_2 = adapter_2.store().list().unwrap();
+    let list_1 = replica_1.list().unwrap();
+    let list_2 = replica_2.list().unwrap();
 
     assert_eq!(list_1.len(), 3);
     assert_eq!(list_2.len(), 3);

@@ -5,7 +5,7 @@ description: Register the medha MCP server, use the twelve tools from an agent, 
 
 # Using it from an agent
 
-The CLI is for you. The MCP server is for your agent â€” same engine, same store, same numbers, exposed
+The CLI is for you. The MCP server is for your agent — same engine, same store, same numbers, exposed
 as tools instead of commands.
 
 ## Register the server
@@ -18,7 +18,7 @@ That is the whole setup. There is no daemon, no port and no background process: 
 stdio inside the host, reading the engine home in the working directory like any other command.
 
 Then copy the [agent skill](/agent-skill) to `.claude/skills/medha/SKILL.md` so the agent knows when
-and how to reach for it. The skill is a short workflow â€” read hints, propose, record, report guards â€”
+and how to reach for it. The skill is a short workflow — read hints, propose, record, report guards —
 and it is the difference between an agent that uses medha deliberately and one that never calls it.
 
 ## The tools
@@ -47,16 +47,16 @@ other writes append to the log.
 
 The four calls that make up a working session, in the order you want them:
 
-1. **`hints`** â€” before relying on anything, ask what is already known. Do not skip this; it is the
+1. **`hints`** — before relying on anything, ask what is already known. Do not skip this; it is the
    entire point of the tool.
-2. **`propose`** â€” when you meet a rule worth keeping, submit it. It enters on probation.
-3. **`record_signal`** â€” as things actually happen. `APPLY` when you used it and it worked,
+2. **`propose`** — when you meet a rule worth keeping, submit it. It enters on probation.
+3. **`record_signal`** — as things actually happen. `APPLY` when you used it and it worked,
    `REJECT_RULE` when a human rejected it, `SKIP` when it did not apply.
-4. **`report_guard`** â€” when an independent check ran, report the outcome. This is what eventually
+4. **`report_guard`** — when an independent check ran, report the outcome. This is what eventually
    lets something become `trusted`.
 
 The failure mode to avoid is step 3 without step 4. Signals alone will never get an entity past
-`active`, by design â€” so an agent that diligently records applies but never reports guards will build
+`active`, by design — so an agent that diligently records applies but never reports guards will build
 a store full of `active` entities and wonder why nothing is ever `trusted`.
 
 ## `recorded: false` is not an error
@@ -66,7 +66,7 @@ was written.
 
 This is deliberate: a typo'd id should not silently invent an entity and start accumulating evidence
 against it. If you genuinely mean to create it, pass `ensure: true`. If you did not mean to, the
-no-op is telling you something â€” most likely that the id you are using is not the one the guidance was
+no-op is telling you something — most likely that the id you are using is not the one the guidance was
 recorded under.
 
 ## Treat `unknown` as probation
@@ -79,7 +79,7 @@ recorded under.
 ```
 
 `unknown` is not an error and not an endorsement. It means medha has no evidence about that key, which
-makes it exactly as trustworthy as a brand-new entity: **probation**. Handle it that way â€” mention the
+makes it exactly as trustworthy as a brand-new entity: **probation**. Handle it that way — mention the
 guidance if it seems reasonable, but do not treat it as established.
 
 ## Fitting trust into a prompt
@@ -104,7 +104,7 @@ medha retract --seq 12 --reason "recorded against the wrong entity"
 ```
 
 Over MCP that is `retract_episode`. The episode is masked, state is recomputed from the log, and the
-correction is recorded. Because entity state is a fold over an append-only log, this always works â€”
+correction is recorded. Because entity state is a fold over an append-only log, this always works —
 there is no denormalized score to repair by hand.
 
 Use `remove_episode` when the entry should not exist at all, rather than merely be inactive.
@@ -115,11 +115,11 @@ It reports evidence and returns hints. It does not decide.
 
 There is no tool that says "apply this rule because its trust is high", and there is no automatic
 promotion, no pruning of low-trust entities, and no silent rewriting of your guidance. A high trust
-score is a well-supported claim, not an instruction â€” the decision stays with you and your agent, and
+score is a well-supported claim, not an instruction — the decision stays with you and your agent, and
 that separation is the point.
 
 ## Next
 
-- [Concepts](/guide/concepts) â€” the vocabulary behind these tools.
-- [Extending medha](/guide/extending) â€” custom kinds, signals and thresholds.
-- [CLI reference](/cli) â€” the same engine from the command line.
+- [Concepts](/guide/concepts) — the vocabulary behind these tools.
+- [Extending medha](/guide/extending) — custom kinds, signals and thresholds.
+- [CLI reference](/cli) — the same engine from the command line.

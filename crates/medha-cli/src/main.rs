@@ -1,11 +1,16 @@
 mod args;
+mod issue;
 mod mcp;
+mod pack;
+mod params;
+mod primer;
 mod render;
 
 use args::*;
 use clap::Parser;
 use medha::config::{BackendKind, MedhaConfig, CONFIG_FILE, MEDHA_HOME_DIR, SQLITE_FILE};
 use medha::core::types::EntityKey;
+use medha::store::StorePort;
 use medha::{GuardInput, MedhaEngine, RecordInput, SweepOptions};
 use render::*;
 use std::env;
@@ -37,6 +42,72 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
+
+    // Commands that do not require an initialized .medha directory
+    match &cli.command {
+        Commands::Primer(primer_args) => {
+            let res = primer::get_primer(primer_args.topic.as_deref())?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&res)?);
+            } else {
+                print!("{}", primer::render_primer(&res, primer_args.compact));
+            }
+            return Ok(());
+        }
+        Commands::Params(_) => {
+            let report = params::params_report(now);
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", params::render_params(&report));
+            }
+            return Ok(());
+        }
+        Commands::Issue(issue_args) => {
+            let maybe_home = resolve_home(cli.home.as_deref());
+            let store_stats = if let Some(ref h) = maybe_home {
+                if let Ok(config) = MedhaConfig::load_from_file(h.join(CONFIG_FILE)) {
+                    let db_path = h.join(config.path.as_deref().unwrap_or(SQLITE_FILE));
+                    if let Ok(eng) = MedhaEngine::open_sqlite(db_path.to_string_lossy().to_string())
+                    {
+                        let pref = eng
+                            .preflight()
+                            .map(|p| if p.ok { "clean" } else { "issues" })
+                            .unwrap_or("error");
+                        let ents = eng.store().list().map(|l| l.len()).unwrap_or(0);
+                        let eps = eng
+                            .store()
+                            .episodes(None, None)
+                            .map(|l| l.len())
+                            .unwrap_or(0);
+                        format!(
+                            "backend: {:?}, entities: {}, episodes: {}, preflight: {}",
+                            config.backend, ents, eps, pref
+                        )
+                    } else {
+                        "None (store open failed)".to_string()
+                    }
+                } else {
+                    "None (uninitialized or store not found)".to_string()
+                }
+            } else {
+                "None (uninitialized or store not found)".to_string()
+            };
+            let report = issue::create_issue_report(
+                issue_args.title.as_deref(),
+                issue_args.open,
+                cli.json,
+                &store_stats,
+            );
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", issue::render_issue(&report));
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
 
     // Handle `init` without requiring an existing .medha directory
     if let Commands::Init(init_args) = &cli.command {
@@ -111,7 +182,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     // Open backend
     let db_path = home_dir.join(config.path.as_deref().unwrap_or(SQLITE_FILE));
-    let mut engine = MedhaEngine::open_sqlite(db_path.to_string_lossy().to_string())?;
+    let mut engine =
+        MedhaEngine::open_sqlite_with_sync(db_path.to_string_lossy().to_string(), &home_dir)?;
 
     match cli.command {
         Commands::Init(_) => unreachable!(),
@@ -492,9 +564,35 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        Commands::Pack(args) => {
+            let exploration_ratio = args.exploration.unwrap_or(0.15);
+            let opts = medha::EnginePackOptions {
+                budget: args.budget,
+                kind: args.kind,
+                namespace: args.namespace,
+                exploration_ratio,
+                seed: args.seed,
+                min_trust: 0.0,
+                allow_quarantined: false,
+                allow_retired: false,
+            };
+            let outcome = engine.pack(opts, now)?;
+            let report = pack::PackReport {
+                home: home_dir.display().to_string(),
+                budget: args.budget,
+                outcome,
+                format: args.format.to_lowercase(),
+            };
+            if cli.json || report.format == "json" {
+                println!("{}", serde_json::to_string_pretty(&report.outcome)?);
+            } else {
+                print!("{}", pack::render_pack(&report));
+            }
+        }
         Commands::Mcp(_) => {
             mcp::run_mcp_server(engine)?;
         }
+        Commands::Primer(_) | Commands::Params(_) | Commands::Issue(_) => unreachable!(),
     }
 
     Ok(())

@@ -1,9 +1,9 @@
 ---
 layout: home
-title: medha
+title: medhā
 titleTemplate: Evidential memory for rules, recipes and tools
 hero:
-  name: medha
+  name: medhā
   text: Memory that remembers what happened
   tagline: >-
     Agents accumulate rules, recipes and tools. Some help. Some are stale, wrong, or quietly ignored.
@@ -11,7 +11,7 @@ hero:
     decides for you.
   image:
     src: /logo.svg
-    alt: medha
+    alt: medhā
   actions:
     - theme: brand
       text: Get started
@@ -49,6 +49,13 @@ features:
       Nothing is overwritten. A wrong entry can be retracted and the entity state recomputed from
       the log, so the record always stays auditable.
 ---
+
+## The name
+
+**medhā** (मेधा). *medhā* (f.): “mental vigour or power, intelligence, prudence, wisdom”; in the plural, the products of intelligence: thoughts, opinions.
+Monier-Williams, *A Sanskrit-English Dictionary* (1899), p. 833: [see the entry in the Cologne Digital Sanskrit Dictionaries](https://www.sanskrit-lexicon.uni-koeln.de/scans/MWScan/2020/web/webtc/getword.php?key=meDA&filter=roman&noLit=off&transLit=slp1).
+
+Medhā is the faculty that retains and judges. This tool keeps the record of what happened and lets that record, not assertion, inform trust.
 
 ## What it is for
 

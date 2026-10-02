@@ -52,3 +52,17 @@ pub fn default_wilson_lower(successes: f64, trials: f64) -> Result<f64, CoreErro
 pub fn default_wilson_upper(successes: f64, trials: f64) -> Result<f64, CoreError> {
     wilson_upper_bound(successes, trials, WILSON_Z)
 }
+
+pub fn wilson_width(successes: f64, trials: f64, z: f64) -> Result<f64, CoreError> {
+    validate_counts(successes, trials)?;
+    if trials == 0.0 {
+        return Ok(1.0);
+    }
+    let width =
+        wilson_upper_bound(successes, trials, z)? - wilson_lower_bound(successes, trials, z)?;
+    round6(width.max(0.0))
+}
+
+pub fn default_wilson_width(successes: f64, trials: f64) -> Result<f64, CoreError> {
+    wilson_width(successes, trials, WILSON_Z)
+}

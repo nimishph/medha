@@ -13,18 +13,16 @@ pub const DEFAULT_MEDHA_REF: &str = "refs/medha/memory";
 pub const LEGACY_MEDHA_REF: &str = "refs/sutra/medha/memory";
 pub const DEFAULT_REMOTE: &str = "origin";
 
-pub struct GitRefSyncAdapter<S: StorePort> {
-    store: S,
+pub struct GitRefSyncAdapter {
     root_dir: PathBuf,
     ref_name: String,
     remote: String,
     read_refs: Vec<String>,
 }
 
-impl<S: StorePort> GitRefSyncAdapter<S> {
-    pub fn new(store: S, root_dir: impl AsRef<Path>) -> Self {
+impl GitRefSyncAdapter {
+    pub fn new(root_dir: impl AsRef<Path>) -> Self {
         Self {
-            store,
             root_dir: root_dir.as_ref().to_path_buf(),
             ref_name: DEFAULT_MEDHA_REF.to_string(),
             remote: DEFAULT_REMOTE.to_string(),
@@ -33,13 +31,11 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
     }
 
     pub fn with_ref_and_remote(
-        store: S,
         root_dir: impl AsRef<Path>,
         ref_name: impl Into<String>,
         remote: impl Into<String>,
     ) -> Self {
         Self {
-            store,
             root_dir: root_dir.as_ref().to_path_buf(),
             ref_name: ref_name.into(),
             remote: remote.into(),
@@ -47,16 +43,8 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
         }
     }
 
-    pub fn store(&self) -> &S {
-        &self.store
-    }
-
-    pub fn store_mut(&mut self) -> &mut S {
-        &mut self.store
-    }
-
-    pub fn into_store(self) -> S {
-        self.store
+    pub fn root_dir(&self) -> &Path {
+        &self.root_dir
     }
 
     pub fn run_git(
@@ -215,13 +203,13 @@ impl<S: StorePort> GitRefSyncAdapter<S> {
     }
 }
 
-impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
+impl SyncPort for GitRefSyncAdapter {
     fn name(&self) -> &str {
         "git-ref"
     }
 
-    fn status(&self) -> Result<SyncStatus, SyncError> {
-        let local_states = self.store.list()?;
+    fn status(&self, store: &dyn StorePort) -> Result<SyncStatus, SyncError> {
+        let local_states = store.list()?;
         let local_count = local_states.len();
 
         if !self.is_git_repo() {
@@ -310,8 +298,8 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         Ok(None)
     }
 
-    fn pull(&mut self) -> Result<PullResult, SyncError> {
-        let local_states = self.store.list()?;
+    fn pull(&mut self, store: &mut dyn StorePort) -> Result<PullResult, SyncError> {
+        let local_states = store.list()?;
         let local_total = local_states.len();
 
         if !self.is_git_repo() {
@@ -341,7 +329,7 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
             }
         }
 
-        let local_episodes = self.store.episodes(None, None)?;
+        let local_episodes = store.episodes(None, None)?;
         let mut merged_episodes = local_episodes.clone();
 
         for snap in &snapshots {
@@ -355,13 +343,13 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         let mut updated = false;
         let mut pulled_count = 0;
         if merged_episodes.len() != local_episodes.len() {
-            self.store.replace_log(&merged_episodes)?;
-            self.store.rebuild()?;
+            store.replace_log(&merged_episodes)?;
+            store.rebuild()?;
             updated = true;
             pulled_count = merged_episodes.len() - local_episodes.len();
         }
 
-        let updated_states = self.store.list()?;
+        let updated_states = store.list()?;
         Ok(PullResult {
             ok: true,
             updated,
@@ -371,7 +359,7 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         })
     }
 
-    fn push(&mut self, now: Option<i64>) -> Result<PushResult, SyncError> {
+    fn push(&mut self, store: &dyn StorePort, now: Option<i64>) -> Result<PushResult, SyncError> {
         if !self.is_git_repo() {
             return Ok(PushResult {
                 ok: false,
@@ -381,8 +369,8 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
             });
         }
 
-        let entities = self.store.list()?;
-        let episodes = self.store.episodes(None, None)?;
+        let entities = store.list()?;
+        let episodes = store.episodes(None, None)?;
         let as_of = now.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -393,7 +381,7 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         let snapshot = MemorySnapshotV1 {
             schema_version: CURRENT_MEMORY_SCHEMA_VERSION,
             as_of,
-            registries: Some(self.store.registries().clone()),
+            registries: Some(store.registries().clone()),
             entities: entities.clone(),
             episodes: if episodes.is_empty() {
                 None
@@ -421,8 +409,12 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
         })
     }
 
-    fn reconcile(&mut self, now: Option<i64>) -> Result<ReconcileResult, SyncError> {
-        let pull_res = self.pull()?;
+    fn reconcile(
+        &mut self,
+        store: &mut dyn StorePort,
+        now: Option<i64>,
+    ) -> Result<ReconcileResult, SyncError> {
+        let pull_res = self.pull(store)?;
         if !pull_res.ok {
             return Ok(ReconcileResult {
                 ok: false,
@@ -434,8 +426,8 @@ impl<S: StorePort> SyncPort for GitRefSyncAdapter<S> {
             });
         }
 
-        let push_res = self.push(now)?;
-        let final_count = self.store.list()?.len();
+        let push_res = self.push(store, now)?;
+        let final_count = store.list()?.len();
 
         Ok(ReconcileResult {
             ok: push_res.ok,

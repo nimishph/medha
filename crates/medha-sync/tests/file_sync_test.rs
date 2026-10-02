@@ -35,8 +35,8 @@ fn test_file_sync_uninitialized_when_file_missing() {
     let dir = tempdir().expect("tempdir");
     let file_path = dir.path().join("sync.json");
 
-    let adapter = FileSyncAdapter::new(store, &file_path);
-    let status = adapter.status().expect("status ok");
+    let adapter = FileSyncAdapter::new(&file_path);
+    let status = adapter.status(&store).expect("status ok");
 
     assert_eq!(status.state, SyncState::Uninitialized);
     assert_eq!(status.local_count, 0);
@@ -53,13 +53,13 @@ fn test_file_sync_push_and_synced_status() {
     let dir = tempdir().expect("tempdir");
     let file_path = dir.path().join("sync.json");
 
-    let mut adapter = FileSyncAdapter::new(store, &file_path);
-    let push_res = adapter.push(Some(1000)).expect("push ok");
+    let mut adapter = FileSyncAdapter::new(&file_path);
+    let push_res = adapter.push(&store, Some(1000)).expect("push ok");
 
     assert!(push_res.ok);
     assert_eq!(push_res.pushed_count, 1);
 
-    let status = adapter.status().expect("status ok");
+    let status = adapter.status(&store).expect("status ok");
     assert_eq!(status.state, SyncState::Synced);
     assert_eq!(status.local_count, 1);
     assert_eq!(status.remote_count, Some(1));
@@ -73,13 +73,13 @@ fn test_file_sync_push_and_synced_status() {
 #[test]
 fn test_file_sync_reconcile_and_convergence() {
     let mut store_a = MemoryStore::new(None);
-    store_a.open().expect("open ok");
+    store_a.open().expect("open a");
     store_a
         .append(sample_signal("rule-a", 1000))
         .expect("append ok");
 
     let mut store_b = MemoryStore::new(None);
-    store_b.open().expect("open ok");
+    store_b.open().expect("open b");
     store_b
         .append(sample_signal("rule-b", 2000))
         .expect("append ok");
@@ -87,23 +87,27 @@ fn test_file_sync_reconcile_and_convergence() {
     let dir = tempdir().expect("tempdir");
     let file_path = dir.path().join("shared-sync.json");
 
-    let mut adapter_a = FileSyncAdapter::new(store_a, &file_path);
-    let mut adapter_b = FileSyncAdapter::new(store_b, &file_path);
+    let mut adapter_a = FileSyncAdapter::new(&file_path);
+    let mut adapter_b = FileSyncAdapter::new(&file_path);
 
     // A pushes to shared file
-    adapter_a.push(Some(1000)).expect("push ok");
+    adapter_a.push(&store_a, Some(1000)).expect("push ok");
 
     // B reconciles: pulls A, merges, pushes merged
-    let rec_b = adapter_b.reconcile(Some(2000)).expect("reconcile ok");
+    let rec_b = adapter_b
+        .reconcile(&mut store_b, Some(2000))
+        .expect("reconcile ok");
     assert!(rec_b.ok);
 
     // A reconciles: pulls merged
-    let rec_a = adapter_a.reconcile(Some(3000)).expect("reconcile ok");
+    let rec_a = adapter_a
+        .reconcile(&mut store_a, Some(3000))
+        .expect("reconcile ok");
     assert!(rec_a.ok);
 
     // Both stores now have both entities
-    let list_a = adapter_a.store().list().expect("list ok");
-    let list_b = adapter_b.store().list().expect("list ok");
+    let list_a = store_a.list().expect("list ok");
+    let list_b = store_b.list().expect("list ok");
 
     let mut ids_a: Vec<String> = list_a.iter().map(|e| e.key.id.clone()).collect();
     let mut ids_b: Vec<String> = list_b.iter().map(|e| e.key.id.clone()).collect();

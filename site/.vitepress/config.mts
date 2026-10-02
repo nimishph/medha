@@ -8,7 +8,7 @@ const base = '/medha/';
 
 export default defineConfig({
   base,
-  title: 'medha',
+  title: 'medhā',
   description:
     'Evidential memory for the rules, recipes and tools your agents rely on. Medha records what happened and returns trust hints; it never decides for you.',
   lang: 'en-US',
@@ -31,7 +31,7 @@ export default defineConfig({
 
   themeConfig: {
     logo: '/logo.svg',
-    siteTitle: 'medha',
+    siteTitle: 'medhā',
 
     socialLinks: [{ icon: 'github', link: repo }],
 
