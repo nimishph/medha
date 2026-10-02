@@ -525,7 +525,13 @@ export function assignSeq(input: EpisodeInput, seq: number): Episode {
 /** Strip the store-assigned `seq`, yielding the episode as it entered the log (for validation). */
 export function episodeToInput(episode: Episode): EpisodeInput {
   const { seq: _seq, ...rest } = episode;
-  return rest as EpisodeInput;
+  const cleaned: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rest)) {
+    if (v !== null && v !== undefined) {
+      cleaned[k] = v;
+    }
+  }
+  return cleaned as EpisodeInput;
 }
 
 export interface FoldEpisodeOptions {
@@ -592,12 +598,12 @@ export function foldEpisode(
       if (limited.suppressed) return limited.state;
       prev = limited.state;
       const applied: SignalApplication =
-        episode.anchors === undefined
+        episode.anchors === undefined || episode.anchors === null
           ? { spec: episode.spec }
           : { spec: episode.spec, anchors: episode.anchors };
       const base = applySignal(prev, applied, { now: episode.at, kindSpec }).state;
       const noteToKeep = episode.note ?? base.lastNote;
-      if (episode.weight === undefined) {
+      if (episode.weight === undefined || episode.weight === null) {
         return noteToKeep !== undefined ? { ...base, lastNote: noteToKeep } : base;
       }
       // Self-describing weight-updater result: the episode carries the mu the configured strategy

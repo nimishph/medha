@@ -77,7 +77,10 @@ export function keyLabel(key: EntityKey): string {
   return key.namespace === '' ? `${key.kind}/${key.id}` : `${key.namespace}/${key.kind}/${key.id}`;
 }
 
-function fixed(value: number): string {
+function fixed(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return '0.000';
+  }
   return value.toFixed(3);
 }
 

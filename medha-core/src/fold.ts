@@ -63,7 +63,7 @@ function mapAnchors(
   // With no host anchor on a successful use, the calendar-week epoch is recorded so durability
   // degrades gracefully instead of the entity appearing immortal (spec §5.4 fallback).
   const incoming =
-    applied.anchors === undefined || applied.anchors.length === 0
+    applied.anchors === undefined || applied.anchors === null || applied.anchors.length === 0
       ? [weekAnchor(now)]
       : applied.anchors;
   const seen = new Set(state.anchors.map((a) => `${a.kind}\u0000${a.value}`));

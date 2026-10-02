@@ -441,7 +441,11 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     throw new ConfigFileError(path, 'expected a JSON object');
   }
   const candidate = parsed as Partial<MedhaConfigV1>;
-  if (candidate.namespaceScope !== undefined && !isNameList(candidate.namespaceScope)) {
+  if (
+    candidate.namespaceScope !== undefined &&
+    candidate.namespaceScope !== null &&
+    !isNameList(candidate.namespaceScope)
+  ) {
     throw new ConfigFileError(path, 'namespaceScope must be an array of non-empty strings');
   }
   if (candidate.layoutVersion !== CONFIG_LAYOUT_VERSION) {
@@ -487,7 +491,9 @@ export function readConfig(home: string): MedhaConfigV1 | null {
         ? null
         : resolveStoredPath(home, candidate.path),
     registries: registries as StoreRegistries,
-    ...(candidate.namespaceScope === undefined ? {} : { namespaceScope: candidate.namespaceScope }),
+    ...(candidate.namespaceScope === undefined || candidate.namespaceScope === null
+      ? {}
+      : { namespaceScope: candidate.namespaceScope }),
   };
 }
 

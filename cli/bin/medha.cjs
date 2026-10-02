@@ -19,6 +19,9 @@ function platformPackage(platform, cpu) {
 
 /** Where the installed program is, or why it cannot be found. */
 function locate(platform, cpu, resolve) {
+  if (process.env.MEDHA_BINARY_PATH) {
+    return { program: process.env.MEDHA_BINARY_PATH };
+  }
   const name = platformPackage(platform, cpu);
   if (name === undefined) {
     return {

@@ -27,7 +27,7 @@ pub struct MedhaConfig {
     pub path: Option<String>,
     #[serde(default)]
     pub registries: StoreRegistries,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace_scope: Option<Vec<String>>,
 }
 

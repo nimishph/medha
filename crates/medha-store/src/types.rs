@@ -20,28 +20,28 @@ pub enum OpenResult {
 pub enum EpisodePayload {
     Signal {
         spec: SignalSpec,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         anchors: Option<Vec<Anchor>>,
         #[serde(default)]
         ensure: bool,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         run_ref: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         updater: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         weight: Option<f64>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         case_id: Option<String>,
     },
     Guard {
         ok: bool,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
         #[serde(default)]
         ensure: bool,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
     Override {
@@ -50,11 +50,11 @@ pub enum EpisodePayload {
     },
     Proposal {
         provenance: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         theta0: Option<f64>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
     Sweep {
@@ -69,18 +69,18 @@ pub enum EpisodePayload {
         reason: String,
     },
     Define {
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         description: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         tags: Option<Vec<String>>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         rationale: Option<String>,
     },
     Decision {
         case_id: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_id: Option<String>,
         condition: String,
         decision: medha_core::decision::Decision,
@@ -91,7 +91,7 @@ pub enum EpisodePayload {
 pub struct EpisodeInput {
     pub key: EntityKey,
     pub at: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     #[serde(flatten)]
     pub payload: EpisodePayload,
@@ -102,7 +102,7 @@ pub struct Episode {
     pub seq: u64,
     pub key: EntityKey,
     pub at: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     #[serde(flatten)]
     pub payload: EpisodePayload,
