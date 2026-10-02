@@ -8,9 +8,9 @@ repository.workspace = true
 description = "High-level evidential-memory engine facade for Medha."
 
 [dependencies]
-medha-core = { path = "../medha-core" }
-medha-store = { path = "../medha-store" }
-medha-sync = { path = "../medha-sync" }
+medha-core = { path = "../medha-core", version = "0.7.2" }
+medha-store = { path = "../medha-store", version = "0.7.2" }
+medha-sync = { path = "../medha-sync", version = "0.7.2" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
