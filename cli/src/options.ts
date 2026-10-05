@@ -196,6 +196,40 @@ export const mcpCommandArgs: ArgsDef = {
   },
 };
 
+export const mcpConfigArgs: ArgsDef = {
+  client: {
+    type: 'positional',
+    description: 'Client id (claude-code, cursor, github-copilot, opencode, claude-desktop).',
+    required: false,
+  },
+  list: {
+    type: 'boolean',
+    description: 'List supported clients, scopes, and launchers.',
+    default: false,
+  },
+  all: {
+    type: 'boolean',
+    description: 'Render a snippet for every client (default scope).',
+    default: false,
+  },
+  scope: { type: 'string', description: 'Scope id for the client (default: its default scope).' },
+  launcher: { type: 'string', description: 'Launcher id: path or npx (default: path).' },
+  'server-name': {
+    type: 'string',
+    description: 'Key the server is registered under (default: medha).',
+  },
+  write: {
+    type: 'boolean',
+    description: "Merge the entry into the scope's config file instead of printing.",
+    default: false,
+  },
+  dir: {
+    type: 'string',
+    description: 'Project directory written to / relative paths anchor at. Default: cwd.',
+  },
+  json: { type: 'boolean', description: 'Emit the report as JSON.', default: false },
+};
+
 export const syncStatusArgs: ArgsDef = {
   ...readCommonArgs,
   ref: {

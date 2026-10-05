@@ -1,0 +1,9 @@
+{
+  "name": "medha",
+  "description": "Evidential memory as a plugin: the medha MCP server (trust hints, evidence, guards), the agent skill, and slash commands for the read side.",
+  "author": {
+    "name": "Nimish Phalnikar",
+    "url": "https://github.com/nimishph"
+  },
+  "version": "0.7.2"
+}

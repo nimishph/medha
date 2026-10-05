@@ -1,6 +1,6 @@
 ﻿---
 title: Using it from an agent
-description: Register the medha MCP server, use the twelve tools from an agent, and fit trust hints into a prompt.
+description: Register the medha MCP server, use the fourteen tools from an agent, and fit trust hints into a prompt.
 ---
 
 # Using it from an agent
@@ -17,6 +17,11 @@ as tools instead of commands.
 That is the whole setup. There is no daemon, no port and no background process: the server runs on
 stdio inside the host, reading the engine home in the working directory like any other command.
 
+Other clients (Cursor, VS Code / Copilot, opencode, Claude Desktop) each have their own file and
+scope — every one of them is on [Connect an MCP client](/integrations), generated from the same
+registry that powers `medha mcp config`, so `medha mcp config <client> --write` can do the edit for
+you.
+
 Then copy the [agent skill](/agent-skill) to `.claude/skills/medha/SKILL.md` so the agent knows when
 and how to reach for it. The skill is a short workflow — read hints, propose, record, report guards —
 and it is the difference between an agent that uses medha deliberately and one that never calls it.
@@ -30,6 +35,7 @@ and it is the difference between an agent that uses medha deliberately and one t
 | `show_entity` | Full detail: trust, components, temporal state, recent episodes, provenance. |
 | `record_signal` | Record `APPLY`, `REJECT_RULE`, `SKIP` and so on. |
 | `report_guard` | Record a guard result (a harness pass/fail, a review verdict). |
+| `record_decision` | Grow or edit one branch of an entity's decision tree: a condition and a decision. Medha does not evaluate conditions — you pick the branch, then report outcomes against it via `record_signal`'s `caseId`. |
 | `propose` | Submit a candidate entity. |
 | `drift` | List drifting entities, most-drifted first. |
 | `simulate` | Preview a signal's effect. Persists nothing. |
@@ -37,11 +43,12 @@ and it is the difference between an agent that uses medha deliberately and one t
 | `retract_episode` | Retract an erroneous episode by sequence number, appending a masking episode. |
 | `remove_episode` | Hard-delete an episode from the log and resequence the rest. Requires `author` and `reason`, which are kept in the store's audit trail with the removed episode. |
 | `pack_context` | Pack active and probation entities into a context window within a token budget. |
+| `primer` | Concise, token-frugal guidance on medha concepts, architecture, signals, guards, decisions, drift, config or sync — ask for what you need before you need it. |
 
 Every tool declares MCP annotations, so a client can tell reads from writes: `hints`, `list_entities`,
-`show_entity`, `drift`, `simulate`, `status` and `pack_context` are read-only; `remove_episode` is the
-only destructive one, and a client that confirms destructive tools will ask before it runs. The
-other writes append to the log.
+`show_entity`, `drift`, `simulate`, `status`, `pack_context` and `primer` are read-only;
+`remove_episode` is the only destructive one, and a client that confirms destructive tools will ask
+before it runs. The other writes append to the log.
 
 ## The loop that matters
 

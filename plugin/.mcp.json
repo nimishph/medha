@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "medha": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cntxt-labs/medha-cli@0.7.2",
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}

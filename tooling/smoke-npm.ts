@@ -102,6 +102,14 @@ try {
     drift.code === 0 && drift.out.includes('drift'),
     drift.out + drift.err,
   );
+  const mcpConfig = await run(['mcp', 'config', '--list', '--json']);
+  check(
+    'it renders MCP client configs from the bundled registry',
+    mcpConfig.code === 0 &&
+      mcpConfig.out.includes('"id": "cursor"') &&
+      mcpConfig.out.includes('"id": "claude-desktop"'),
+    mcpConfig.out + mcpConfig.err,
+  );
   const usage = await run(['frobnicate']);
   check(
     'a failing command exits non-zero through the launcher',

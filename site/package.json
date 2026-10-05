@@ -7,9 +7,10 @@
   "scripts": {
     "sync": "node scripts/sync-content.mjs",
     "gen:cli": "bun run scripts/gen-cli-ref.ts",
-    "predev": "npm run sync && bun run gen:cli",
+    "gen:integrations": "bun run scripts/gen-integrations.ts",
+    "predev": "npm run sync && bun run gen:cli && bun run gen:integrations",
     "dev": "vitepress dev",
-    "prebuild": "npm run sync && bun run gen:cli",
+    "prebuild": "npm run sync && bun run gen:cli && bun run gen:integrations",
     "build": "vitepress build",
     "preview": "vitepress preview"
   },

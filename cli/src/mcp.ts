@@ -19,10 +19,10 @@ import { parseTimestamp, resolveAuthor } from './write.ts';
 
 /**
  * An MCP server over a project's evidential memory engine.
- * Exposes 13 tools:
+ * Exposes 14 tools:
  * hints (batch), list_entities, show_entity, record_signal, report_guard,
  * record_decision, propose, drift, simulate, status, retract_episode,
- * remove_episode, pack_context.
+ * remove_episode, pack_context, primer.
  */
 export function createMcpServer(engine: Medha, environment: Environment): McpServer {
   const server = new McpServer({ name: 'medha', version: VERSION });

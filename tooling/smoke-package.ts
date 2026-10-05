@@ -7,7 +7,15 @@
  *
  *   bun run tooling/smoke-package.ts [--dist dist]
  */
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -115,7 +123,27 @@ try {
   const drift = await run(['drift']);
   expect('reports drift headlessly', drift.code === 0 && drift.out.includes('drift'), drift);
 
-  // 6. MCP serve with full handshake and exit on stdin close
+  // 6. mcp config — the compiled binary must carry the client registry, and --write must land
+  const configList = await run(['mcp', 'config', '--list', '--json']);
+  expect(
+    'lists the bundled MCP clients',
+    configList.code === 0 &&
+      configList.out.includes('"id": "cursor"') &&
+      configList.out.includes('"id": "opencode"') &&
+      configList.out.includes('"id": "claude-desktop"'),
+    configList,
+  );
+  const configWrite = await run(['mcp', 'config', 'cursor', '--write']);
+  const cursorFile = join(project, '.cursor', 'mcp.json');
+  expect(
+    'writes a client config file',
+    configWrite.code === 0 &&
+      existsSync(cursorFile) &&
+      readFileSync(cursorFile, 'utf8').includes('"medha"'),
+    configWrite,
+  );
+
+  // 7. MCP serve with full handshake and exit on stdin close
   const server = Bun.spawn({
     cmd: [executable, 'mcp', 'serve'],
     cwd: project,

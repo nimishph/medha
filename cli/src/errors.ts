@@ -160,6 +160,27 @@ export class SyncRegistryMismatchError extends CliError {
   }
 }
 
+/** The bundled MCP client registry (integrations/clients.json) failed validation. */
+export class McpRegistryError extends CliError {
+  readonly code = 'CLI_MCP_REGISTRY_INVALID';
+
+  constructor(problem: string, init: { readonly hint?: string; readonly cause?: unknown } = {}) {
+    super(`mcp client registry: ${problem}`, { context: { problem }, ...init });
+  }
+}
+
+/** `medha mcp config` was given a client id the registry does not carry. */
+export class McpClientNotFoundError extends CliError {
+  readonly code = 'CLI_MCP_CLIENT_UNKNOWN';
+
+  constructor(name: string, known: readonly string[]) {
+    super(`no MCP client named '${name}'`, {
+      context: { name, known },
+      hint: `known clients: ${known.join(', ')}`,
+    });
+  }
+}
+
 function summarizeDiff(diff: RegistryDiff): string {
   const part = (
     label: string,

@@ -20,6 +20,8 @@
     "boundaries": "depcruise --config .dependency-cruiser.cjs medha-core/src medha-store/src medha-sync/src medha/src cli/src",
     "test": "bun test",
     "spec:check": "python docs/spec/vectors/generate.py --check",
+    "plugin:sync": "bun run tooling/sync-plugin.ts",
+    "plugin:check": "bun run tooling/sync-plugin.ts --check",
     "check": "bun run lint && bun run typecheck && bun run boundaries && bun run test",
     "build": "bun run tooling/package-release.ts",
     "build:ts": "bun run tooling/package-release.ts",

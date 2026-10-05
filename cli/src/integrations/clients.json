@@ -1,0 +1,109 @@
+{
+  "$schema": "../../../schemas/mcp-clients.v1.json",
+  "serverName": "medha",
+  "launchers": {
+    "path": {
+      "label": "medha on PATH",
+      "argv": ["medha", "mcp", "serve"]
+    },
+    "npx": {
+      "label": "npx (pinned)",
+      "argv": ["npx", "-y", "@cntxt-labs/medha-cli@${version}", "mcp", "serve"]
+    }
+  },
+  "clients": [
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "docs": "https://code.claude.com/docs/en/mcp",
+      "notes": "The project file is the portable .mcp.json format, shared as-is with other MCP clients. A project-scoped server asks for approval the first time it loads.",
+      "scopes": [
+        { "id": "project", "label": "Project", "path": ".mcp.json", "default": true },
+        { "id": "user", "label": "User", "path": "~/.claude.json" }
+      ],
+      "document": {
+        "format": "json",
+        "container": ["mcpServers"],
+        "template": { "command": "$argv[0]", "args": "$argv[1:]" }
+      }
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "docs": "https://cursor.com/docs/mcp",
+      "notes": "Project and global files are merged; the project file wins on a duplicate server name. Restart Cursor after saving.",
+      "scopes": [
+        { "id": "project", "label": "Project", "path": ".cursor/mcp.json", "default": true },
+        { "id": "user", "label": "Global", "path": "~/.cursor/mcp.json" }
+      ],
+      "document": {
+        "format": "json",
+        "container": ["mcpServers"],
+        "template": { "type": "stdio", "command": "$argv[0]", "args": "$argv[1:]" }
+      }
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot / VS Code",
+      "docs": "https://code.visualstudio.com/docs/copilot/reference/mcp-configuration",
+      "notes": "The workspace file (.vscode/mcp.json) keys servers under 'servers'; the portable user file (~/.copilot/mcp-config.json) uses 'mcpServers'. A root .mcp.json also works as the portable workspace format.",
+      "scopes": [
+        {
+          "id": "workspace",
+          "label": "Workspace",
+          "path": ".vscode/mcp.json",
+          "default": true
+        },
+        {
+          "id": "user",
+          "label": "Copilot user",
+          "path": "~/.copilot/mcp-config.json",
+          "container": ["mcpServers"]
+        }
+      ],
+      "document": {
+        "format": "json",
+        "container": ["servers"],
+        "template": { "type": "stdio", "command": "$argv[0]", "args": "$argv[1:]" }
+      }
+    },
+    {
+      "id": "opencode",
+      "name": "opencode",
+      "docs": "https://opencode.ai/docs/mcp-servers/",
+      "notes": "Servers live directly under 'mcp' in the current config format; opencode v2 nests them under 'mcp.servers'.",
+      "scopes": [
+        { "id": "project", "label": "Project", "path": "opencode.json", "default": true },
+        { "id": "user", "label": "Global", "path": "~/.config/opencode/opencode.json" }
+      ],
+      "document": {
+        "format": "json",
+        "container": ["mcp"],
+        "template": { "type": "local", "command": "$argv", "enabled": true }
+      }
+    },
+    {
+      "id": "claude-desktop",
+      "name": "Claude Desktop",
+      "docs": "https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop",
+      "notes": "One config file per machine, no project scope. Fully quit Claude Desktop and reopen it for changes to take effect.",
+      "scopes": [
+        {
+          "id": "app",
+          "label": "App",
+          "default": true,
+          "path": {
+            "darwin": "~/Library/Application Support/Claude/claude_desktop_config.json",
+            "windows": "%APPDATA%/Claude/claude_desktop_config.json",
+            "default": "~/.config/Claude/claude_desktop_config.json"
+          }
+        }
+      ],
+      "document": {
+        "format": "json",
+        "container": ["mcpServers"],
+        "template": { "command": "$argv[0]", "args": "$argv[1:]" }
+      }
+    }
+  ]
+}

@@ -2,6 +2,11 @@ import type { EntityKey, ScoredDecisionCase } from '@cntxt-labs/medha-core';
 import { MedhaError } from '@cntxt-labs/medha-core';
 import type { InitReport } from './init.ts';
 import type {
+  McpConfigListReport,
+  McpConfigSnippetReport,
+  McpConfigWriteReport,
+} from './integrations/mcp-config.ts';
+import type {
   MaintainBackupReport,
   MaintainCompactReport,
   MaintainPreflightReport,
@@ -454,4 +459,49 @@ export function renderSyncPush(result: {
     lines.push(`  Commit SHA:      ${result.commit}`);
   }
   return lines.join('\n');
+}
+
+/** `medha mcp config --list`: every client, its scopes with their config files, the launchers. */
+export function renderMcpConfigList(report: McpConfigListReport): string {
+  const lines: string[] = ['Supported MCP clients:'];
+  for (const client of report.clients) {
+    lines.push(`  ${client.id} — ${client.name}`);
+    lines.push(`    docs: ${client.docs}`);
+    for (const scope of client.scopes) {
+      lines.push(`    ${scope.id}  ${scope.path}`);
+    }
+    if (client.notes !== undefined) {
+      lines.push(`    note: ${client.notes}`);
+    }
+  }
+  lines.push('Launchers:');
+  for (const launcher of report.launchers) {
+    lines.push(`  ${launcher.id} — ${launcher.label}`);
+  }
+  return lines.join('\n');
+}
+
+/** `medha mcp config <client>`: a header, then the snippet block verbatim for easy copying. */
+export function renderMcpConfigSnippet(report: McpConfigSnippetReport): string {
+  const head = [
+    `${report.clientName} (${report.clientId}) — scope: ${report.scopeId} (${report.scopeLabel})`,
+    `  config file: ${report.path}`,
+    `  launcher:    ${report.launcherLabel}`,
+    `  docs:        ${report.docs}`,
+  ];
+  if (report.notes !== undefined) {
+    head.push(`  note:        ${report.notes}`);
+  }
+  return [...head, '', report.text.trimEnd()].join('\n');
+}
+
+/** `medha mcp config <client> --write`: where it landed and whether the bytes changed. */
+export function renderMcpConfigWrite(report: McpConfigWriteReport): string {
+  const state = report.created ? 'created' : report.changed ? 'updated' : 'no change';
+  return [
+    `${report.clientName} (${report.clientId}) — scope: ${report.scopeId}, launcher: ${report.launcherId}`,
+    `  config file: ${report.path}`,
+    `  server key:  ${report.serverName}`,
+    `  result:      ${state}`,
+  ].join('\n');
 }

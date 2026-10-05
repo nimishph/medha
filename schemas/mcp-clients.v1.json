@@ -1,0 +1,135 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/nimishph/medha/main/schemas/mcp-clients.v1.json",
+  "title": "Medha MCP Client Registry Schema (v1)",
+  "description": "Declarative registry mapping the medha MCP server onto each AI coding tool's configuration file (cli/src/integrations/clients.json). Pure data: config paths, JSON dialect templates and launchers. No client-specific logic lives in code; the renderer interprets this file.",
+  "type": "object",
+  "required": ["serverName", "launchers", "clients"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URI to this schema for editor autocomplete and validation."
+    },
+    "serverName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Default key the server is registered under inside each client's server map."
+    },
+    "launchers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/launcher" },
+      "description": "How the server process is started. Keyed by launcher id (e.g. path, npx)."
+    },
+    "clients": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/client" },
+      "description": "One entry per supported AI coding tool."
+    }
+  },
+  "$defs": {
+    "template": {
+      "description": "A server-entry template. Strings starting with '$' are references ($argv, $argv[0], $argv[1:], $env, $serverName); every other string, number or boolean is a literal. Objects and arrays are resolved recursively, and keys resolving to an empty value are omitted.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "array", "items": { "$ref": "#/$defs/template" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/template" } }
+      ]
+    },
+    "path": {
+      "description": "A config file path. Either a single string (relative to the project, absolute, or ~-anchored to the home directory) or a per-OS map with a required 'default'.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["default"],
+          "additionalProperties": false,
+          "properties": {
+            "windows": { "type": "string", "minLength": 1 },
+            "darwin": { "type": "string", "minLength": 1 },
+            "linux": { "type": "string", "minLength": 1 },
+            "default": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "launcher": {
+      "type": "object",
+      "required": ["label", "argv"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Program and arguments. Elements may contain the ${version} placeholder, substituted with the CLI version at render time."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment for the server process, exposed to templates as $env. Omitted from output when empty."
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["id", "label", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "label": { "type": "string", "minLength": 1 },
+        "path": { "$ref": "#/$defs/path" },
+        "default": {
+          "type": "boolean",
+          "description": "The scope used when no scope id is given. At most one per client."
+        },
+        "container": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Overrides the client-level container for this scope (clients whose scopes key servers differently)."
+        }
+      }
+    },
+    "document": {
+      "type": "object",
+      "required": ["format", "container", "template"],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": ["json"],
+          "description": "Serialization format. 'literal' is reserved for clients whose config is not JSON (YAML/TOML); not yet implemented."
+        },
+        "container": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Deep path from the document root to the map of servers, e.g. [mcpServers] or [mcp, servers]."
+        },
+        "template": { "$ref": "#/$defs/template" }
+      }
+    },
+    "client": {
+      "type": "object",
+      "required": ["id", "name", "docs", "scopes", "document"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Stable identifier used on the command line (medha mcp config <id>)."
+        },
+        "name": { "type": "string", "minLength": 1 },
+        "docs": { "type": "string", "format": "uri" },
+        "notes": { "type": "string" },
+        "scopes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/scope" } },
+        "document": { "$ref": "#/$defs/document" }
+      }
+    }
+  }
+}

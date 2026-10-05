@@ -2184,6 +2184,114 @@ describe('medha mcp server', () => {
   });
 });
 
+describe('medha mcp config', () => {
+  const REGISTRY_IDS = ['claude-code', 'cursor', 'github-copilot', 'opencode', 'claude-desktop'];
+
+  test('--list names every registry client, its scopes, and both launchers', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', '--list'], env)).toBe(0);
+    const text = out();
+    for (const id of REGISTRY_IDS) {
+      expect(text).toContain(id);
+    }
+    expect(text).toContain('.mcp.json');
+    expect(text).toContain('.cursor/mcp.json');
+    expect(text).toContain('path');
+    expect(text).toContain('npx');
+    expect(text).toContain('https://cursor.com/docs/mcp');
+  });
+
+  test('--json --list emits the machine report', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', '--list', '--json'], env)).toBe(0);
+    const report = JSON.parse(out()) as {
+      clients: { id: string; scopes: { id: string }[] }[];
+      launchers: { id: string }[];
+    };
+    expect(report.clients.map((c) => c.id)).toEqual(REGISTRY_IDS);
+    expect(report.clients.every((c) => c.scopes.length > 0)).toBe(true);
+    expect(report.launchers.map((l) => l.id)).toEqual(['path', 'npx']);
+  });
+
+  test('renders the default-scope snippet with docs, container, and server key', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', 'claude-code'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain('https://code.claude.com/docs/en/mcp');
+    expect(text).toContain('"mcpServers"');
+    expect(text).toContain('"medha"');
+    expect(text).toContain('"serve"');
+    expect(text).toContain('medha on PATH');
+  });
+
+  test('renders the npx launcher with the resolved version, never the placeholder', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', 'cursor', '--launcher', 'npx'], env)).toBe(0);
+    const text = out();
+    expect(text).toContain(`@cntxt-labs/medha-cli@${VERSION}`);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: asserting the placeholder is gone.
+    expect(text).not.toContain('${version}');
+  });
+
+  test('honours --scope for a non-default config file', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', 'cursor', '--scope', 'user'], env)).toBe(0);
+    expect(out()).toContain('~/.cursor/mcp.json');
+  });
+
+  test('--write merges into an existing file keeping siblings, then reports no change', async () => {
+    const { env, out, root } = fresh();
+    mkdirSync(join(root, '.cursor'), { recursive: true });
+    const target = join(root, '.cursor', 'mcp.json');
+    writeFileSync(target, '{"mcpServers":{"other":{"command":"x"}},"foo":1}', 'utf8');
+    expect(await runCli(['mcp', 'config', 'cursor', '--write'], env)).toBe(0);
+    expect(out()).toContain('updated');
+    expect(JSON.parse(readFileSync(target, 'utf8'))).toEqual({
+      mcpServers: {
+        other: { command: 'x' },
+        medha: { type: 'stdio', command: 'medha', args: ['mcp', 'serve'] },
+      },
+      foo: 1,
+    });
+    expect(await runCli(['mcp', 'config', 'cursor', '--write'], env)).toBe(0);
+    expect(out()).toContain('no change');
+  });
+
+  test('--write creates a missing file and container', async () => {
+    const { env, out, root } = fresh();
+    expect(await runCli(['mcp', 'config', 'claude-code', '--write'], env)).toBe(0);
+    expect(out()).toContain('created');
+    const written = JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf8')) as {
+      mcpServers: Record<string, unknown>;
+    };
+    expect(Object.keys(written.mcpServers)).toEqual(['medha']);
+  });
+
+  test('a bare config with no client is usage (exit 2)', async () => {
+    const { env, err } = fresh();
+    expect(await runCli(['mcp', 'config'], env)).toBe(2);
+    expect(err()).toContain('client');
+  });
+
+  test('--all and --write together are usage (exit 2)', async () => {
+    const { env, err } = fresh();
+    expect(await runCli(['mcp', 'config', '--all', '--write'], env)).toBe(2);
+    expect(err()).toContain('--all');
+  });
+
+  test('--all --json renders every client exactly once', async () => {
+    const { env, out } = fresh();
+    expect(await runCli(['mcp', 'config', '--all', '--json'], env)).toBe(0);
+    const reports = JSON.parse(out()) as { clientId: string }[];
+    expect(reports.map((r) => r.clientId)).toEqual(REGISTRY_IDS);
+  });
+
+  test('bare medha mcp still fails as usage; config does not alias it', async () => {
+    const { env } = fresh();
+    expect(await runCli(['mcp'], env)).toBe(2);
+  });
+});
+
 describe('medha sync commands', () => {
   test('sync status reports uninitialized when sync target does not exist', async () => {
     const { env, out } = fresh();

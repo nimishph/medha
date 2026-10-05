@@ -2,6 +2,7 @@ import { InvalidArgumentError } from '@cntxt-labs/medha-core';
 import { defineCommand } from 'citty';
 import { currentEnvironment } from './environment.ts';
 import { type InitOptions, runInit } from './init.ts';
+import type { RenderOptions } from './integrations/render.ts';
 import {
   runMaintainBackup,
   runMaintainCompact,
@@ -22,6 +23,7 @@ import {
   maintainPreflightArgs,
   maintainRestoreArgs,
   mcpCommandArgs,
+  mcpConfigArgs,
   packCommandArgs,
   paramsCommandArgs,
   primerCommandArgs,
@@ -59,6 +61,9 @@ import {
   renderMaintainCompact,
   renderMaintainPreflight,
   renderMaintainRestore,
+  renderMcpConfigList,
+  renderMcpConfigSnippet,
+  renderMcpConfigWrite,
   renderParams,
   renderShow,
   renderSimulate,
@@ -757,6 +762,76 @@ export const mcpServeCommand = defineCommand({
   },
 });
 
+/** `medha mcp config`: registry-driven snippets and writes; needs no engine home. */
+
+function mcpRenderOptions(args: Readonly<Record<string, unknown>>): RenderOptions {
+  const scope = args.scope;
+  const launcher = args.launcher;
+  const serverName = args['server-name'];
+  return {
+    ...(typeof scope === 'string' ? { scopeId: scope } : {}),
+    ...(typeof launcher === 'string' ? { launcherId: launcher } : {}),
+    ...(typeof serverName === 'string' ? { serverName } : {}),
+  };
+}
+
+export const mcpConfigCommand = defineCommand({
+  meta: {
+    name: 'config',
+    description: 'Generate or write an MCP client registration from the built-in registry.',
+  },
+  args: mcpConfigArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { loadRegistry } = await import('./integrations/registry.ts');
+    const { runMcpConfigAll, runMcpConfigList, runMcpConfigSnippet, runMcpConfigWrite } =
+      await import('./integrations/mcp-config.ts');
+    const registry = loadRegistry();
+    const json = args.json === true;
+    if (args.list === true) {
+      const report = runMcpConfigList(registry);
+      environment.stdout(json ? toJson(report) : renderMcpConfigList(report));
+      return;
+    }
+    if (args.all === true && args.write === true) {
+      throw new InvalidArgumentError(
+        '--all',
+        'no --write alongside it (write one client at a time)',
+        '--write',
+      );
+    }
+    if (args.all === true) {
+      const reports = runMcpConfigAll(registry, mcpRenderOptions(args));
+      const text = reports.map((report) => renderMcpConfigSnippet(report)).join('\n\n');
+      environment.stdout(json ? toJson(reports) : text);
+      return;
+    }
+    const clientId =
+      typeof args.client === 'string' && args.client !== '' ? args.client : undefined;
+    if (clientId === undefined) {
+      throw new InvalidArgumentError(
+        'client',
+        'a client id (or --list for the ids, --all for every snippet)',
+        String(args.client ?? 'none'),
+      );
+    }
+    if (args.write === true) {
+      const report = runMcpConfigWrite(registry, clientId, {
+        ...mcpRenderOptions(args),
+        context: {
+          cwd: args.dir ?? environment.cwd,
+          env: environment.env,
+          platform: process.platform,
+        },
+      });
+      environment.stdout(json ? toJson(report) : renderMcpConfigWrite(report));
+      return;
+    }
+    const report = runMcpConfigSnippet(registry, clientId, mcpRenderOptions(args));
+    environment.stdout(json ? toJson(report) : renderMcpConfigSnippet(report));
+  },
+});
+
 export const mcpCommand = defineCommand({
   meta: {
     name: 'mcp',
@@ -765,6 +840,7 @@ export const mcpCommand = defineCommand({
   args: mcpCommandArgs,
   subCommands: {
     serve: mcpServeCommand,
+    config: mcpConfigCommand,
   },
   /*
    * Deliberately no `run` and no `default` here: `medha mcp serve` is the one spelling.

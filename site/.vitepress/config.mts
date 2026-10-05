@@ -55,6 +55,7 @@ export default defineConfig({
           { text: 'Concepts', link: '/guide/concepts' },
           { text: 'How trust is computed', link: '/guide/trust' },
           { text: 'Using it from an agent', link: '/guide/mcp' },
+          { text: 'Connect an MCP client', link: '/integrations' },
         ],
       },
       {

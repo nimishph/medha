@@ -9,10 +9,11 @@ cli/README.md
 cli/LICENSE
 cli/SKILL.md
 
-# Documentation site (site/). node_modules is covered above; the three generated pages are build
+# Documentation site (site/). node_modules is covered above; the four generated pages are build
 # output produced by site/scripts/, and the VitePress build output is never committed.
 site/.vitepress/cache/
 site/.vitepress/dist/
 site/overview.md
 site/agent-skill.md
 site/cli.md
+site/integrations.md
