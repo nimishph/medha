@@ -24,11 +24,11 @@ Core philosophy: **Medha records evidence; you decide what to do with it.**
 
 ### Essential Commands
 - \`medha init\` — Initialize \`.medha/\` home directory with configuration and store.
-- \`medha show <kind> <id>\` — Inspect trust breakdown (Wilson, guard, recency, durability).
-- \`medha record <kind> <id> <signal>\` — Record an observed signal (e.g. APPLY, REJECT_RULE).
-- \`medha guard <kind> <id> --ok / --fail\` — Record automated verification outcome.
-- \`medha propose <kind> <id> <signal>\` — Stage a signal without immediately appending.
-- \`medha define <kind> <id>\` — Define an entity and optional decision tree.
+- \`medha show --id <id> [--kind <kind>]\` — Inspect trust breakdown (Wilson, guard, recency, durability).
+- \`medha record --id <id> --signal <signal>\` — Record an observed signal (e.g. APPLY, REJECT_RULE; \`--ensure\` creates a new entity).
+- \`medha guard --id <id> --ok|--fail --guard <kind>\` — Record automated verification outcome.
+- \`medha propose --id <id> --source <source>\` — Propose a candidate entity (enters on probation).
+- \`medha define --id <id> --title <title> --rationale <why>\` — Define an entity (\`medha decision\` grows its tree).
 - \`medha drift\` — Detect upward or downward divergence in entity reliability.
 - \`medha pack --budget <tokens>\` — Compress top trusted guidance into active context budget.
 - \`medha sync status|pull|push\` — Synchronize memory across git refs or shared files.
@@ -88,8 +88,8 @@ Evidence is recorded as immutable episodes in an append-only log.
 
 ### Usage
 \`\`\`sh
-medha record rule no-any-type APPLY --author "agent-claude" --note "Clean build"
-medha record rule old-polyfill REJECT_RULE --author "nimish" --note "Deprecated in Node 20"
+medha record --id no-any-type --signal APPLY --ensure --author "agent-claude" --note "Clean build"
+medha record --id old-polyfill --signal REJECT_RULE --author "nimish" --note "Deprecated in Node 20"
 \`\`\`
 
 ### Author Diversity & Rate Limits
@@ -114,10 +114,10 @@ Guards provide external, objective validation (e.g. test suites, linters, AST ch
 ### Recording Guards
 \`\`\`sh
 # Automated test suite passed
-medha guard rule strict-typing --ok --note "tsc --noEmit exit 0"
+medha guard --id strict-typing --ok --guard harness --note "tsc --noEmit exit 0"
 
 # Automated test suite failed
-medha guard rule strict-typing --fail --note "tsc reported 3 type errors"
+medha guard --id strict-typing --fail --guard harness --note "tsc reported 3 type errors"
 \`\`\`
 
 ### Guard Factor ($G$)
@@ -136,22 +136,22 @@ Medha supports contextual decision trees so rules can have branch-specific trust
 
 ### Defining an Entity
 \`\`\`sh
-medha define rule db-pool-size --description "Postgres pool sizing"
+medha define --id small-db-pool --title "Keep the Postgres pool small" --rationale "Short-lived workers exhaust max_connections"
 \`\`\`
 
 ### Adding Decision Branches
 \`\`\`sh
-# Branch 1: High concurrency serverless
-medha rule db-pool-size decision "environment == 'lambda'" "max_connections = 5"
+# Branch 1: high-concurrency serverless, so the rule applies
+medha decision --id small-db-pool --condition "environment == 'lambda'" --apply
 
-# Branch 2: Long-running container
-medha rule db-pool-size decision "environment == 'container'" "max_connections = 50"
+# Branch 2: long-running container, so it does not
+medha decision --id small-db-pool --condition "environment == 'container'" --ignore
 \`\`\`
 
 ### Per-Branch Evidence
 Signal episodes can target specific branch cases via \`--case-id <id>\`:
 \`\`\`sh
-medha record rule db-pool-size APPLY --case-id case-8f2a1 --note "Lambda stable"
+medha record --id small-db-pool --signal APPLY --case-id case-8f2a1 --note "Lambda stable"
 \`\`\`
 Evidence on one branch does not contaminate another branch.
 
@@ -180,7 +180,7 @@ This mathematically eliminates small-sample overconfidence.
 Run \`medha drift\` to inspect divergence between short-term EMA and long-term baseline:
 \`\`\`sh
 medha drift
-medha drift --kind rule --threshold 0.15
+medha drift --limit 10 --json
 \`\`\`
 
 - **Downward Drift**: Entity is failing significantly more often recently than historically.
