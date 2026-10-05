@@ -49,6 +49,7 @@ Core philosophy: **Medha records evidence; you decide what to do with it.**
 - `medha ui` — Launch local real-time web dashboard.
 - `medha primer [topic]` — Read token-frugal agent guidance on a specific topic.
 - `medha issue [title]` — Prepare prefilled GitHub issue with sanitized diagnostics.
+- `medha mcp config <client> --write` — Register the MCP server with a client (`--list` for ids).
 - Documentation: [nimishph.github.io/medha](https://nimishph.github.io/medha/) (or `bun run docs:dev` locally)."#,
     },
     TopicDef {

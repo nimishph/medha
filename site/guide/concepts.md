@@ -38,6 +38,10 @@ One piece of evidence about an entity: something happened to it.
 recency either. A rule that nobody has needed in six months should *look* six months stale, not look
 freshly validated because an agent kept declining to use it.
 
+Only a success refreshes recency. A `REJECT_RULE`, or any other signal that is not a success, counts
+as a failure but leaves the entity's age where it was, so a rejection of a dormant rule cannot lift
+it off the recency floor and raise its trust (spec 1.5.0).
+
 You can register your own signals, and a kind can weight a signal's value rather than counting it as
 one success or one failure — see [Extending medha](/guide/extending).
 

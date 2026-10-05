@@ -22,8 +22,17 @@ scope — every one of them is on [Connect an MCP client](/integrations), genera
 registry that powers `medha mcp config`, so `medha mcp config <client> --write` can do the edit for
 you.
 
-Then copy the [agent skill](/agent-skill) to `.claude/skills/medha/SKILL.md` so the agent knows when
-and how to reach for it. The skill is a short workflow — read hints, propose, record, report guards —
+In Claude Code, the plugin does all of this in one install — the server (pinned through
+`npx`), the agent skill, and the `/medha:hints`, `/medha:status`, `/medha:drift` and `/medha:pack`
+commands:
+
+```text
+/plugin marketplace add nimishph/cntxt-labs
+/plugin install medha@cntxt-labs
+```
+
+Without the plugin, copy the [agent skill](/agent-skill) to `.claude/skills/medha/SKILL.md` so the
+agent knows when and how to reach for it. The skill is a short workflow — read hints, propose, record, report guards —
 and it is the difference between an agent that uses medha deliberately and one that never calls it.
 
 ## The tools

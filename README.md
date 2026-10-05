@@ -228,6 +228,12 @@ Register the server in your project's `.mcp.json`:
 { "mcpServers": { "medha": { "command": "medha", "args": ["mcp", "serve"] } } }
 ```
 
+Or let medha write it for your client: `medha mcp config --list` shows the clients it knows
+(Claude Code, Cursor, GitHub Copilot / VS Code, opencode, Claude Desktop) with their scopes, and
+`medha mcp config <client> --write` merges the entry into that client's file without touching the
+other servers there. Without `--write` it prints the snippet; `--scope user`, `--launcher npx` and
+`--all` change what it renders.
+
 Then copy [`SKILL.md`](SKILL.md) to
 `.claude/skills/medha/SKILL.md` so the agent knows when and how to use it.
 
@@ -243,6 +249,17 @@ Then copy [`SKILL.md`](SKILL.md) to
 | `drift` | List drifting entities. |
 | `simulate` | Preview a signal's effect; persists nothing. |
 | `status` | Engine health and preflight. |
+
+### Claude Code plugin
+
+In Claude Code, the plugin brings the MCP server (pinned to this version, through `npx`), the agent
+skill and four read-side slash commands (`/medha:hints`, `/medha:status`, `/medha:drift`,
+`/medha:pack`) in one install:
+
+```text
+/plugin marketplace add nimishph/cntxt-labs
+/plugin install medha@cntxt-labs
+```
 
 ### Fitting trust into a prompt
 
