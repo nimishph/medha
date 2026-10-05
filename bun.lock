@@ -13,7 +13,7 @@
     },
     "cli": {
       "name": "@cntxt-labs/medha-cli",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "bin": {
         "medha": "bin/medha.cjs",
       },
@@ -26,16 +26,16 @@
         "zod": "^4.6.5",
       },
       "optionalDependencies": {
-        "@cntxt-labs/medha-darwin-arm64": "0.7.3",
-        "@cntxt-labs/medha-darwin-x64": "0.7.3",
-        "@cntxt-labs/medha-linux-arm64": "0.7.3",
-        "@cntxt-labs/medha-linux-x64": "0.7.3",
-        "@cntxt-labs/medha-win32-x64": "0.7.3",
+        "@cntxt-labs/medha-darwin-arm64": "0.7.4",
+        "@cntxt-labs/medha-darwin-x64": "0.7.4",
+        "@cntxt-labs/medha-linux-arm64": "0.7.4",
+        "@cntxt-labs/medha-linux-x64": "0.7.4",
+        "@cntxt-labs/medha-win32-x64": "0.7.4",
       },
     },
     "medha": {
       "name": "@cntxt-labs/medha",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
         "@cntxt-labs/medha-store": "workspace:*",
@@ -44,18 +44,18 @@
     },
     "medha-core": {
       "name": "@cntxt-labs/medha-core",
-      "version": "0.7.3",
+      "version": "0.7.4",
     },
     "medha-store": {
       "name": "@cntxt-labs/medha-store",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
       },
     },
     "medha-sync": {
       "name": "@cntxt-labs/medha-sync",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "dependencies": {
         "@cntxt-labs/medha-core": "workspace:*",
       },
