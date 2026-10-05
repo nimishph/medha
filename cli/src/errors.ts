@@ -50,7 +50,10 @@ export function isCliUsageFailure(failure: unknown): failure is Error {
   return failure instanceof Error && failure.name === 'CLIError';
 }
 
-/** The engine home already has a config.json and init refused to touch it. */
+/**
+ * The engine home already has a config.json and init refused to touch it. `init` itself no longer
+ * raises this (a second run refreshes instead); kept for hosts that match on the code.
+ */
 export class HomeExistsError extends CliError {
   readonly code = 'CLI_ALREADY_INITIALIZED';
 

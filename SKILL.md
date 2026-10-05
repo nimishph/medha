@@ -47,7 +47,10 @@ You record evidence; **you** decide what to do with it.
 
 ## Setup
 
-Run once per project (creates `.medha/`; add it to `.gitignore` or commit it deliberately):
+Run once per project (creates `.medha/`; add it to `.gitignore` or commit it deliberately). It also
+keeps a short medha section in the project's `AGENTS.md` / `CLAUDE.md` (`--agents-file <path>` to
+name another file, `--no-agents-file` for none). Running it again after an upgrade is safe: the store
+is left alone and the section is refreshed to the new version.
 
 ```sh
 medha init

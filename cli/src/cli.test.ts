@@ -315,19 +315,31 @@ describe('medha init — backends and paths', () => {
 });
 
 describe('medha init — idempotency', () => {
-  test('a second init refuses as already-initialized', async () => {
-    const { env, err } = fresh();
+  test('a second init refreshes without touching the store', async () => {
+    const { env, home, out } = fresh();
     await runCli(['init'], env);
-    expect(await runCli(['init'], env)).toBe(1);
-    expect(err()).toContain('CLI_ALREADY_INITIALIZED');
+    await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env);
+    const config = readFileSync(join(home, 'config.json'), 'utf8');
+    expect(await runCli(['init'], env)).toBe(0);
+    expect(out()).toContain('already initialized; store left as it is');
+    expect(readFileSync(join(home, 'config.json'), 'utf8')).toBe(config);
+    expect(await runCli(['show', '--id', 'r1', '--json'], env)).toBe(0);
+    expect(out()).toContain('"r1"');
   });
 
-  test('a matching --config still refuses as already-initialized', async () => {
+  test('a matching --config refreshes as well', async () => {
     const { env, root } = fresh();
     await runCli(['init'], env);
     const cfg = join(root, 'empty.json');
     writeFileSync(cfg, '{}');
-    expect(await runCli(['init', '--config', cfg], env)).toBe(1);
+    expect(await runCli(['init', '--config', cfg], env)).toBe(0);
+  });
+
+  test('a scope change on an initialized home asks for --recreate', async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    expect(await runCli(['init', '--namespace', 'a'], env)).not.toBe(0);
+    expect(err()).toContain('--recreate');
   });
 
   test('a drifting --config is a named registry-drift error, not already-initialized', async () => {
@@ -357,6 +369,76 @@ describe('medha init — idempotency', () => {
     const registries = readRawConfig(home).registries as { kinds: string[] };
     expect(registries.kinds).toContain('gadget');
     expect(registries.kinds).not.toContain('widget');
+  });
+});
+
+describe('medha init — agent instruction section', () => {
+  const section = /<!-- medha:begin v[^\n]*-->[\s\S]*<!-- medha:end -->/;
+
+  test('creates AGENTS.md with the section when no instruction file exists', async () => {
+    const { env, root, out } = fresh();
+    expect(await runCli(['init'], env)).toBe(0);
+    const text = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+    expect(text).toMatch(section);
+    expect(text).toContain(`medha:begin v${VERSION}`);
+    expect(text).toContain('medha show --id');
+    expect(existsSync(join(root, 'CLAUDE.md'))).toBe(false);
+    expect(out()).toContain('created AGENTS.md');
+  });
+
+  test('appends to existing AGENTS.md and CLAUDE.md, keeping what is there', async () => {
+    const { env, root } = fresh();
+    writeFileSync(join(root, 'AGENTS.md'), '# Agents\n\nBe kind.\n');
+    writeFileSync(join(root, 'CLAUDE.md'), '# Claude\n');
+    expect(await runCli(['init'], env)).toBe(0);
+    const agents = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+    expect(agents.startsWith('# Agents\n\nBe kind.\n\n<!-- medha:begin')).toBe(true);
+    expect(readFileSync(join(root, 'CLAUDE.md'), 'utf8')).toMatch(section);
+  });
+
+  test('skips a CLAUDE.md that only imports AGENTS.md', async () => {
+    const { env, root } = fresh();
+    writeFileSync(join(root, 'AGENTS.md'), '# Agents\n');
+    writeFileSync(join(root, 'CLAUDE.md'), '@AGENTS.md\n');
+    expect(await runCli(['init'], env)).toBe(0);
+    expect(readFileSync(join(root, 'CLAUDE.md'), 'utf8')).toBe('@AGENTS.md\n');
+    expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toMatch(section);
+  });
+
+  test('a re-run replaces an older section in place and leaves the rest alone', async () => {
+    const { env, root, out } = fresh();
+    writeFileSync(
+      join(root, 'AGENTS.md'),
+      '# Top\n\n<!-- medha:begin v0.1.0 — old -->\nstale advice\n<!-- medha:end -->\n\n## Bottom\n',
+    );
+    expect(await runCli(['init'], env)).toBe(0);
+    const text = readFileSync(join(root, 'AGENTS.md'), 'utf8');
+    expect(text).not.toContain('stale advice');
+    expect(text.startsWith('# Top\n\n<!-- medha:begin')).toBe(true);
+    expect(text.endsWith('<!-- medha:end -->\n\n## Bottom\n')).toBe(true);
+    expect(out()).toContain('was v0.1.0');
+
+    expect(await runCli(['init'], env)).toBe(0);
+    expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe(text);
+    expect(out()).toContain('section is current');
+  });
+
+  test('--agents-file names the file; --no-agents-file writes none', async () => {
+    const named = fresh();
+    expect(await runCli(['init', '--agents-file', 'docs/agents.md'], named.env)).toBe(0);
+    expect(readFileSync(join(named.root, 'docs', 'agents.md'), 'utf8')).toMatch(section);
+    expect(existsSync(join(named.root, 'AGENTS.md'))).toBe(false);
+
+    const none = fresh();
+    expect(await runCli(['init', '--no-agents-file', '--json'], none.env)).toBe(0);
+    expect(existsSync(join(none.root, 'AGENTS.md'))).toBe(false);
+    expect(JSON.parse(none.out()).agentFiles).toEqual([]);
+  });
+
+  test('the memory backend writes no section', async () => {
+    const { env, root } = fresh();
+    expect(await runCli(['init', '--store', 'memory'], env)).toBe(0);
+    expect(existsSync(join(root, 'AGENTS.md'))).toBe(false);
   });
 });
 

@@ -12,9 +12,10 @@ import {
   resolveRegistries,
   SQLiteStore,
 } from '@cntxt-labs/medha-store';
+import { type AgentFileResult, agentTargets, applyAgentSection } from './agent-instructions.ts';
 import type { Environment } from './environment.ts';
 import type { RegistryDiff } from './errors.ts';
-import { HomeExistsError, RegistryDriftError, StoreCorruptError } from './errors.ts';
+import { RegistryDriftError, StoreCorruptError } from './errors.ts';
 import {
   BACKENDS,
   type Backend,
@@ -28,11 +29,13 @@ import {
   registryEquals,
   removeStoreArtifacts,
   resolveStorePath,
+  storeForConfig,
   writeConfig,
   writeGitignore,
   writeReadme,
   writeSnapshot,
 } from './layout.ts';
+import { VERSION } from './version.ts';
 
 /**
  * `medha init` (spec §9.1, the write-plane bootstrap): resolve the engine home under `--dir`, build
@@ -41,7 +44,27 @@ import {
  * registries into `config.json` as the single source of truth — plus an optional bootstrap
  * snapshot. Headless by construction: nothing here reads a TTY, and the ephemeral memory backend
  * persists nothing at all.
+ *
+ * Running it again on an initialized home is safe and is how an upgrade reaches the project: the
+ * store and config.json are left exactly as they are (only `--recreate` wipes), preflight runs
+ * against them, and the generated project files — the medha section of the agent instruction file
+ * — are brought up to this version.
  */
+
+/** The section `init` keeps in the project's AGENTS.md / CLAUDE.md (see agent-instructions.ts). */
+export const AGENT_SECTION = `## Evidential memory: medha
+
+This project tracks how well its rules, recipes and tools actually work in [medha](https://nimishph.github.io/medha/)
+(engine home: \`.medha/\`). Medha reports evidence and trust hints; **you** decide what to do with them.
+
+- Before leaning on a project rule, recipe or tool, check its trust: \`medha show --id <id>\` (add
+  \`--kind recipe|tool\` for non-rules). Unknown entities are \`probation\`: weigh them lightly.
+- \`medha pack --budget 2000\` gives the most trusted guidance that fits a token budget.
+- After using one, record what happened: \`medha record --id <id> --signal APPLY\` (or
+  \`REJECT_RULE\`, \`SKIP\`; \`--ensure\` creates a new entity).
+- When a check confirms or refutes it (tests, review, audit): \`medha guard --id <id> --ok|--fail --guard <kind>\`.
+- \`medha primer [topic]\` explains any of this in a few lines. If a \`medha\` MCP server is
+  connected, its tools do the same.`;
 
 export interface InitOptions {
   readonly dir: string;
@@ -59,9 +82,16 @@ export interface InitOptions {
    * without hand-editing config.json.
    */
   readonly noNamespace?: boolean;
+  /**
+   * The agent instruction file to keep the medha section in, relative to `dir`; `false` writes none
+   * (`--no-agents-file`). Default: AGENTS.md and/or CLAUDE.md, see `agentTargets`.
+   */
+  readonly agentsFile?: string | false;
 }
 
 export interface InitReport {
+  /** `existing` when the home was already initialized and init only refreshed what it generates. */
+  readonly status: 'initialized' | 'recreated' | 'existing';
   readonly home: string;
   readonly backend: Backend;
   readonly path: string | null;
@@ -80,6 +110,8 @@ export interface InitReport {
   /** null only for the ephemeral memory backend, which has no home directory to scaffold. */
   readonly gitignore: string | null;
   readonly readme: string | null;
+  /** The agent instruction files init wrote the medha section into (empty for memory / opt-out). */
+  readonly agentFiles: readonly AgentFileResult[];
 }
 
 /** Parse `--namespace`: a comma-separated, deduplicated, non-empty namespace list, or undefined. */
@@ -178,6 +210,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
     const store = new MemoryStore({ registries: requested });
     const preflight = await bootstrap(store, options.backup);
     return {
+      status: 'initialized',
       home,
       backend,
       path: null,
@@ -189,8 +222,20 @@ export async function runInit(options: InitOptions, environment: Environment): P
       namespaceScope: requestedScope ?? null,
       gitignore: null,
       readme: null,
+      agentFiles: [],
     };
   }
+
+  const agentFiles = (): readonly AgentFileResult[] =>
+    options.agentsFile === false
+      ? []
+      : applyAgentSection(
+          options.dir,
+          agentTargets(options.dir, options.agentsFile),
+          'medha',
+          VERSION,
+          AGENT_SECTION,
+        );
 
   const forcedStorePath = storePath as string;
   if (!options.recreate) {
@@ -204,7 +249,31 @@ export async function runInit(options: InitOptions, environment: Environment): P
           registryDiff(existing.registries, requested),
         );
       }
-      throw new HomeExistsError(home);
+      // Already initialized: leave the store and config.json alone, check them, and bring the
+      // generated project files up to this version. A scope change is a re-init, not a refresh.
+      if (requestedScope !== undefined || options.noNamespace === true) {
+        throw new InvalidArgumentError(
+          options.noNamespace === true ? '--no-namespace' : '--namespace',
+          `--recreate alongside it: ${home} is already initialized`,
+          options.namespace,
+        );
+      }
+      const preflight = await bootstrap(storeForConfig(existing), options.backup);
+      return {
+        status: 'existing',
+        home,
+        backend: existing.backend,
+        path: existing.path ?? null,
+        config: configPathFor(home),
+        layoutVersion: existing.layoutVersion,
+        preflight,
+        registryDrift: null,
+        backup: options.backup ?? null,
+        namespaceScope: existing.namespaceScope ?? null,
+        gitignore: null,
+        readme: null,
+        agentFiles: agentFiles(),
+      };
     }
   }
   const namespaceScope = resolveNamespaceScope(requestedScope, options, home);
@@ -245,6 +314,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
       };
 
   return {
+    status: options.recreate ? 'recreated' : 'initialized',
     home,
     backend,
     path: forcedStorePath,
@@ -256,6 +326,7 @@ export async function runInit(options: InitOptions, environment: Environment): P
     namespaceScope: namespaceScope ?? null,
     gitignore: gitignorePath,
     readme: readmePath,
+    agentFiles: agentFiles(),
   };
 }
 

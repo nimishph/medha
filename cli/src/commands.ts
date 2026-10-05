@@ -130,6 +130,11 @@ export const initCommand = defineCommand({
           ? { namespace: namespaceFlag }
           : {}),
       recreate: args.recreate === true,
+      ...(rawArgs.some((a) => a === '--no-agents-file' || a.startsWith('--no-agents-file='))
+        ? { agentsFile: false }
+        : typeof args['agents-file'] === 'string'
+          ? { agentsFile: args['agents-file'] }
+          : {}),
     };
     const report = await runInit(options, environment);
     environment.stdout(args.json === true ? toJson(report) : renderInit(report));
