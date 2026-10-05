@@ -465,7 +465,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("pack json");
     assert!(pack_json.status.success());
     let pack_j: Value = serde_json::from_slice(&pack_json.stdout).expect("parse pack json");
-    assert!(pack_j["selected"].as_array().unwrap().len() >= 1);
+    assert!(!pack_j["selected"].as_array().unwrap().is_empty());
     assert!(pack_j["totalCost"].as_u64().unwrap() <= 1000);
 
     // ==========================================
@@ -577,4 +577,5 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     }
 
     let _ = mcp_child.kill();
+    let _ = mcp_child.wait();
 }
