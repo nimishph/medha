@@ -341,7 +341,9 @@ medha maintain restore snapshot.json
 ```
 
 Everything lives under `.medha/`. `medha init` scaffolds a `.medha/.gitignore` and a
-`.medha/README.md` for you: `config.json` (the registries) is meant to be committed, while the
+`.medha/README.md` for you, and keeps a short medha section in the project's `AGENTS.md` /
+`CLAUDE.md` (or `--agents-file <path>`; `--no-agents-file` for none) so coding agents know to use
+it. Re-run `medha init` after an upgrade: the store is left alone and that section is refreshed. `config.json` (the registries) is meant to be committed, while the
 store data itself is gitignored by default — share it with `medha sync` instead, since it has its
 own conflict-resolving merge, not git's. Delete or edit `.medha/.gitignore` if you'd rather commit
 the store file directly as a simpler, manual sync.

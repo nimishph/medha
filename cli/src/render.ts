@@ -1,5 +1,6 @@
 import type { EntityKey, ScoredDecisionCase } from '@cntxt-labs/medha-core';
 import { MedhaError } from '@cntxt-labs/medha-core';
+import { renderAgentFiles } from './agent-instructions.ts';
 import type { InitReport } from './init.ts';
 import type {
   McpConfigListReport,
@@ -54,7 +55,9 @@ export function renderInit(report: InitReport): string {
   const p = report.preflight;
   const lastSweep = p.lastSweep === null ? 'not yet' : new Date(p.lastSweep).toISOString();
   const lines = [
-    `medha: initialized engine home at ${report.home}`,
+    report.status === 'existing'
+      ? `medha: engine home at ${report.home} is already initialized; store left as it is`
+      : `medha: ${report.status} engine home at ${report.home}`,
     `  backend:    ${report.backend}`,
     report.path === null ? `  store:      ephemeral (memory)` : `  store:      ${report.path}`,
     ...(report.config === null
@@ -70,6 +73,7 @@ export function renderInit(report: InitReport): string {
         ]),
     ...(report.gitignore === null ? [] : [`  gitignore:  ${report.gitignore}`]),
     ...(report.readme === null ? [] : [`  readme:     ${report.readme}`]),
+    ...renderAgentFiles('medha', report.agentFiles).map((line) => `  agents:     ${line}`),
   ];
   return `${lines.join('\n')}\n`;
 }

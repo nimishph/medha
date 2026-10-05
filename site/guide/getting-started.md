@@ -39,10 +39,22 @@ medha: initialized engine home at /your/project/.medha
   last sweep: 2026-09-28T05:57:31.194Z
   gitignore:  /your/project/.medha/.gitignore
   readme:     /your/project/.medha/README.md
+  agents:     created AGENTS.md with the medha section
 ```
 
 `init` runs a preflight check before it hands back, so a home that reports `ok` is one medha can
-read. See [Maintenance and sharing](/guide/maintenance) for what to commit and what to gitignore.
+read.
+
+`init` also keeps a short section on using medha in the project's agent instruction file, so a
+coding agent working there knows to check trust before leaning on a rule and to record what
+happened. It goes into `AGENTS.md` and `CLAUDE.md`, whichever exist (a `CLAUDE.md` that only says
+`@AGENTS.md` is skipped), and creates `AGENTS.md` when neither does. Name another file with
+`--agents-file docs/agents.md`, or pass `--no-agents-file` for none. The section sits between
+`<!-- medha:begin … -->` and `<!-- medha:end -->` markers; the rest of the file is never touched.
+
+Running `medha init` again on an initialized home is safe, and is the step to take after upgrading
+medha: the store and `config.json` are left as they are, preflight runs, and the agent section is
+replaced with the one this version ships. Only `--recreate` wipes the store. See [Maintenance and sharing](/guide/maintenance) for what to commit and what to gitignore.
 
 Three store backends are available, chosen with `--store`:
 

@@ -42,6 +42,13 @@ export const initCommandArgs: ArgsDef = {
     description: 'Wipe the engine store and re-initialize.',
     default: false,
   },
+  'agents-file': {
+    type: 'string',
+    description:
+      'Agent instruction file to keep the medha section in, relative to --dir. Default: AGENTS.md ' +
+      'and/or CLAUDE.md, whichever exist (AGENTS.md is created when neither does). Pass ' +
+      '--no-agents-file to write none.',
+  },
   json: { type: 'boolean', description: 'Emit the init report as JSON.', default: false },
 };
 
