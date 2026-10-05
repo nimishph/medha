@@ -7,7 +7,7 @@
 import { afterAll, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, normalize } from 'node:path';
+import { join, win32 } from 'node:path';
 import { ConfigFileError, McpClientNotFoundError, McpRegistryError } from '../errors.ts';
 import { loadRegistry } from './registry.ts';
 import { displayPath, pickPath, resolvePath, writeClientConfig } from './write.ts';
@@ -56,7 +56,7 @@ describe('path handling', () => {
         platform: 'win32',
         env: { APPDATA: 'C:/Users/me/AppData/Roaming' },
       }),
-    ).toBe(normalize('C:/Users/me/AppData/Roaming/Claude/claude_desktop_config.json'));
+    ).toBe(win32.normalize('C:/Users/me/AppData/Roaming/Claude/claude_desktop_config.json'));
     expect(resolvePath('.mcp.json', { cwd, home })).toBe(join(cwd, '.mcp.json'));
   });
 

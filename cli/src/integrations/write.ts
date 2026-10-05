@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, normalize, resolve } from 'node:path';
+import { dirname, posix, win32 } from 'node:path';
 import { ConfigFileError, McpRegistryError } from '../errors.ts';
 import type { McpRegistry, PathSpec } from './registry.ts';
 import { clientById } from './registry.ts';
@@ -68,7 +68,10 @@ export function resolvePath(spec: PathSpec, context: PathContext = {}): string {
   };
   path = path.replace(ENV_WINDOWS, expand).replace(ENV_BRACE, expand);
   const cwd = context.cwd ?? process.cwd();
-  return isAbsolute(path) ? normalize(path) : resolve(cwd, path);
+  // Path rules follow the platform being resolved for, not the host running the code: a win32
+  // path is absolute on a POSIX host too, and must never be anchored at that host's cwd.
+  const rules = (context.platform ?? process.platform) === 'win32' ? win32 : posix;
+  return rules.isAbsolute(path) ? rules.normalize(path) : rules.resolve(cwd, path);
 }
 
 export interface WriteOptions extends RenderOptions {
