@@ -14,6 +14,8 @@ export interface Environment {
   readonly now: () => number;
   /** Whether stderr is an interactive terminal (reserved for progress rendering). */
   readonly isTTY?: boolean;
+  /** Whether stdout is an interactive terminal — gates styling of output written to stdout. */
+  readonly stdoutIsTTY?: boolean;
   /** The exit code the process should leave behind; commands raise it to fail. */
   exitCode: number;
   stdout(text: string): void;
@@ -48,6 +50,7 @@ export function processEnvironment(): Environment {
     env: process.env,
     now: () => Date.now(),
     isTTY: process.stderr.isTTY === true,
+    stdoutIsTTY: process.stdout.isTTY === true,
     exitCode: 0,
     stdout: (text) => {
       process.stdout.write(text);

@@ -101,7 +101,7 @@ export async function runCli(argv: readonly string[], environment: Environment):
   if (command === 'help') {
     const subArgs = argv.slice(1);
     if (subArgs.length === 0) {
-      environment.stdout(await help(environment.isTTY === true));
+      environment.stdout(await help(environment.stdoutIsTTY === true));
       return 0;
     }
     const { cmd, parent } = await resolveUsageTarget(subArgs);
@@ -109,7 +109,7 @@ export async function runCli(argv: readonly string[], environment: Environment):
     return 0;
   }
   if (command === '--help' || command === '-h') {
-    environment.stdout(await help(environment.isTTY === true));
+    environment.stdout(await help(environment.stdoutIsTTY === true));
     return 0;
   }
 

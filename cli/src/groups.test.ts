@@ -4,13 +4,17 @@ import { commands } from './commands.ts';
 import { bindEnvironment, type Environment } from './environment.ts';
 import { COMMAND_GROUPS, groupCommands, OTHER_GROUP_TITLE } from './groups.ts';
 
-function capture(isTTY = false): { env: Environment; out: () => string } {
+function capture(
+  stdoutIsTTY = false,
+  isTTY = stdoutIsTTY,
+): { env: Environment; out: () => string } {
   let out = '';
   const env: Environment = {
     cwd: process.cwd(),
     env: {},
     now: () => 0,
     isTTY,
+    stdoutIsTTY,
     exitCode: 0,
     stdout: (text) => {
       out += text;
@@ -61,6 +65,13 @@ describe('medha --help groups', () => {
     const { env, out } = capture(true);
     expect(await runCli(['help'], env)).toBe(0);
     expect(out()).toContain('\u001b[1mRECORD EVIDENCE');
+  });
+
+  test('help piped while stderr is a terminal stays plain: styling follows stdout', async () => {
+    const { env, out } = capture(false, true);
+    expect(await runCli(['--help'], env)).toBe(0);
+    expect(out()).toContain('RECORD EVIDENCE');
+    expect(out()).not.toContain('\u001b[');
   });
 
   test('a command help still renders that command alone', async () => {

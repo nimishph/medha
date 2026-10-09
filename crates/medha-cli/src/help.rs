@@ -10,7 +10,8 @@ use clap::Command;
 
 /// Section title and the commands in it, in the order a newcomer meets them.
 pub const GROUPS: &[(&str, &[&str])] = &[
-    ("Get started", &["init", "primer", "params"]),
+    // `help` is clap's built-in subcommand; the TypeScript CLI handles it outside citty's registry.
+    ("Get started", &["init", "primer", "params", "help"]),
     (
         "Record evidence",
         &[
@@ -56,6 +57,9 @@ const OTHER: &str = "Other";
 
 /// `(title, [(name, one-line description)])`, groups in order, empty ones dropped.
 pub fn sections(cmd: &Command) -> Vec<(String, Vec<(String, String)>)> {
+    // Build a copy so clap's generated `help` subcommand is listed, as the flat default list did.
+    let mut cmd = cmd.clone();
+    cmd.build();
     let available: Vec<(String, String)> = cmd
         .get_subcommands()
         .filter(|sub| !sub.is_hide_set())
@@ -161,6 +165,11 @@ mod tests {
                 "{name} missing from help:\n{text}"
             );
         }
+        assert!(
+            text.lines().any(|l| l.starts_with("  help ")),
+            "built-in help subcommand missing from help:
+{text}"
+        );
         assert!(text.contains("--home") && text.contains("--json"));
     }
 }
