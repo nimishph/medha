@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Storage backends (SQLite via rusqlite, in-memory) and log projection for Medha."
 
 [dependencies]
-medha-core = { path = "../medha-core", version = "0.7.4" }
+medha-core = { path = "../medha-core", version = "0.7.5" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

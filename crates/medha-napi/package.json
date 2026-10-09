@@ -1,6 +1,6 @@
 {
   "name": "@cntxt-labs/medha-napi",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "private": true,
   "type": "module",
   "description": "NAPI-RS native Node/Bun bindings for medha-core",
