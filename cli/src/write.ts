@@ -81,7 +81,10 @@ export interface RecordReport {
   readonly home: string;
   readonly key: EntityKey;
   readonly signal: string;
-  /** False when the entity is unknown and `--ensure` was not passed: nothing was written. */
+  /**
+   * False when the entity is unknown and `--ensure` was not passed: the episode is logged but
+   * changes no entity (it shows as "no effect").
+   */
   readonly recorded: boolean;
   readonly hint: EvidentialHint;
   readonly note?: string | undefined;

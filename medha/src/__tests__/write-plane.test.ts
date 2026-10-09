@@ -89,6 +89,23 @@ describe('write plane — record (§6.2)', () => {
     expect(await store.episodes()).toHaveLength(1);
   });
 
+  test('show marks logged no-ops, and only those: later signals on the created entity count', async () => {
+    const { medha } = makeEngine();
+    const key = { namespace: '', kind: 'tool', id: 'late' };
+    await medha.record(key, 'APPLY', ctx);
+    await medha.record(key, 'REJECT_RULE', ctx);
+    const unknown = await medha.show(key, ctx);
+    expect(unknown.known).toBe(false);
+    expect(unknown.noEffect).toEqual([0, 1]);
+
+    await medha.record(key, 'APPLY', ctx, { ensure: true });
+    await medha.record(key, 'APPLY', ctx);
+    const known = await medha.show(key, ctx);
+    expect(known.known).toBe(true);
+    expect(known.noEffect).toEqual([0, 1]);
+    expect(known.recentEpisodes.map((episode) => episode.seq)).toEqual([3, 2, 1, 0]);
+  });
+
   test('a custom updater is reachable from the write path — not just the four built-ins', async () => {
     const { store, medha } = makeEngine();
     medha.updaters.register(fixedUpdater('fixed-delta', 0.99), 'project');

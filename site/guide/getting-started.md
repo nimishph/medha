@@ -113,8 +113,8 @@ There are three built-in signals:
 | `SKIP` | It did not apply. Neutral: it never counts for or against. |
 
 `--ensure` creates the entity if it does not exist yet. Without it, recording against an unknown id
-is a no-op and the response says `recorded: false` — so a typo silently does nothing rather than
-inventing an entity.
+changes nothing and the response says `recorded: false` — so a typo does not invent an entity. The
+attempt is still logged, and `medha show` marks it "no effect", so a mistaken id leaves a trail.
 
 ## Ask why
 

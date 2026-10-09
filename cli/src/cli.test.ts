@@ -979,6 +979,22 @@ describe('medha write plane', () => {
     expect(out()).toContain('"known": true');
   });
 
+  test('show marks the attempt logged before --ensure as having no effect', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'late', '--signal', 'APPLY'], env);
+    await runCli(['record', '--id', 'late', '--signal', 'APPLY', '--ensure'], env);
+    const before = out().length;
+    expect(await runCli(['show', '--id', 'late'], env)).toBe(0);
+    const lines = out().slice(before).split('\n');
+    const marked = lines.filter((line) =>
+      line.includes('(no effect: entity unknown, no --ensure)'),
+    );
+    expect(marked).toHaveLength(1);
+    expect(marked[0]).toMatch(/^ {4}#0 signal/);
+    expect(lines.some((line) => /^ {4}#1 signal at \S+$/.test(line))).toBe(true);
+  });
+
   test('guard needs exactly one of --ok / --fail', async () => {
     const { env, err } = fresh();
     await runCli(['init'], env);

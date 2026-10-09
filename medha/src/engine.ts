@@ -132,6 +132,30 @@ function buildWeightContext(state: EntityState, spec: SignalSpec): WeightUpdateC
   };
 }
 
+/**
+ * Replay one key's slice the way the projection does (retractions from the whole log masked) and
+ * collect the episodes that found no entity and did not create one.
+ */
+function noEffectSeqs(
+  log: readonly Episode[],
+  episodes: readonly Episode[],
+  kinds: KindRegistry,
+): number[] {
+  const retracted = new Set<number>();
+  for (const episode of log) if (episode.type === 'retract') retracted.add(episode.targetSeq);
+  const seqs: number[] = [];
+  let state: EntityState | undefined;
+  for (const episode of [...episodes].sort((a, b) => a.seq - b.seq)) {
+    if (retracted.has(episode.seq)) continue;
+    const next = foldEpisode(state, episode, { kinds });
+    if (state === undefined && next === undefined) {
+      if (episode.type === 'signal' || episode.type === 'guard') seqs.push(episode.seq);
+    }
+    state = next;
+  }
+  return seqs;
+}
+
 function compareKeyString(a: { readonly key: EntityKey }, b: { readonly key: EntityKey }): number {
   const s1 = entityKeyString(a.key);
   const s2 = entityKeyString(b.key);
@@ -301,6 +325,7 @@ export class Medha {
     const episodes = log.filter((episode) => entityKeyString(episode.key) === keyString);
     const recentN = options.recent ?? 10;
     const recentEpisodes = [...episodes].sort((a, b) => b.seq - a.seq).slice(0, recentN);
+    const noEffect = noEffectSeqs(log, episodes, this.kindRegistry());
     const proposalEpisodes = episodes.filter(
       (episode): episode is Extract<Episode, { type: 'proposal' }> => episode.type === 'proposal',
     );
@@ -323,6 +348,7 @@ export class Medha {
         gates: evaluateGates(fresh, freshHint.trustScore, this.kindSpecFor(key.kind)),
         known: false,
         recentEpisodes,
+        noEffect,
         provenance,
         promoted,
         ...(definition === undefined ? {} : { definition }),
@@ -335,6 +361,7 @@ export class Medha {
       gates: evaluateGates(state, hint.trustScore, this.kindSpecFor(state.key.kind)),
       known: true,
       recentEpisodes,
+      noEffect,
       provenance,
       promoted,
       ...(definition === undefined ? {} : { definition }),
@@ -1361,6 +1388,11 @@ export interface EntityDetail {
   /** False when the id is unknown — the hint is then the probation prior (spec §5.2). */
   readonly known: boolean;
   readonly recentEpisodes: readonly Episode[];
+  /**
+   * Seqs of this key's episodes that are logged but changed nothing: a signal or guard on an id
+   * that did not exist yet, without `ensure` (spec §5.2, the `recorded: false` case). Ascending.
+   */
+  readonly noEffect: readonly number[];
   /** `provenance` strings from the key's proposal episodes (MinerPort flow). */
   readonly provenance: readonly string[];
   /** True if any proposal episode for this key was promoted by Medha's promotion policy. */
