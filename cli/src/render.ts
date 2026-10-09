@@ -198,11 +198,15 @@ export function renderShow(report: ShowReport): string {
   }
   if (detail.recentEpisodes.length > 0) {
     lines.push('  recent episodes:');
+    const noEffect = new Set(detail.noEffect);
     for (const episode of detail.recentEpisodes) {
       const noteStr =
         'note' in episode && typeof episode.note === 'string' ? ` — "${episode.note}"` : '';
+      const effectStr = noEffect.has(episode.seq)
+        ? ' (no effect: entity unknown, no --ensure)'
+        : '';
       lines.push(
-        `    #${episode.seq} ${episode.type} at ${new Date(episode.at).toISOString()}${noteStr}`,
+        `    #${episode.seq} ${episode.type} at ${new Date(episode.at).toISOString()}${effectStr}${noteStr}`,
       );
     }
   }

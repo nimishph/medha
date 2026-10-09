@@ -95,7 +95,7 @@ A kind can carry its own policy. Set it at init with `medha init --config <file>
 2. **Propose** a new rule: `propose` / `medha propose --id <id> --source <who> [--text ..]`.
 3. **Record** evidence as it happens: `record_signal` / `medha record --id <id> --signal APPLY --ensure`.
    Signals: `APPLY` (used and worked), `REJECT_RULE` (a human rejected it), `SKIP` (not applicable).
-   If the entity is unknown and `ensure` is not set, the response says `recorded: false` — nothing was written.
+   If the entity is unknown and `ensure` is not set, the response says `recorded: false` — the attempt is logged, but changes no entity.
 4. **Report guards**: `report_guard` / `medha guard --id <id> --ok|--fail --guard review`.
    Without a passing guard, trust is capped at 0.5 — usage alone never makes a rule `trusted`.
 5. **Explain**: `medha explain-threshold --id <id>` lists each threshold with ok/no and the numbers.

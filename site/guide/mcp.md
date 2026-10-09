@@ -77,8 +77,9 @@ a store full of `active` entities and wonder why nothing is ever `trusted`.
 
 ## `recorded: false` is not an error
 
-`record_signal` returns `recorded: false` when the entity is unknown and `ensure` was not set. Nothing
-was written.
+`record_signal` returns `recorded: false` when the entity is unknown and `ensure` was not set. No
+entity was created or changed; the attempt is logged as an episode with no effect (`show` lists its
+seq under `noEffect`), so you can audit which ids were tried.
 
 This is deliberate: a typo'd id should not silently invent an entity and start accumulating evidence
 against it. If you genuinely mean to create it, pass `ensure: true`. If you did not mean to, the
