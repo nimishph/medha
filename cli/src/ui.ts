@@ -8,9 +8,11 @@ import {
   type ScoredDecisionCase,
 } from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
+import { inspectEntity, type SimulationStep, simulatePath } from './inspect.ts';
 import { type OpenedHome, openHome } from './open.ts';
 import { LIFECYCLE_STATUSES, pageAll, paramsReport, type StatusReport } from './read.ts';
 import { toJson } from './render.ts';
+import { INSPECT_VIEW_CSS, INSPECT_VIEW_HTML, INSPECT_VIEW_JS } from './ui-inspect.ts';
 import { VERSION } from './version.ts';
 
 export interface UiOptions {
@@ -555,6 +557,7 @@ export function generateDashboardHtml(data: {
       width: 100%;
       accent-color: #6366f1;
     }
+${INSPECT_VIEW_CSS}
   </style>
 </head>
 <body>
@@ -568,7 +571,7 @@ export function generateDashboardHtml(data: {
 
     <nav class="nav-tabs">
       <button class="tab-btn active" id="tabBtnFleet" onclick="switchTab('fleet')">Fleet Overview</button>
-      <button class="tab-btn" id="tabBtnDecomposer" onclick="switchTab('decomposer')">Trust Decomposer</button>
+      <button class="tab-btn" id="tabBtnDecomposer" onclick="switchTab('decomposer')">Inspect</button>
       <button class="tab-btn" id="tabBtnPacker" onclick="switchTab('packer')">Context Packer</button>
       <button class="tab-btn" id="tabBtnTimeline" onclick="switchTab('timeline')">Audit Timeline</button>
     </nav>
@@ -638,61 +641,8 @@ export function generateDashboardHtml(data: {
       </div>
     </section>
 
-    <!-- TAB 2: TRUST DECOMPOSER -->
-    <section id="viewDecomposer" class="tab-view">
-      <div class="decomposer-grid">
-        <div class="card">
-          <h3 style="margin-bottom: 12px; font-weight: 700;">Mathematical Trust Decomposition</h3>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
-            Trust score is computed by decomposing statistical evidence, oracle guard verdicts, recency decay, and durability anchors:
-            <code style="font-family: var(--font-mono); color: #818cf8; display: block; margin-top: 6px;">T = min(C, D * λ * G * W)</code>
-          </p>
-
-          <div style="margin-bottom: 1.5rem;">
-            <label style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted);">Select Entity to Decompose:</label>
-            <select id="decomposerSelect" class="search-input" style="width: 100%; margin-top: 6px;" onchange="updateDecomposer()"></select>
-          </div>
-
-          <div id="decomposerFactors"></div>
-        </div>
-
-        <div class="card">
-          <h3 style="margin-bottom: 12px; font-weight: 700;">What-If Signal Simulation</h3>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem;">
-            Test the exact mathematical delta a signal would produce on the selected entity without writing to the store:
-          </p>
-
-          <div class="form-group">
-            <label>Signal to Simulate:</label>
-            <select id="simulateSignal" class="search-input" style="width: 100%;">
-              <option value="APPLY">APPLY (Successful execution: +1.0)</option>
-              <option value="REJECT_RULE">REJECT_RULE (Rule violated: -1.0)</option>
-              <option value="SKIP">SKIP (Neutral: delta 0.0)</option>
-              <option value="CONTEXT_REJECT">CONTEXT_REJECT (Context unsuitable: 0.0)</option>
-            </select>
-          </div>
-
-          <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-bottom: 1.5rem;" onclick="runSimulation()">
-            Run Simulation
-          </button>
-
-          <div id="simulationResult" style="display: none; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 1rem;"></div>
-        </div>
-      </div>
-
-      <div class="card" style="margin-top: 1.5rem;" id="decomposerTreeCard">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <div>
-            <h3 style="font-weight: 700; margin: 0;">Decision Tree &amp; Branch Governance</h3>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; margin-bottom: 0;">
-              Hierarchical conditional branches with isolated Wilson evidence, decisions, and scored status:
-            </p>
-          </div>
-          <span id="decomposerTreeBadge" class="badge badge-secondary">0 branches</span>
-        </div>
-        <div id="decomposerTreeForest" style="margin-top: 1rem;"></div>
-      </div>
-    </section>
+    <!-- TAB 2: INSPECT -->
+    ${INSPECT_VIEW_HTML}
 
     <!-- TAB 3: CONTEXT BUDGET PACKER -->
     <section id="viewPacker" class="tab-view">
@@ -824,7 +774,7 @@ export function generateDashboardHtml(data: {
         const keyStr = e.key.namespace ? \`\${e.key.namespace}\\u0000\${e.key.kind}\\u0000\${e.key.id}\` : \`\\u0000\${e.key.kind}\\u0000\${e.key.id}\`;
         const tree = (state.decisionTrees && (state.decisionTrees[e.key.id] || state.decisionTrees[keyStr])) || [];
         const treeBadge = tree.length > 0
-          ? \` <span class="badge badge-primary" style="margin-left: 6px; font-size: 0.68rem; cursor: pointer;" title="Entity has \${tree.length} decision branches" data-inspect-id="\${escapeHtml(e.key.id)}">🌳 \${tree.length}</span>\`
+          ? \` <span class="badge badge-primary" style="margin-left: 6px; font-size: 0.68rem; cursor: pointer;" title="Entity has \${tree.length} decision branches" data-inspect-id="\${escapeHtml(e.key.id)}" data-inspect-ns="\${escapeHtml(e.key.namespace)}" data-inspect-kind="\${escapeHtml(e.key.kind)}">🌳 \${tree.length}</span>\`
           : '';
         const pct = Math.round(e.trustScore * 100);
         return \`
@@ -845,7 +795,7 @@ export function generateDashboardHtml(data: {
               \${e.lastNote ? '"' + escapeHtml(e.lastNote) + '"' : '—'}
             </td>
             <td>
-              <button class="btn" style="padding: 4px 8px; font-size: 0.75rem;" data-inspect-id="\${escapeHtml(e.key.id)}">Inspect</button>
+              <button class="btn" style="padding: 4px 8px; font-size: 0.75rem;" data-inspect-id="\${escapeHtml(e.key.id)}" data-inspect-ns="\${escapeHtml(e.key.namespace)}" data-inspect-kind="\${escapeHtml(e.key.kind)}">Inspect</button>
             </td>
           </tr>
         \`;
@@ -854,28 +804,14 @@ export function generateDashboardHtml(data: {
 
     document.getElementById('entitiesTbody').addEventListener('click', (evt) => {
       const btn = evt.target.closest('[data-inspect-id]');
-      if (btn) inspectEntity(btn.getAttribute('data-inspect-id'));
+      if (btn) {
+        inspectEntity(
+          btn.getAttribute('data-inspect-id'),
+          btn.getAttribute('data-inspect-ns') ?? undefined,
+          btn.getAttribute('data-inspect-kind') ?? undefined,
+        );
+      }
     });
-
-    function populateDecomposerSelect() {
-      const sel = document.getElementById('decomposerSelect');
-      const ents = state.entities || [];
-      sel.innerHTML = ents.map(e => {
-        const keyLabel = e.key.namespace ? \`\${e.key.namespace}/\${e.key.kind}/\${e.key.id}\` : \`\${e.key.kind}/\${e.key.id}\`;
-        const keyStr = e.key.namespace ? \`\${e.key.namespace}\\u0000\${e.key.kind}\\u0000\${e.key.id}\` : \`\\u0000\${e.key.kind}\\u0000\${e.key.id}\`;
-        const tree = (state.decisionTrees && (state.decisionTrees[e.key.id] || state.decisionTrees[keyStr])) || [];
-        const treeSuffix = tree.length > 0 ? \` [🌳 \${tree.length}]\` : '';
-        return \`<option value="\${escapeHtml(e.key.id)}">\${escapeHtml(keyLabel)} (\${escapeHtml(e.status)}, T=\${e.trustScore.toFixed(3)})\${treeSuffix}</option>\`;
-      }).join('');
-      updateDecomposer();
-    }
-
-    function inspectEntity(id) {
-      switchTab('decomposer');
-      const sel = document.getElementById('decomposerSelect');
-      sel.value = id;
-      updateDecomposer();
-    }
 
     function renderDecisionForest(tree) {
       if (!tree || tree.length === 0) {
@@ -927,86 +863,7 @@ export function generateDashboardHtml(data: {
       return roots.map(r => renderBranch(r, 0)).join('');
     }
 
-    function updateDecomposer() {
-      const id = document.getElementById('decomposerSelect').value;
-      const entity = (state.entities || []).find(e => e.key.id === id);
-      const container = document.getElementById('decomposerFactors');
-      const treeForest = document.getElementById('decomposerTreeForest');
-      const treeBadge = document.getElementById('decomposerTreeBadge');
-
-      if (!entity) {
-        container.innerHTML = '<p style="color: var(--text-faint)">Select an entity above.</p>';
-        if (treeForest) treeForest.innerHTML = '';
-        if (treeBadge) treeBadge.textContent = '0 branches';
-        return;
-      }
-
-      const keyStr = entity.key.namespace ? \`\${entity.key.namespace}\\u0000\${entity.key.kind}\\u0000\${entity.key.id}\` : \`\\u0000\${entity.key.kind}\\u0000\${entity.key.id}\`;
-      const tree = (state.decisionTrees && (state.decisionTrees[entity.key.id] || state.decisionTrees[keyStr])) || [];
-      if (treeBadge) {
-        treeBadge.textContent = \`\${tree.length} branch\${tree.length === 1 ? '' : 'es'}\`;
-        treeBadge.className = tree.length > 0 ? 'badge badge-primary' : 'badge badge-secondary';
-      }
-      if (treeForest) {
-        treeForest.innerHTML = renderDecisionForest(tree);
-      }
-
-      const c = entity.components;
-      container.innerHTML = \`
-        <div class="factor-card">
-          <div class="factor-header"><span>Wilson 95% Confidence Floor (W)</span><span style="font-family: var(--font-mono); color: #10b981;">\${c.wilson.toFixed(3)}</span></div>
-          <div class="factor-desc">Derived from \${entity.evidence.successes} successes in \${entity.evidence.totalTrials} trials with Wilson continuity correction.</div>
-        </div>
-        <div class="factor-card">
-          <div class="factor-header"><span>Guard Verdict Factor (G)</span><span style="font-family: var(--font-mono); color: #6366f1;">\${c.guard.toFixed(3)}</span></div>
-          <div class="factor-desc">Multiplier from deterministic harness and automated oracle verification reports.</div>
-        </div>
-        <div class="factor-card">
-          <div class="factor-header"><span>Recency Time-Decay (λ)</span><span style="font-family: var(--font-mono); color: #f59e0b;">\${c.recency.toFixed(3)}</span></div>
-          <div class="factor-desc">Half-life decay factor modeling aging evidence without usage.</div>
-        </div>
-        <div class="factor-card">
-          <div class="factor-header"><span>Durability Multiplier (D)</span><span style="font-family: var(--font-mono); color: #a855f7;">\${c.durability.toFixed(3)}</span></div>
-          <div class="factor-desc">Cross-session durability anchor scaling.</div>
-        </div>
-        <div class="factor-card">
-          <div class="factor-header"><span>Ceiling Cap (C)</span><span style="font-family: var(--font-mono); color: #94a3b8;">\${c.ceiling.toFixed(3)}</span></div>
-          <div class="factor-desc">Structural upper bound ceiling for this entity kind.</div>
-        </div>
-      \`;
-    }
-
-    async function runSimulation() {
-      const id = document.getElementById('decomposerSelect').value;
-      const signal = document.getElementById('simulateSignal').value;
-      const resContainer = document.getElementById('simulationResult');
-      resContainer.style.display = 'block';
-      resContainer.innerHTML = '<span style="color: var(--text-muted)">Simulating...</span>';
-
-      try {
-        const res = await fetch('/api/simulate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, signal })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        const deltaColor = data.deltaTrust >= 0 ? '#10b981' : '#f43f5e';
-        const sign = data.deltaTrust >= 0 ? '+' : '';
-        resContainer.innerHTML = \`
-          <div style="font-weight: 700; margin-bottom: 8px;">Simulation Outcome:</div>
-          <div style="display: flex; gap: 16px; font-size: 0.85rem; font-family: var(--font-mono);">
-            <div>Before: <strong>\${data.before.trustScore.toFixed(3)}</strong> (\${data.before.status})</div>
-            <div>➔</div>
-            <div>After: <strong>\${data.after.trustScore.toFixed(3)}</strong> (\${data.after.status})</div>
-            <div style="color: \${deltaColor}; font-weight: 700;">\${sign}\${data.deltaTrust.toFixed(3)}</div>
-          </div>
-        \`;
-      } catch (err) {
-        resContainer.innerHTML = \`<span style="color: var(--quarantined)">Simulation error: \${err.message}</span>\`;
-      }
-    }
+${INSPECT_VIEW_JS}
 
     function updatePackerControls() {
       document.getElementById('lblBudget').textContent = document.getElementById('rngBudget').value;
@@ -1327,7 +1184,20 @@ export async function startUiServer(
         return;
       }
 
-      // 6. API: POST /api/simulate
+      // 6a. API: GET /api/inspect - everything the Inspect tab needs for one entity.
+      if (url.pathname === '/api/inspect') {
+        const key: EntityKey = {
+          namespace: url.searchParams.get('namespace') ?? '',
+          kind: url.searchParams.get('kind') ?? 'rule',
+          id: url.searchParams.get('id') ?? '',
+        };
+        const detail = await inspectEntity(opened, key, { now: environment.now() });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(toJson(detail));
+        return;
+      }
+
+      // 6b. API: POST /api/simulate - a single signal (legacy) or a path of hypothetical steps.
       if (url.pathname === '/api/simulate' && req.method === 'POST') {
         let body = '';
         for await (const chunk of req) body += chunk;
@@ -1336,12 +1206,19 @@ export async function startUiServer(
           kind?: string;
           namespace?: string;
           signal?: string;
+          steps?: SimulationStep[];
         };
         const key: EntityKey = {
           namespace: parsed.namespace ?? '',
           kind: parsed.kind ?? 'rule',
           id: parsed.id ?? '',
         };
+        if (parsed.steps !== undefined) {
+          const path = await simulatePath(opened, key, parsed.steps, { now: environment.now() });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(toJson(path));
+          return;
+        }
         const delta = await opened.adminEngine.simulate(key, parsed.signal ?? 'APPLY', {
           now: environment.now(),
         });

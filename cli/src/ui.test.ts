@@ -8,8 +8,24 @@ import { runInit } from './init.ts';
 import { runReport } from './report.ts';
 import { generateDashboardHtml, startUiServer, type UiServerHandle } from './ui.ts';
 import { VERSION } from './version.ts';
+import { runGuard, runRecord } from './write.ts';
 
 const NOW = 1_700_000_000_000;
+
+interface InspectJson {
+  known: boolean;
+  guard: { condition: string };
+  hint: { evidence: { totalTrials: number } };
+  thresholds: { trusted: number };
+  signals: { name: string }[];
+}
+
+interface SimulateJson {
+  error?: string;
+  before: { evidence: { totalTrials: number } };
+  after: { evidence: { totalTrials: number } };
+  frames: { statusChanged: boolean; hint: { status: string }; guard: { condition: string } }[];
+}
 
 let cleanups: string[] = [];
 
@@ -333,5 +349,125 @@ describe('medha ui dashboard & report', () => {
     const content = await Bun.file(outPath).text();
     expect(content).toContain('<!DOCTYPE html>');
     expect(content).toContain('Medha Evidential Memory Dashboard');
+  });
+
+  test('inspect + simulate endpoints are namespace-aware and speak the real signal names', async () => {
+    const testPort = 8497;
+    const testDir = join(
+      tmpdir(),
+      `medha-ui-inspect-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(testDir, { recursive: true });
+    cleanups.push(testDir);
+    const env = makeTestEnv(testDir);
+    await runInit({ dir: testDir, backend: 'sqlite', recreate: false }, env);
+    for (let i = 0; i < 3; i++) {
+      await runRecord(
+        { dir: testDir, id: 'r1', namespace: 'team', signal: 'APPLY', ensure: true },
+        env,
+      );
+    }
+    await runGuard({ dir: testDir, id: 'r1', namespace: 'team', ok: true }, env);
+
+    const server = await startUiServer({ dir: testDir, port: testPort, host: '127.0.0.1' }, env);
+    const post = (body: unknown) =>
+      fetch(`${server.url}/api/simulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then((r) => r.json() as Promise<SimulateJson>);
+    try {
+      // A guard reported without a name still counts as "no check": the card must say so.
+      const detail = (await (
+        await fetch(`${server.url}/api/inspect?namespace=team&kind=rule&id=r1`)
+      ).json()) as InspectJson;
+      expect(detail.known).toBe(true);
+      expect(detail.guard.condition).toBe('none');
+      expect(detail.hint.evidence.totalTrials).toBe(3);
+      expect(detail.thresholds.trusted).toBe(0.6);
+      expect(detail.signals.map((sg: { name: string }) => sg.name)).toContain('REJECT_CONTEXT');
+
+      // The namespace reaches the engine: the entity is found, not simulated as a fresh one.
+      const single = await post({ namespace: 'team', id: 'r1', signal: 'APPLY' });
+      expect(single.before.evidence.totalTrials).toBe(3);
+      expect(single.after.evidence.totalTrials).toBe(4);
+
+      // The real name of the "context unsuitable" signal works.
+      const ctx = await post({ namespace: 'team', id: 'r1', signal: 'REJECT_CONTEXT' });
+      expect(ctx.error).toBeUndefined();
+      expect(ctx.after.evidence.totalTrials).toBe(3);
+
+      // A path replays steps in order and flags the stage changes.
+      const path = await post({
+        namespace: 'team',
+        id: 'r1',
+        steps: [
+          { type: 'guard', ok: false, kind: 'review' },
+          { type: 'guard', ok: true, kind: 'review' },
+          { type: 'advance', days: 30 },
+        ],
+      });
+      const frames = path.frames;
+      expect(frames).toHaveLength(4);
+      expect(frames[1]?.hint.status).toBe('quarantined');
+      expect(frames[1]?.statusChanged).toBe(true);
+      expect(frames[2]?.guard.condition).toBe('passed');
+      // Nothing was written by any of it.
+      const after = (await (
+        await fetch(`${server.url}/api/inspect?namespace=team&kind=rule&id=r1`)
+      ).json()) as InspectJson;
+      expect(after.guard.condition).toBe('none');
+
+      const tooMany = await post({
+        namespace: 'team',
+        id: 'r1',
+        steps: Array.from({ length: 80 }, () => ({ type: 'advance', days: 1 })),
+      });
+      expect(String(tooMany.error)).toContain('at most');
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('inspect page explains things in plain words', () => {
+    const html = generateDashboardHtml({
+      status: {
+        asOf: NOW,
+        home: '/h',
+        backend: 'sqlite',
+        path: null,
+        byStatus: { active: 0, trusted: 0, probation: 0, quarantined: 0, retired: 0 },
+        drifting: 0,
+        preflight: {
+          asOf: NOW,
+          status: 'ok',
+          location: null,
+          episodeCount: 0,
+          entityCount: 0,
+          integrity: 'ok',
+          danglingRetractions: [],
+          lastSweep: null,
+          registries: { kinds: 1, signals: 1, anchors: 1 },
+        },
+        params: { asOf: NOW, note: '', params: [] },
+      },
+      entities: [],
+      episodes: [],
+      version: VERSION,
+      home: '/h',
+    });
+    for (const phrase of [
+      'Why this score?',
+      'Independent check',
+      'What happens next?',
+      'Holding it back most',
+      'Show the math',
+      'On trial',
+      'Proven',
+    ]) {
+      expect(html).toContain(phrase);
+    }
+    // The old dropdown offered a signal the engine does not have.
+    expect(html).not.toContain('CONTEXT_REJECT');
   });
 });
