@@ -167,8 +167,7 @@ mod tests {
         }
         assert!(
             text.lines().any(|l| l.starts_with("  help ")),
-            "built-in help subcommand missing from help:
-{text}"
+            "built-in help subcommand missing from help:\n{text}"
         );
         assert!(text.contains("--home") && text.contains("--json"));
     }
