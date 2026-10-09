@@ -3,14 +3,60 @@ import { type CommandDef, renderUsage, runCommand } from 'citty';
 import { commands } from './commands.ts';
 import { bindEnvironment, type Environment } from './environment.ts';
 import { CliUsageError, isCliUsageFailure } from './errors.ts';
+import { groupCommands } from './groups.ts';
 import { toJson } from './render.ts';
 import { VERSION } from './version.ts';
 
-let helpText: string | undefined;
+type Resolvable<T> = T | Promise<T> | (() => T | Promise<T>);
 
-async function help(): Promise<string> {
-  helpText ??= await renderUsage(commands);
-  return helpText;
+async function resolve<T>(value: Resolvable<T>): Promise<T> {
+  return typeof value === 'function' ? await (value as () => T | Promise<T>)() : await value;
+}
+
+const helpCache = new Map<boolean, string>();
+
+/**
+ * The top-level help: commands in sections (see `groups.ts`) instead of one flat list. Every
+ * subcommand still gets a one-line description; `medha <command> --help` is unchanged and still
+ * rendered by citty.
+ */
+async function help(styled: boolean): Promise<string> {
+  const cached = helpCache.get(styled);
+  if (cached !== undefined) return cached;
+
+  const bold = (text: string): string => (styled ? `\u001b[1m${text}\u001b[22m` : text);
+  const dim = (text: string): string => (styled ? `\u001b[2m${text}\u001b[22m` : text);
+
+  const meta = (await resolve(commands.meta)) as { description?: string } | undefined;
+  const subs = ((await resolve(commands.subCommands)) ?? {}) as Record<
+    string,
+    Resolvable<CommandDef>
+  >;
+  const described: Record<string, string> = {};
+  for (const [name, node] of Object.entries(subs)) {
+    const def = await resolve(node);
+    const nodeMeta = (await resolve(def.meta)) as
+      | { description?: string; hidden?: boolean }
+      | undefined;
+    if (nodeMeta?.hidden === true) continue;
+    described[name] = nodeMeta?.description ?? '';
+  }
+
+  const width = Math.max(...Object.keys(described).map((name) => name.length));
+  const lines = [`${meta?.description ?? ''} ${dim(`(medha v${VERSION})`)}`.trim(), ''];
+  lines.push(`${bold('USAGE')}  medha <command> [OPTIONS]`, '');
+  for (const section of groupCommands(described)) {
+    lines.push(bold(section.title.toUpperCase()));
+    for (const { name, value } of section.entries) {
+      lines.push(`  ${name.padEnd(width)}  ${value}`);
+    }
+    lines.push('');
+  }
+  lines.push(`Use ${bold('medha <command> --help')} for more information about a command.`, '');
+
+  const text = lines.join('\n');
+  helpCache.set(styled, text);
+  return text;
 }
 
 /**
@@ -49,13 +95,13 @@ export async function runCli(argv: readonly string[], environment: Environment):
     return 0;
   }
   if (command === undefined) {
-    environment.stderr(await help());
+    environment.stderr(await help(environment.isTTY === true));
     return 2;
   }
   if (command === 'help') {
     const subArgs = argv.slice(1);
     if (subArgs.length === 0) {
-      environment.stdout(await help());
+      environment.stdout(await help(environment.isTTY === true));
       return 0;
     }
     const { cmd, parent } = await resolveUsageTarget(subArgs);
@@ -63,7 +109,7 @@ export async function runCli(argv: readonly string[], environment: Environment):
     return 0;
   }
   if (command === '--help' || command === '-h') {
-    environment.stdout(await help());
+    environment.stdout(await help(environment.isTTY === true));
     return 0;
   }
 

@@ -1,4 +1,5 @@
 mod args;
+mod help;
 mod issue;
 mod mcp;
 mod pack;
@@ -7,7 +8,7 @@ mod primer;
 mod render;
 
 use args::*;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use medha::config::{BackendKind, MedhaConfig, CONFIG_FILE, MEDHA_HOME_DIR, SQLITE_FILE};
 use medha::core::types::EntityKey;
 use medha::store::StorePort;
@@ -19,7 +20,14 @@ use std::path::PathBuf;
 use std::process::exit;
 
 fn main() {
-    let cli = Cli::parse();
+    let command = Cli::command();
+    let command = command
+        .clone()
+        .help_template(help::grouped_template(&command));
+    let cli = match Cli::from_arg_matches(&command.get_matches()) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
+    };
     if let Err(err) = run(cli) {
         eprintln!("medha error: {}", err);
         exit(1);
