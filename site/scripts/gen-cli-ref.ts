@@ -101,10 +101,16 @@ function renderDefault(arg: ArgDef): string {
   return `\`${String(arg.default)}\``;
 }
 
+interface CommandGroup {
+  readonly title: string;
+  readonly commands: readonly string[];
+}
+
 async function renderCommand(
   node: CommandNode,
   path: string[],
   depth: number,
+  groups?: readonly CommandGroup[],
 ): Promise<string[]> {
   const lines: string[] = [];
   const heading = '#'.repeat(Math.min(depth + 2, 6));
@@ -131,18 +137,44 @@ async function renderCommand(
   }
 
   const subs = await resolveSubCommands(node);
-  for (const [name, child] of Object.entries(subs)) {
-    if (isHidden(child)) continue;
-    const childPath = [...path, name];
-    if (depth === 0 && UNPUBLISHED.has(name)) continue;
-    lines.push(...(await renderCommand(child, childPath, depth + 1)));
+  const visibleSubs = Object.entries(subs).filter(
+    ([name, child]) => !isHidden(child) && !(depth === 0 && UNPUBLISHED.has(name)),
+  );
+
+  if (depth === 0 && groups !== undefined) {
+    // Top-level commands under a heading per group, the same sections `medha --help` prints.
+    const byName = new Map(visibleSubs);
+    const placed = new Set<string>();
+    const sections: { title: string; names: string[] }[] = groups.map((group) => ({
+      title: group.title,
+      names: group.commands.filter((name) => byName.has(name)),
+    }));
+    for (const section of sections) for (const name of section.names) placed.add(name);
+    const rest = visibleSubs.map(([name]) => name).filter((name) => !placed.has(name));
+    if (rest.length > 0) sections.push({ title: 'Other', names: rest });
+    for (const section of sections) {
+      if (section.names.length === 0) continue;
+      lines.push(`### ${section.title}`, '');
+      for (const name of section.names) {
+        const child = byName.get(name) as CommandNode;
+        lines.push(...(await renderCommand(child, [...path, name], 2)));
+      }
+    }
+    return lines;
+  }
+
+  for (const [name, child] of visibleSubs) {
+    lines.push(...(await renderCommand(child, [...path, name], depth + 1)));
   }
 
   return lines;
 }
 
 /** Render the whole tree as a markdown page body. Exported for testing against a stub tree. */
-export async function renderCommandTree(root: CommandNode): Promise<string> {
+export async function renderCommandTree(
+  root: CommandNode,
+  groups?: readonly CommandGroup[],
+): Promise<string> {
   const name = root.meta?.name ?? 'medha';
   const version = root.meta?.version;
   const lines: string[] = [
@@ -159,7 +191,7 @@ export async function renderCommandTree(root: CommandNode): Promise<string> {
     '> [How trust works](/guide/trust).',
     '',
   ];
-  lines.push(...(await renderCommand(root, [name], 0)));
+  lines.push(...(await renderCommand(root, [name], 0, groups)));
   return `${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
 }
 
@@ -170,7 +202,8 @@ if (import.meta.main === true) {
   // workspace installed. bun is required: the tree is TypeScript that resolves through workspace
   // path aliases, which node cannot load.
   const { commands } = await import('../../cli/src/commands.ts');
-  const markdown = await renderCommandTree(commands as unknown as CommandNode);
+  const { COMMAND_GROUPS } = await import('../../cli/src/groups.ts');
+  const markdown = await renderCommandTree(commands as unknown as CommandNode, COMMAND_GROUPS);
   await mkdir(new URL('./', OUTPUT), { recursive: true });
   await writeFile(OUTPUT, markdown, 'utf8');
   console.log(`wrote ${OUTPUT.pathname}`);
