@@ -276,6 +276,13 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
   const override = s1.override ?? s2.override ?? null;
   const retiredAt = s1.retiredAt ?? s2.retiredAt ?? null;
   const restoredAt = s1.restoredAt ?? s2.restoredAt ?? null;
+  const lastNote = s1.lastNote ?? s2.lastNote;
+  const authors = s1.authors ?? s2.authors;
+
+  const rejectingAuthors =
+    s1.rejectingAuthors || s2.rejectingAuthors
+      ? Array.from(new Set([...(s1.rejectingAuthors ?? []), ...(s2.rejectingAuthors ?? [])])).sort()
+      : undefined;
 
   // Lifecycle status
   let status: LifecycleStatus;
@@ -298,6 +305,9 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
         updater: s1.updater || s2.updater,
         createdAt: Math.min(s1.createdAt, s2.createdAt),
         lastSignalAt,
+        ...(rejectingAuthors ? { rejectingAuthors } : {}),
+        ...(authors ? { authors } : {}),
+        ...(lastNote !== undefined ? { lastNote } : {}),
       },
       updatedAt,
     );
@@ -324,5 +334,8 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
     updater: s1.updater || s2.updater,
     createdAt: Math.min(s1.createdAt, s2.createdAt),
     lastSignalAt,
+    ...(rejectingAuthors ? { rejectingAuthors } : {}),
+    ...(authors ? { authors } : {}),
+    ...(lastNote !== undefined ? { lastNote } : {}),
   };
 }

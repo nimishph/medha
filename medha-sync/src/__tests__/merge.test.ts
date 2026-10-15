@@ -289,4 +289,51 @@ describe('mergeEntityStates — 2-way state merge', () => {
     expect(m?.lastSignalAt).toBe(2000);
     expect(m?.anchors).toHaveLength(2);
   });
+
+  it('combines, sorts, and dedupes rejectingAuthors across replicas', () => {
+    const s1: EntityState = {
+      key: { namespace: '', kind: 'rule', id: 'rule-authors' },
+      evidence: { k: 1, n: 3, contextRejects: 0 },
+      ema: { mu: 0.3, theta0: 0.5, updatedAt: 1000 },
+      guard: { kind: 'none', lastOk: null, lastOkAt: null },
+      anchors: [],
+      status: 'probation',
+      override: null,
+      retiredAt: null,
+      restoredAt: null,
+      updater: 'ema',
+      createdAt: 500,
+      lastSignalAt: 1000,
+      rejectingAuthors: ['charlie', 'alice'],
+      authors: { alice: { lastAt: 1000, counted: 2, suppressed: 0 } },
+      lastNote: 'replica 1 note',
+    };
+
+    const s2: EntityState = {
+      key: { namespace: '', kind: 'rule', id: 'rule-authors' },
+      evidence: { k: 0, n: 2, contextRejects: 0 },
+      ema: { mu: 0.1, theta0: 0.5, updatedAt: 2000 },
+      guard: { kind: 'none', lastOk: null, lastOkAt: null },
+      anchors: [],
+      status: 'probation',
+      override: null,
+      retiredAt: null,
+      restoredAt: null,
+      updater: 'ema',
+      createdAt: 600,
+      lastSignalAt: 2000,
+      rejectingAuthors: ['bob', 'alice'],
+      authors: { bob: { lastAt: 2000, counted: 2, suppressed: 0 } },
+    };
+
+    const merged = mergeEntityStates([s1], [s2]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.rejectingAuthors).toEqual(['alice', 'bob', 'charlie']);
+    expect(merged[0]?.authors).toBeDefined();
+    expect(merged[0]?.lastNote).toBe('replica 1 note');
+
+    // Commutative check
+    const reversed = mergeEntityStates([s2], [s1]);
+    expect(reversed[0]?.rejectingAuthors).toEqual(['alice', 'bob', 'charlie']);
+  });
 });
