@@ -1,6 +1,6 @@
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::round::round6;
-use medha_core::thresholds::{DEFAULT_THETA0, RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS};
+use medha_core::thresholds::{RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS};
 use medha_core::types::{Anchor, CoreError, EntityKey, LifecycleStatus, RecencyConfig, Thresholds};
 use medha_store::{EntityState, Episode, EpisodeInput, EpisodePayload};
 use std::collections::{HashMap, HashSet};
@@ -336,14 +336,13 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
     };
     let merged_mu = round6(merged_mu.clamp(0.0, 1.0))?;
 
-    let updated_at = match (s1.last_signal_at, s2.last_signal_at) {
-        (Some(t1), Some(t2)) => Some(t1.max(t2)),
-        (Some(t1), None) => Some(t1),
-        (None, Some(t2)) => Some(t2),
-        (None, None) => None,
-    };
+    // As the TypeScript reference: the EMA's clock (which every signal moves, unlike
+    // `last_signal_at`) is both the merged EMA's and the instant the merged status is judged at.
+    let updated_at = s1.ema.updated_at.max(s2.ema.updated_at);
 
-    let theta0 = DEFAULT_THETA0;
+    // The local replica's baseline. Resetting it to the default would move the drift reference,
+    // and with it quarantine, for an entity whose baseline was set by a `baseline` episode.
+    let theta0 = s1.ema.theta0;
 
     // Merge anchors uniquely
     let mut anchor_set: HashSet<String> = HashSet::new();
@@ -374,11 +373,13 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         }
         (Some(_), None) => s1.guard.clone(),
         (None, Some(_)) => s2.guard.clone(),
+        // Neither was reported with a time: the incoming guard only when it has a result and
+        // the local one has none.
         (None, None) => {
-            if s1.guard.last_ok.is_some() {
-                s1.guard.clone()
-            } else {
+            if s1.guard.last_ok.is_none() && s2.guard.last_ok.is_some() {
                 s2.guard.clone()
+            } else {
+                s1.guard.clone()
             }
         }
     };
@@ -414,11 +415,11 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
                 ema: &medha_core::types::EmaState {
                     mu: merged_mu,
                     theta0,
-                    updated_at: updated_at.unwrap_or(0),
+                    updated_at,
                     sample_count: (total_n.round() as u64),
                 },
                 last_signal_at,
-                now: updated_at.unwrap_or(0),
+                now: updated_at,
                 stored_status: LifecycleStatus::Probation,
                 status_override,
                 thresholds: &thresholds,
@@ -440,7 +441,7 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         ema: medha_core::types::EmaState {
             mu: merged_mu,
             theta0,
-            updated_at: s1.ema.updated_at.max(s2.ema.updated_at),
+            updated_at,
             sample_count: (total_n.round() as u64),
         },
         status,
