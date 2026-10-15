@@ -8,7 +8,9 @@
  * - `plugin/skills/agent/SKILL.md`        <- the root SKILL.md, frontmatter renamed for the
  *                                            plugin prefix (`/medha:agent`);
  * - `plugin/.claude-plugin/plugin.json`   <- only its `version` field; name, description and
- *                                            author stay hand-written and are preserved.
+ *                                            author stay hand-written and are preserved;
+ * - `crates/medha-cli/src/primer_topics.json` <- the primer templates (`cli/src/primer-topics.ts`),
+ *                                            so the Rust CLI renders the same text (medha-v1g).
  *
  * Hand-written and never touched here: `plugin/commands/*.md`. Distribution happens through the
  * `nimishph/cntxt-labs` marketplace (and the local `cntxt-labs-dev` workspace marketplace), so the
@@ -56,6 +58,13 @@ export async function buildPluginFiles(): Promise<Map<string, string>> {
   };
   manifest.version = cliPackage.version;
   files.set('plugin/.claude-plugin/plugin.json', `${JSON.stringify(manifest, null, 2)}\n`);
+
+  // The primer: one text for both CLIs, each filling the placeholders from its own kernel.
+  const { PRIMER_TEMPLATES } = await import('../cli/src/primer-topics.ts');
+  files.set(
+    'crates/medha-cli/src/primer_topics.json',
+    `${JSON.stringify(PRIMER_TEMPLATES, null, 2)}\n`,
+  );
 
   return files;
 }

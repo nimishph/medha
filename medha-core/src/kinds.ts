@@ -18,6 +18,12 @@ export interface KindThresholds {
   readonly minUsesForTrusted?: number;
   readonly minUsesForRetired?: number;
   readonly retiredTrustThreshold?: number;
+  /**
+   * Retirement by trust also needs this many distinct authors among the failed trials (spec §6
+   * step 5.1, since 2.0.0). Default 1: no author requirement. Above 1 the fold keeps
+   * `rejectingAuthors` for the kind, so one reviewer cannot retire a rule alone.
+   */
+  readonly minDistinctAuthorsForRetired?: number;
 }
 
 /**
@@ -111,6 +117,9 @@ export class KindRegistry {
             if (val < 0) {
               throw new InvalidArgumentError(`thresholds.${key}`, 'a non-negative number', val);
             }
+          }
+          if (key === 'minDistinctAuthorsForRetired' && (!Number.isInteger(val) || val < 1)) {
+            throw new InvalidArgumentError(`thresholds.${key}`, 'a positive integer', val);
           }
         }
       }

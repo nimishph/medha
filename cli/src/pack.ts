@@ -1,6 +1,7 @@
 import { InvalidArgumentError, type PackOutcome } from '@cntxt-labs/medha-core';
 import type { Environment } from './environment.ts';
 import { openHome } from './open.ts';
+import { parseIds } from './read.ts';
 import { keyLabel } from './render.ts';
 
 export interface PackOptions {
@@ -9,6 +10,8 @@ export interface PackOptions {
   readonly budget?: string | number;
   readonly kind?: string;
   readonly namespace?: string;
+  /** Comma-separated entity ids (gh-23). */
+  readonly ids?: string;
   readonly exploration?: string | number;
   readonly format?: string;
   readonly seed?: string | number;
@@ -65,6 +68,7 @@ export async function runPack(options: PackOptions, environment: Environment): P
         budget,
         kind: options.kind ?? 'rule',
         ...(options.namespace === undefined ? {} : { namespace: options.namespace }),
+        ...(options.ids === undefined ? {} : { ids: parseIds(options.ids) }),
         explorationRatio,
         ...(seed === undefined ? {} : { seed }),
       },

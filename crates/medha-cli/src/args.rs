@@ -49,6 +49,14 @@ pub enum Commands {
     #[command(name = "override", about = "Explicitly override an entity's status")]
     Override(OverrideArgs),
 
+    #[command(
+        about = "Lift a retirement or override quarantine, as a human decision with a reason (audited)"
+    )]
+    Reinstate(ReinstateArgs),
+
+    #[command(about = "Retract a previously recorded episode by its sequence number")]
+    Retract(RetractArgs),
+
     #[command(about = "Synchronize evidential memory across files or Git refs")]
     Sync(SyncArgs),
 
@@ -77,7 +85,7 @@ pub enum Commands {
     Issue(IssueArgs),
 
     #[command(
-        about = "Pack active and probation entities into an evidential context window within token budget"
+        about = "Pack trusted, active and probation entities into a token budget (quarantined and retired are left out)"
     )]
     Pack(PackArgs),
 
@@ -93,8 +101,28 @@ pub struct ListArgs {
     pub status: Option<String>,
     #[arg(long, help = "Filter by namespace")]
     pub namespace: Option<String>,
+    #[arg(
+        long,
+        help = "Filter: only these entity ids, comma-separated (e.g. the rules your host still has)"
+    )]
+    pub ids: Option<String>,
     #[arg(long, help = "Pagination limit")]
     pub limit: Option<usize>,
+}
+
+/// `--ids a,b,c` → the ids; an empty list is refused rather than matching nothing (gh-23).
+pub fn parse_ids(raw: &str) -> Result<Vec<String>, String> {
+    let ids: Vec<String> = raw
+        .split(',')
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if ids.is_empty() {
+        return Err(format!(
+            "Invalid --ids: expected a comma-separated list of entity ids, received '{raw}'"
+        ));
+    }
+    Ok(ids)
 }
 
 #[derive(Args, Debug, Default)]
@@ -205,7 +233,10 @@ pub struct GuardArgs {
     #[arg(long, conflicts_with = "ok", help = "Guard check failed")]
     pub fail: bool,
 
-    #[arg(long = "guard", help = "Guard type name (e.g. review, linter, tests)")]
+    #[arg(
+        long = "guard",
+        help = "Guard type name (e.g. review, linter, tests). Required until the entity has one: a report against no guard would not count, so it is refused"
+    )]
     pub guard_kind: Option<String>,
 
     #[arg(long, help = "Author or reviewer identifier")]
@@ -324,6 +355,42 @@ pub struct OverrideArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct ReinstateArgs {
+    #[arg(long, help = "Entity identifier")]
+    pub id: String,
+
+    #[arg(long, default_value = "rule", help = "Entity kind")]
+    pub kind: String,
+
+    #[arg(long, default_value = "", help = "Entity namespace")]
+    pub namespace: String,
+
+    #[arg(long, help = "Why a human is lifting the latch; kept in the audit log")]
+    pub reason: String,
+}
+
+#[derive(Args, Debug)]
+pub struct RetractArgs {
+    #[arg(long, help = "Episode sequence number to retract")]
+    pub seq: u64,
+
+    #[arg(long, help = "Reason for the retraction")]
+    pub reason: String,
+
+    #[arg(
+        long,
+        help = "Entity the episode must belong to: a seq from another entity is refused"
+    )]
+    pub id: Option<String>,
+
+    #[arg(long, default_value = "rule", help = "Entity kind (with --id)")]
+    pub kind: String,
+
+    #[arg(long, default_value = "", help = "Entity namespace (with --id)")]
+    pub namespace: String,
+}
+
+#[derive(Args, Debug)]
 pub struct SyncArgs {
     #[command(subcommand)]
     pub action: SyncAction,
@@ -396,6 +463,12 @@ pub struct PackArgs {
 
     #[arg(long, help = "Filter by namespace")]
     pub namespace: Option<String>,
+
+    #[arg(
+        long,
+        help = "Only these entity ids, comma-separated (keeps your host's rule set authoritative)"
+    )]
+    pub ids: Option<String>,
 
     #[arg(
         long,

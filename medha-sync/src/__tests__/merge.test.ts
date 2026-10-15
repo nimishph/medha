@@ -221,6 +221,26 @@ describe('mergeEpisodes — retractions (medha-8gx)', () => {
 });
 
 describe('mergeEntityStates — 2-way state merge', () => {
+  it('is idempotent: merging a state with itself does not double the evidence', () => {
+    const a: EntityState = {
+      key: { namespace: '', kind: 'rule', id: 'rule-1' },
+      evidence: { k: 4, n: 4, contextRejects: 0 },
+      ema: { mu: 0.7, theta0: 0.5, updatedAt: 1000 },
+      guard: { kind: 'ast', lastOk: true, lastOkAt: 1000 },
+      anchors: [{ kind: 'git-head', value: 'sha-1' }],
+      status: 'probation',
+      override: null,
+      retiredAt: null,
+      restoredAt: null,
+      updater: 'ema',
+      createdAt: 500,
+      lastSignalAt: 1000,
+    };
+
+    expect(mergeEntityStates([a], [a])).toEqual([a]);
+    expect(mergeEntityStates([a], [structuredClone(a)])).toEqual([a]);
+  });
+
   it('is commutative and calculates sample-weighted EMA mu', () => {
     const s1: EntityState = {
       key: { namespace: '', kind: 'rule', id: 'rule-1' },

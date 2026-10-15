@@ -1,11 +1,19 @@
 /**
- * Unit tests and anti-drift validation for the Medha Primer (§14.4, medha-168.2).
+ * Unit tests and anti-drift validation for the Medha Primer (Â§14.4, medha-168.2).
  */
 
 import { describe, expect, it } from 'bun:test';
+import { ACTIVE_THRESHOLD, UNGUARDED_TRUST_CEILING, WILSON_Z } from '@cntxt-labs/medha-core';
 import type { ArgsDef, CommandDef } from 'citty';
 import { commands } from './commands.ts';
-import { getPrimer, PRIMER_TOPIC_NAMES, PRIMER_TOPICS, renderPrimer } from './primer.ts';
+import {
+  getPrimer,
+  PRIMER_TOPIC_NAMES,
+  PRIMER_TOPICS,
+  primerValues,
+  renderPrimer,
+} from './primer.ts';
+import { PRIMER_PLACEHOLDERS, PRIMER_TEMPLATES } from './primer-topics.ts';
 
 describe('medha primer CLI & MCP Tool', () => {
   it('returns index when called with no topic or index/help', () => {
@@ -51,7 +59,7 @@ describe('medha primer CLI & MCP Tool', () => {
     expect(compact).toBe(topic.content);
   });
 
-  it('guarantees zero-drift: every `medha …` example parses against the real command', async () => {
+  it('guarantees zero-drift: every `medha â€¦` example parses against the real command', async () => {
     const examples = new Set<string>();
     for (const topic of Object.values(PRIMER_TOPICS)) {
       for (const line of topic.content.split('\n')) {
@@ -100,11 +108,13 @@ describe('medha primer CLI & MCP Tool', () => {
   });
 
   it('guarantees math consistency: primer text matches engine constants', () => {
+    // These used to pin 0.85 and 1.959964, the numbers the engine did not use (gh-19).
     const guardsTopic = getPrimer('guards');
-    expect(guardsTopic.content).toContain('0.85'); // Unguarded ceiling
+    expect(guardsTopic.content).toContain(String(UNGUARDED_TRUST_CEILING));
+    expect(guardsTopic.content).not.toContain('0.85');
 
     const driftTopic = getPrimer('drift');
-    expect(driftTopic.content).toContain('1.959964'); // Wilson 95% Z
+    expect(driftTopic.content).toContain(`z = ${WILSON_Z}`);
 
     const configTopic = getPrimer('config');
     expect(configTopic.content).toContain('sqlite');
@@ -177,3 +187,39 @@ async function checkExample(example: string): Promise<string | undefined> {
   }
   return undefined;
 }
+
+/**
+ * medha-v1g (gh-19): the primer said "active at L >= 0.50, ceiling 0.85, retired at T < 0.20"
+ * while the engine used trust 0.25, a 0.5 ceiling and an undecayed bound. Numbers the model decides
+ * are now placeholders filled from the kernel, and these tests keep it that way.
+ */
+describe('primer numbers come from the kernel', () => {
+  const used = new Set(
+    PRIMER_TEMPLATES.flatMap((t) =>
+      [...t.template.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]),
+    ),
+  );
+
+  it('fills every placeholder a template uses, and no topic is left with one', () => {
+    expect([...used].sort()).toEqual([...PRIMER_PLACEHOLDERS].sort());
+    for (const name of PRIMER_TOPIC_NAMES) {
+      expect(getPrimer(name).content, name).not.toContain('{{');
+    }
+  });
+
+  it('templates hold no decimal literal: a model number must be a placeholder', () => {
+    for (const t of PRIMER_TEMPLATES) {
+      expect(t.template.match(/\d\.\d/g), t.name).toBeNull();
+    }
+  });
+
+  it('renders the engine values', () => {
+    const values = primerValues();
+    expect(values.ACTIVE_THRESHOLD).toBe(String(ACTIVE_THRESHOLD));
+    expect(values.UNGUARDED_TRUST_CEILING).toBe(String(UNGUARDED_TRUST_CEILING));
+    expect(values.REJECT_CONTEXT_VALUE).toBe('-0.2');
+    expect(getPrimer('guards').content).toContain(
+      `stays strictly below **${UNGUARDED_TRUST_CEILING}**`,
+    );
+  });
+});

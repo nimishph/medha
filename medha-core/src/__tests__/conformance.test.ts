@@ -139,6 +139,8 @@ describe('conformance vectors', () => {
       expect(state.evidence).toEqual(want.evidence);
       expect(state.ema.mu).toBe(want.ema.mu);
       expect(state.authors ?? {}).toEqual(want.authors);
+      // Kept only when the kind requires more than one rejecting author (spec §6 step 5.1).
+      expect(state.rejectingAuthors).toEqual(want.rejectingAuthors);
     });
   }
 });

@@ -179,6 +179,7 @@ pub fn compute_trust_and_status(
     let es = EmaState {
         mu: ema.mu,
         theta0: ema.theta0,
+        updated_at: 0,
         sample_count: ema.sample_count as u64,
     };
 
@@ -238,6 +239,7 @@ pub fn compute_trust_and_status(
         status_override: st_override,
         thresholds: &th,
         recency_config: &rc,
+        rejecting_authors: None,
     })
     .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 

@@ -195,7 +195,10 @@ export class SQLiteStore implements StorePort {
 
   async rebuild(): Promise<EntityState[]> {
     this.assertOpen('rebuild');
-    return foldLog(this.log);
+    // Fold with the store's kind registry, as the append path does: kind specs (evidence weighting,
+    // thresholds) shape the state, so a default fold would report a false mismatch.
+    const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
+    return foldLog(this.log, { kinds });
   }
 
   async replaceLog(

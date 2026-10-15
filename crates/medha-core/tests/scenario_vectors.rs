@@ -45,6 +45,15 @@ fn test_all_scenarios_conformance() {
                 if let Some(uc) = thr["unguardedCeiling"].as_f64() {
                     kind_spec.thresholds.unguarded_ceiling = uc;
                 }
+                if let Some(mr) = thr["minUsesForRetired"].as_u64() {
+                    kind_spec.thresholds.min_uses_for_retired = mr;
+                }
+                if let Some(rt) = thr["retiredTrustThreshold"].as_f64() {
+                    kind_spec.thresholds.retired_trust_threshold = rt;
+                }
+                if let Some(ma) = thr["minDistinctAuthorsForRetired"].as_u64() {
+                    kind_spec.thresholds.min_distinct_authors_for_retired = ma;
+                }
             }
             if let Some(rec) = ks.get("recency") {
                 if let Some(hl) = rec["halfLifeDays"].as_f64() {
@@ -122,8 +131,21 @@ fn test_all_scenarios_conformance() {
             status_override: state.status_override,
             thresholds: &kind_spec.thresholds,
             recency_config: &kind_spec.recency,
+            rejecting_authors: Some(state.rejecting_authors.len()),
         })
         .unwrap_or_else(|e| panic!("Scenario '{}' final observation failed: {:?}", name, e));
+
+        let expected_authors: Vec<String> = scenario["expected"]
+            .get("rejectingAuthors")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().map(|s| s.as_str().unwrap().to_string()).collect())
+            .unwrap_or_default();
+        let actual_authors: Vec<String> = state.rejecting_authors.iter().cloned().collect();
+        assert_eq!(
+            actual_authors, expected_authors,
+            "Scenario '{}' rejectingAuthors mismatch",
+            name
+        );
 
         let exp = &scenario["expected"];
         let exp_trust = exp["trust"].as_f64().expect("exp trust");

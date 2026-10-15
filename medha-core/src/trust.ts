@@ -7,6 +7,7 @@ import { recencyDecay } from './recency.ts';
 import { round6 } from './rounding.ts';
 import {
   ACTIVE_THRESHOLD,
+  MIN_DISTINCT_AUTHORS_FOR_RETIRED,
   MIN_USES_FOR_RETIRED,
   MIN_USES_FOR_TRUSTED,
   RETIRED_TRUST_THRESHOLD,
@@ -166,7 +167,11 @@ export function statusForTrust(
   const minUsesForRetired = kindSpec?.thresholds?.minUsesForRetired ?? MIN_USES_FOR_RETIRED;
   const retiredThreshold = kindSpec?.thresholds?.retiredTrustThreshold ?? RETIRED_TRUST_THRESHOLD;
   const undecayedTrust = trust.components.wilson * trust.components.guard;
-  if (state.evidence.n >= minUsesForRetired && undecayedTrust < retiredThreshold) {
+  if (
+    state.evidence.n >= minUsesForRetired &&
+    undecayedTrust < retiredThreshold &&
+    enoughRejectingAuthors(state, kindSpec)
+  ) {
     return 'retired';
   }
 
@@ -187,6 +192,13 @@ export function statusForTrust(
   const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
   if (trust.trust >= activeThreshold) return 'active';
   return 'probation';
+}
+
+/** Whether the failed trials come from enough distinct authors to retire (spec §6 step 5.1). */
+function enoughRejectingAuthors(state: EntityState, kindSpec?: KindSpec): boolean {
+  const required =
+    kindSpec?.thresholds?.minDistinctAuthorsForRetired ?? MIN_DISTINCT_AUTHORS_FOR_RETIRED;
+  return required <= 1 || (state.rejectingAuthors?.length ?? 0) >= required;
 }
 
 /**

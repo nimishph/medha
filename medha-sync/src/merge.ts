@@ -7,6 +7,7 @@
  *   merge(A, A) === A
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import {
   type Anchor,
   type EntityState,
@@ -229,6 +230,11 @@ export function mergeEntityStates(
 }
 
 function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
+  // Idempotency: evidence is summed, so merging a state with a copy of itself would double it.
+  // Identical states are one observation, not two (the cost: two replicas that independently
+  // reached exactly the same state are also read as one).
+  if (isDeepStrictEqual(s1, s2)) return s1;
+
   const totalN = s1.evidence.n + s2.evidence.n;
   const totalK = s1.evidence.k + s2.evidence.k;
   const totalContextRejects = s1.evidence.contextRejects + s2.evidence.contextRejects;

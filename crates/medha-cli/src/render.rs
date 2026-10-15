@@ -1,5 +1,31 @@
 use medha::core::types::TrustHint;
-use medha::{ShowReport, SimulationReport, ThresholdExplanation};
+use medha::{ShowReport, SimulationReport, StatusLatch, ThresholdExplanation};
+
+/// The latch, in words, as the TypeScript CLI prints it (medha-x3g): without it, `retired` with
+/// trust 0.000 beside a healthy Wilson bound reads like a bug rather than a decision.
+fn render_latch(latch: Option<&StatusLatch>) -> String {
+    let Some(latch) = latch else {
+        return String::new();
+    };
+    let status = format!("{:?}", latch.status).to_lowercase();
+    let by = if latch.cause == "evidence" {
+        format!(
+            "by evidence ({}/{} successes)",
+            latch.evidence.k, latch.evidence.n
+        )
+    } else {
+        format!("by {}", latch.cause)
+    };
+    let lift = if latch.lifted_by.iter().any(|l| l == "retract") {
+        "a human restores it (medha reinstate) or retracts the failures behind it"
+    } else {
+        "a human restores it (medha reinstate)"
+    };
+    format!(
+        "  latched:  {status} at #{} {by}; new evidence no longer changes its status or trust\n            lifted only when {lift}\n",
+        latch.seq
+    )
+}
 
 pub fn render_hint(hint: &TrustHint) -> String {
     format!(
@@ -15,6 +41,7 @@ pub fn render_show(report: &ShowReport) -> String {
     let known_str = if report.known { "known" } else { "unknown" };
     let mut out = format!("medha: {} ({})\n", key_repr, known_str);
     out.push_str(&format!("  status:   {:?}\n", report.hint.status));
+    out.push_str(&render_latch(report.latch.as_ref()));
     out.push_str(&format!(
         "  trust:    {:.3}  (wilson {:.3}, guard {:.3}, recency {:.3}, durability {:.3}, ceiling {:.3})\n",
         report.hint.trust,
@@ -52,6 +79,7 @@ pub fn render_explain_threshold(expl: &ThresholdExplanation) -> String {
         "medha: explain thresholds for {}\n",
         expl.key.to_string_repr()
     );
+    out.push_str(&render_latch(expl.latch.as_ref()));
     for gate in &expl.gates {
         out.push_str(&format!(
             "  {}: {}\n",

@@ -25,7 +25,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
       - run: cargo build --release -p medha-napi
+      # The TS/Rust parity test (medha/src/__tests__/rust-parity.test.ts) drives this binary; with
+      # MEDHA_REQUIRE_PARITY set, a missing or stale driver fails the run instead of skipping.
+      - run: cargo build -p medha --example parity_driver
       - run: bun run check
+        env:
+          MEDHA_REQUIRE_PARITY: '1'
   # The committed conformance vectors must match what the independent Python reference generates.
   spec:
     name: spec vectors

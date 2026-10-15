@@ -71,6 +71,7 @@ fn main() {
         let ema = EmaState {
             mu: successes / trials,
             theta0: 0.8,
+            updated_at: 0,
             sample_count: 50,
         };
 
@@ -85,6 +86,7 @@ fn main() {
             status_override: None,
             thresholds: &thresholds,
             recency_config: &recency_config,
+            rejecting_authors: None,
         })
         .unwrap();
 

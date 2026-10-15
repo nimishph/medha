@@ -156,6 +156,51 @@ function noEffectSeqs(
   return seqs;
 }
 
+/**
+ * The status that holds whatever new evidence says, and the episode that set it (medha-x3g):
+ * a stored `retired` (spec §6 step 2) or an override `quarantined` (step 1). Replays the key's
+ * slice the way the projection does. A guard-failure or drift quarantine is not a latch: it lifts
+ * by itself when the cause clears.
+ */
+function latchOf(
+  log: readonly Episode[],
+  episodes: readonly Episode[],
+  kinds: KindRegistry,
+): StatusLatch | undefined {
+  const retracted = new Set<number>();
+  for (const episode of log) if (episode.type === 'retract') retracted.add(episode.targetSeq);
+  let state: EntityState | undefined;
+  let latch: StatusLatch | undefined;
+  for (const episode of [...episodes].sort((a, b) => a.seq - b.seq)) {
+    if (retracted.has(episode.seq)) continue;
+    const before = state;
+    state = foldEpisode(state, episode, { kinds });
+    if (state === undefined) {
+      latch = undefined;
+      continue;
+    }
+    const enteredRetired = state.status === 'retired' && before?.status !== 'retired';
+    const enteredOverride = state.override === 'quarantined' && before?.override !== 'quarantined';
+    if (enteredRetired || enteredOverride) {
+      const cause: StatusLatch['cause'] =
+        episode.type === 'override' || episode.type === 'sweep' || episode.type === 'baseline'
+          ? episode.type
+          : 'evidence';
+      latch = {
+        status: enteredRetired ? 'retired' : 'quarantined',
+        seq: episode.seq,
+        at: episode.at,
+        cause,
+        evidence: { k: state.evidence.k, n: state.evidence.n },
+        liftedBy: cause === 'evidence' ? ['restore', 'retract'] : ['restore'],
+      };
+    } else if (state.status !== 'retired' && state.override !== 'quarantined') {
+      latch = undefined;
+    }
+  }
+  return latch;
+}
+
 function compareKeyString(a: { readonly key: EntityKey }, b: { readonly key: EntityKey }): number {
   const s1 = entityKeyString(a.key);
   const s2 = entityKeyString(b.key);
@@ -186,6 +231,28 @@ export class Medha {
   private async ensureOpen(): Promise<OpenResult> {
     if (this.openResult === undefined) this.openResult = await this.store.open();
     return this.openResult;
+  }
+
+  /**
+   * Open for a read that answers from the evidence. A store that opened corrupt holds only the log
+   * before the break, so every answer would quietly cover part of the evidence: `list` printed
+   * "0 entities" and `show` an unknown entity on probation, with exit 0 (gh-18). Those reads refuse
+   * instead. `preflight`, the session sweep and maintenance still open it, to report and repair.
+   */
+  private async openForRead(): Promise<void> {
+    const opened = await this.ensureOpen();
+    if (opened.status === 'corrupt') {
+      throw new CorruptStoreError(
+        opened.location,
+        `Cannot read a corrupt store: the log is unrecoverable from seq ${opened.location.atSeq}, ` +
+          'so any answer would cover only the episodes before it',
+        {
+          hint:
+            "run 'medha maintain preflight' to see the break, then restore a snapshot " +
+            "('medha maintain restore')",
+        },
+      );
+    }
   }
 
   private assertMaintainable(location: CorruptLocation): void {
@@ -264,7 +331,7 @@ export class Medha {
    */
   async hints(keys: readonly EntityKey[], context: Context): Promise<Map<string, EvidentialHint>> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     for (const key of keys) this.validateKey(key);
     const kinds = new KindRegistry(this.store.registries.kinds);
     const states = await this.store.list();
@@ -288,8 +355,9 @@ export class Medha {
     page?: PageRequest,
   ): Promise<Page<EvidentialHint>> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     if (filter.kind !== undefined) this.kindRegistry().requireKnown(filter.kind);
+    const ids = filter.ids === undefined ? undefined : new Set(filter.ids);
     const states = await this.store.list();
     const sorted = states
       .map((state) => buildHint(state, context.now, this.kindSpecFor(state.key.kind)))
@@ -298,7 +366,8 @@ export class Medha {
           (filter.kind === undefined || hint.key.kind === filter.kind) &&
           (filter.status === undefined || hint.status === filter.status) &&
           (filter.namespace === undefined || hint.key.namespace === filter.namespace) &&
-          (filter.drifting === undefined || hint.temporal.isDrifting === filter.drifting),
+          (filter.drifting === undefined || hint.temporal.isDrifting === filter.drifting) &&
+          (ids === undefined || ids.has(hint.key.id)),
       )
       .sort((a, b) => b.trustScore - a.trustScore || compareKeyString(a, b));
     return paginate(sorted, page);
@@ -311,7 +380,7 @@ export class Medha {
     options: { readonly recent?: number } = {},
   ): Promise<EntityDetail> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     this.validateKey(key);
     this.requireKind(key);
     if (
@@ -326,6 +395,7 @@ export class Medha {
     const recentN = options.recent ?? 10;
     const recentEpisodes = [...episodes].sort((a, b) => b.seq - a.seq).slice(0, recentN);
     const noEffect = noEffectSeqs(log, episodes, this.kindRegistry());
+    const latch = latchOf(log, episodes, this.kindRegistry());
     const proposalEpisodes = episodes.filter(
       (episode): episode is Extract<Episode, { type: 'proposal' }> => episode.type === 'proposal',
     );
@@ -362,6 +432,7 @@ export class Medha {
       known: true,
       recentEpisodes,
       noEffect,
+      ...(latch === undefined ? {} : { latch }),
       provenance,
       promoted,
       ...(definition === undefined ? {} : { definition }),
@@ -372,7 +443,7 @@ export class Medha {
   /** Every entity currently drifting, most drifted first. */
   async drift(context: Context, options: { readonly limit?: number } = {}): Promise<DriftReport> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     if (
       options.limit !== undefined &&
       (!Number.isSafeInteger(options.limit) || options.limit < 1)
@@ -408,7 +479,7 @@ export class Medha {
     context: Context,
   ): Promise<HintDelta> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     this.validateKey(key);
     this.requireKind(key);
     const spec = this.resolveSignal(signal);
@@ -457,7 +528,7 @@ export class Medha {
         seed,
       );
     }
-    await this.ensureOpen();
+    await this.openForRead();
     for (const key of candidates) this.validateKey(key);
     if (candidates.length === 0 || policy.slots === 0) return [];
 
@@ -511,7 +582,7 @@ export class Medha {
     context: Context,
   ): Promise<PackOutcome<T>> {
     sanitizeContext(context);
-    await this.ensureOpen();
+    await this.openForRead();
     if (!Number.isSafeInteger(options.budget) || options.budget < 0) {
       throw new InvalidArgumentError('options.budget', 'a non-negative integer', options.budget);
     }
@@ -545,11 +616,13 @@ export class Medha {
       }
     } else {
       const states = await this.store.list();
+      const ids = options.ids === undefined ? undefined : new Set(options.ids);
       packCandidates = states
         .filter(
           (state) =>
             (options.kind === undefined || state.key.kind === options.kind) &&
-            (options.namespace === undefined || state.key.namespace === options.namespace),
+            (options.namespace === undefined || state.key.namespace === options.namespace) &&
+            (ids === undefined || ids.has(state.key.id)),
         )
         .map((state) => {
           const hint = buildHint(state, context.now, this.kindSpecFor(state.key.kind));
@@ -1280,11 +1353,17 @@ export class Medha {
     targetSeq: number,
     reason: string,
     context: Context,
-    options: { readonly author?: string } = {},
+    options: {
+      readonly author?: string;
+      /** When given, the target must be an episode of this entity (gh-22: a bare seq can miss). */
+      readonly key?: EntityKey;
+    } = {},
   ): Promise<{
     readonly episode: Episode;
     readonly state: EntityState | undefined;
     readonly hint: EvidentialHint;
+    /** Set when the retraction took the entity out of `quarantined` or `retired`. */
+    readonly lifted?: { readonly from: LifecycleStatus; readonly to: LifecycleStatus };
   }> {
     sanitizeContext(context);
     await this.ensureOpen();
@@ -1304,6 +1383,20 @@ export class Medha {
         targetSeq,
       );
     }
+    if (options.key !== undefined && entityKeyString(options.key) !== entityKeyString(target.key)) {
+      throw new InvalidArgumentError(
+        'targetSeq',
+        `an episode of ${entityKeyString(options.key).replaceAll('\u0000', '/')}`,
+        targetSeq,
+        {
+          hint: `episode #${targetSeq} belongs to ${entityKeyString(target.key).replaceAll('\u0000', '/')}; check the seq with 'medha show'`,
+        },
+      );
+    }
+    const kindSpec = this.kindSpecFor(target.key.kind);
+    const beforeState = await this.store.get(target.key);
+    const before =
+      beforeState === undefined ? undefined : buildHint(beforeState, context.now, kindSpec);
     const input: EpisodeInput = {
       type: 'retract',
       key: target.key,
@@ -1314,8 +1407,18 @@ export class Medha {
     };
     const appended = await this.store.append(input);
     const state = appended.state ?? freshState(target.key, context.now);
-    const hint = buildHint(state, context.now, this.kindSpecFor(target.key.kind));
-    return { episode: appended.episode, state: appended.state, hint };
+    const hint = buildHint(state, context.now, kindSpec);
+    const wasHeld = before?.status === 'quarantined' || before?.status === 'retired';
+    const lifted =
+      before !== undefined && wasHeld && hint.status !== before.status
+        ? { from: before.status, to: hint.status }
+        : undefined;
+    return {
+      episode: appended.episode,
+      state: appended.state,
+      hint,
+      ...(lifted === undefined ? {} : { lifted }),
+    };
   }
 
   /**
@@ -1379,6 +1482,11 @@ export type ListFilter = {
   readonly status?: LifecycleStatus;
   readonly namespace?: string;
   readonly drifting?: boolean;
+  /**
+   * Only these entity ids (gh-23): a host that owns the live rule set keeps entities medha still
+   * holds, but the host has deleted or renamed, out of its answers.
+   */
+  readonly ids?: readonly string[];
 };
 
 export interface EntityDetail {
@@ -1401,6 +1509,26 @@ export interface EntityDetail {
   readonly definition?: EntityDefinition | undefined;
   /** The entity's decision-tree forest (medha-arj.2/.3), when any branch has been recorded. */
   readonly decisionTree?: readonly ScoredDecisionCase[] | undefined;
+  /** Set while a status holds whatever new evidence says (medha-x3g). */
+  readonly latch?: StatusLatch | undefined;
+}
+
+/**
+ * A status that new evidence cannot change. `retired` latches by design: an agent must not be able
+ * to talk a failed rule back into use by recording successes. An override `quarantined` holds until
+ * a restore. Both are lifted only by a human decision.
+ */
+export interface StatusLatch {
+  readonly status: 'retired' | 'quarantined';
+  /** The episode that set it. */
+  readonly seq: number;
+  readonly at: number;
+  /** `evidence`: the fold retired it (spec §6 step 5.1); otherwise the episode type that did. */
+  readonly cause: 'evidence' | 'override' | 'sweep' | 'baseline';
+  /** The evidence when it latched. */
+  readonly evidence: { readonly k: number; readonly n: number };
+  /** What lifts it: a `restore` override, or (for `evidence`) retracting the failures behind it. */
+  readonly liftedBy: readonly ('restore' | 'retract')[];
 }
 
 export interface DriftEntry {
@@ -1446,6 +1574,8 @@ export interface EnginePackOptions<T = unknown> {
   readonly kind?: string | undefined;
   /** Filter to entities of a given namespace. */
   readonly namespace?: string | undefined;
+  /** Only these entity ids (gh-23), so a host's own rule set stays authoritative. */
+  readonly ids?: readonly string[] | undefined;
   /** Explicit candidates to pack. If omitted, matching entities in store are used. */
   readonly candidates?:
     | readonly {

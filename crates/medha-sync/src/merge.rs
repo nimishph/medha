@@ -83,10 +83,20 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
         EpisodePayload::Proposal {
             provenance,
             description,
+            evidence_refs,
+            promoted,
             ..
         } => {
             parts.push(provenance.clone());
             parts.push(description.clone().unwrap_or_default());
+            if let Some(refs) = evidence_refs {
+                let mut sorted_refs = refs.clone();
+                sorted_refs.sort();
+                parts.push(sorted_refs.join(","));
+            }
+            if let Some(p) = promoted {
+                parts.push(p.to_string());
+            }
         }
         EpisodePayload::Sweep { action, reason } => {
             parts.push(action.clone());
@@ -103,15 +113,10 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
             parts.push(retract_target.to_string());
             parts.push(reason.clone());
         }
-        EpisodePayload::Define {
-            title,
-            tags,
-            rationale,
-            ..
-        } => {
-            parts.push(title.clone().unwrap_or_default());
-            parts.push(rationale.clone().unwrap_or_default());
-            let mut sorted_tags = tags.clone().unwrap_or_default();
+        EpisodePayload::Define { definition } => {
+            parts.push(definition.title.clone());
+            parts.push(definition.rationale.clone());
+            let mut sorted_tags = definition.tags.clone().unwrap_or_default();
             sorted_tags.sort();
             parts.push(sorted_tags.join(","));
         }
@@ -120,6 +125,7 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
             parent_id,
             condition,
             decision,
+            ..
         } => {
             parts.push(case_id.clone());
             parts.push(parent_id.clone().unwrap_or_default());
@@ -307,6 +313,13 @@ pub fn merge_entity_states(
 }
 
 fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState, CoreError> {
+    // Idempotency: evidence is summed, so merging a state with a copy of itself would double it.
+    // Identical states are one observation, not two (the cost: two replicas that independently
+    // reached exactly the same state are also read as one).
+    if s1 == s2 {
+        return Ok(s1.clone());
+    }
+
     let total_n = s1.evidence.n + s2.evidence.n;
     let total_k = s1.evidence.k + s2.evidence.k;
     let total_context_rejects = s1.evidence.context_rejects + s2.evidence.context_rejects;
@@ -396,6 +409,7 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
                 ema: &medha_core::types::EmaState {
                     mu: merged_mu,
                     theta0,
+                    updated_at: updated_at.unwrap_or(0),
                     sample_count: (total_n.round() as u64),
                 },
                 last_signal_at,
@@ -404,6 +418,7 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
                 status_override,
                 thresholds: &thresholds,
                 recency_config: &recency_config,
+                rejecting_authors: None,
             })?;
             computation.status
         };
@@ -420,15 +435,30 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         ema: medha_core::types::EmaState {
             mu: merged_mu,
             theta0,
+            updated_at: s1.ema.updated_at.max(s2.ema.updated_at),
             sample_count: (total_n.round() as u64),
         },
         status,
         status_override,
+        retired_at: s1.retired_at.or(s2.retired_at),
+        restored_at: s1.restored_at.or(s2.restored_at),
+        created_at: s1.created_at.min(s2.created_at),
         last_signal_at,
         updater: if !s1.updater.is_empty() {
             s1.updater.clone()
         } else {
             s2.updater.clone()
+        },
+        last_note: s1.last_note.clone().or_else(|| s2.last_note.clone()),
+        authors: s1.authors.clone().or_else(|| s2.authors.clone()),
+        rejecting_authors: match (&s1.rejecting_authors, &s2.rejecting_authors) {
+            (None, None) => None,
+            (a, b) => {
+                let mut all: Vec<String> = a.iter().chain(b.iter()).flatten().cloned().collect();
+                all.sort();
+                all.dedup();
+                Some(all)
+            }
         },
         decision_tree: s1.decision_tree.clone(),
     })

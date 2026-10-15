@@ -64,6 +64,7 @@ pub fn score_decision_case(
         status_override: None,
         thresholds,
         recency_config,
+        rejecting_authors: None,
     })?;
 
     Ok(ScoredDecisionCase {

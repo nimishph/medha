@@ -6,7 +6,7 @@ use crate::types::{
     CoreError, EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, SignalSpec,
     Thresholds,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthorLedger {
@@ -39,6 +39,9 @@ pub struct EntityFoldState {
     pub status: LifecycleStatus,
     pub status_override: Option<LifecycleStatus>,
     pub authors: HashMap<String, AuthorLedger>,
+    /// Distinct authors of the failed trials; kept only when the kind requires more than one
+    /// rejecting author before retirement (spec §6 step 5.1).
+    pub rejecting_authors: BTreeSet<String>,
 }
 
 impl Default for EntityFoldState {
@@ -52,6 +55,7 @@ impl Default for EntityFoldState {
             status: LifecycleStatus::Probation,
             status_override: None,
             authors: HashMap::new(),
+            rejecting_authors: BTreeSet::new(),
         }
     }
 }
@@ -178,6 +182,15 @@ pub fn fold_signal_step(
         }
     }
 
+    if kind_spec.thresholds.min_distinct_authors_for_retired > 1
+        && spec.counts_as_trial
+        && !spec.counts_as_success
+    {
+        state
+            .rejecting_authors
+            .insert(author.unwrap_or("").to_string());
+    }
+
     if kind_spec.evidence_weighting.as_deref() == Some("signal-value") {
         let tw = if spec.counts_as_trial {
             spec.value.abs()
@@ -235,6 +248,7 @@ pub fn fold_signal_step(
         status_override: state.status_override,
         thresholds: &kind_spec.thresholds,
         recency_config: &kind_spec.recency,
+        rejecting_authors: Some(state.rejecting_authors.len()),
     })?;
 
     state.status = res.status;
@@ -265,6 +279,7 @@ pub fn fold_guard_step(
         status_override: state.status_override,
         thresholds: &kind_spec.thresholds,
         recency_config: &kind_spec.recency,
+        rejecting_authors: Some(state.rejecting_authors.len()),
     })?;
 
     state.status = res.status;

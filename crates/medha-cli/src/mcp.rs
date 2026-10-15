@@ -98,7 +98,12 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                             "type": "object",
                             "properties": {
                                 "kind": { "type": "string" },
-                                "namespace": { "type": "string" }
+                                "namespace": { "type": "string" },
+                                "ids": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Only these entity ids (e.g. the rules your host still has)."
+                                }
                             }
                         }
                     },
@@ -249,13 +254,18 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                     },
                     {
                         "name": "pack_context",
-                        "description": "Pack active and probation entities into evidential context window within token budget.",
+                        "description": "Pack trusted, active and probation entities (rules, tools) into an evidential context window within a token budget; quarantined and retired ones are left out.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
                                 "budget": { "type": "integer" },
                                 "kind": { "type": "string" },
                                 "namespace": { "type": "string" },
+                                "ids": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Only these entity ids, so retired or deleted host rules are never packed."
+                                },
                                 "explorationRatio": { "type": "number" },
                                 "seed": { "type": "integer" },
                                 "format": { "type": "string" }
@@ -348,8 +358,12 @@ fn run_tool<S: StorePort>(
         }
         "list_entities" => match engine.list() {
             Ok(states) => {
+                let ids = string_list(args.get("ids"));
                 let mut hints = Vec::new();
                 for s in states {
+                    if ids.as_ref().is_some_and(|ids| !ids.contains(&s.key.id)) {
+                        continue;
+                    }
                     if let Ok(h) = engine.hint(&s.key, now) {
                         hints.push(h);
                     }
@@ -401,10 +415,16 @@ fn run_tool<S: StorePort>(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
+            let ensure = args
+                .get("ensure")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             let input = RecordInput {
                 key: EntityKey::new(ns, kind, id),
                 signal: signal.to_string(),
                 at: now,
+                ensure,
                 author,
                 anchors: None,
                 run_ref: None,
@@ -431,8 +451,23 @@ fn run_tool<S: StorePort>(
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
+            let key = EntityKey::new(ns, kind, id);
+            // A report with no guard kind, on an entity that has none, would not count (gh-17).
+            if guard_kind.as_deref().is_none_or(|k| k.trim().is_empty()) {
+                let has_guard = engine
+                    .get(&key)
+                    .map_err(|e| e.to_string())?
+                    .is_some_and(|s| !s.guard.kind.is_empty() && s.guard.kind != "none");
+                if !has_guard {
+                    return Err(format!(
+                        "{} has no guard yet, so a report without `guard` would not count; pass guard (e.g. ci, review, tests)",
+                        key.to_string_repr()
+                    ));
+                }
+            }
+
             let input = GuardInput {
-                key: EntityKey::new(ns, kind, id),
+                key,
                 ok,
                 kind: guard_kind,
                 at: now,
@@ -567,8 +602,22 @@ fn run_tool<S: StorePort>(
                 .get("reason")
                 .and_then(|v| v.as_str())
                 .unwrap_or("User requested retraction");
-            match engine.retract(seq, reason, now) {
-                Ok(res) => Ok(json!({ "retractedSeq": seq, "episode": res.episode })),
+            // Given the entity, a seq from another one is refused (gh-22).
+            let expect = args.get("id").and_then(|v| v.as_str()).map(|id| {
+                EntityKey::new(
+                    args.get("namespace").and_then(|v| v.as_str()).unwrap_or(""),
+                    args.get("kind").and_then(|v| v.as_str()).unwrap_or("rule"),
+                    id,
+                )
+            });
+            match engine.retract_checked(seq, reason, now, expect.as_ref()) {
+                Ok(res) => {
+                    let mut out = json!({ "retractedSeq": seq, "episode": res.appended.episode });
+                    if let Some(lifted) = res.lifted {
+                        out["lifted"] = json!(lifted);
+                    }
+                    Ok(out)
+                }
                 Err(e) => Err(e.to_string()),
             }
         }
@@ -605,6 +654,7 @@ fn run_tool<S: StorePort>(
                 budget,
                 kind,
                 namespace,
+                ids: string_list(args.get("ids")),
                 exploration_ratio,
                 seed,
                 min_trust: 0.0,
@@ -645,4 +695,14 @@ fn run_tool<S: StorePort>(
         }
         other => Err(format!("Unknown tool: {}", other)),
     }
+}
+
+/// An optional array of strings from tool arguments (`ids`, gh-23).
+fn string_list(value: Option<&Value>) -> Option<Vec<String>> {
+    value.and_then(|v| v.as_array()).map(|items| {
+        items
+            .iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect()
+    })
 }

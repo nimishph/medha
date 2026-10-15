@@ -389,11 +389,54 @@ describe('maintenance plane — preflight (§9 maintain preflight)', () => {
     expect(report.entityCount).toBe(0);
   });
 
+  test('evidence reads refuse a corrupt store instead of answering from the prefix (gh-18)', async () => {
+    const { medha } = corruptEngine();
+    const ctx = { now: NOW };
+    const reads: readonly (() => Promise<unknown>)[] = [
+      () => medha.hints([key('a')], ctx),
+      () => medha.list({}, ctx),
+      () => medha.show(key('a'), ctx),
+      () => medha.drift(ctx),
+      () => medha.simulate(key('a'), 'APPLY', ctx),
+      () => medha.pack({ budget: 100 }, ctx),
+    ];
+    for (const read of reads) {
+      await expect(read()).rejects.toMatchObject({ code: 'STORE_LOG_CORRUPT' });
+    }
+    // The diagnostic read still reports rather than throws.
+    expect((await medha.preflight(ctx)).status).toBe('corrupt');
+  });
+
   test('reports a healthy store as having no dangling retractions', async () => {
     const { medha } = makeEngine();
     await applyN(medha, key('clean'), 3, NOW - 1 * DAY);
     const report = await medha.preflight({ now: NOW });
     expect(report.danglingRetractions).toEqual([]);
+  });
+
+  test('reports ok when a kind spec changes folding (signal-value weighting, per-kind thresholds)', async () => {
+    // rebuild() must fold with the store's kind registry; a default fold diverges from the
+    // projection on any kind whose spec shapes the state and reported a false fold-mismatch.
+    const weighted = { name: 'weighted', evidenceWeighting: 'signal-value' } as const;
+    const strict = { name: 'strict', thresholds: { active: 0.99 } } as const;
+    const frac = { name: 'FRAC', value: 0.4, countsAsTrial: true, countsAsSuccess: true } as const;
+    const store = new MemoryStore({
+      registries: {
+        kinds: [weighted.name, strict.name],
+        kindSpecs: [weighted, strict],
+        signalSpecs: [frac],
+        anchorKinds: ['week'],
+      },
+    });
+    const medha = new Medha({ store });
+    for (let i = 0; i < 6; i++) {
+      const now = NOW + i * 1_000;
+      await medha.record(key('w', weighted.name), 'FRAC', { now }, { ensure: true });
+      await medha.record(key('s', strict.name), 'APPLY', { now }, { ensure: true });
+    }
+
+    const report = await medha.preflight({ now: NOW + 10_000 });
+    expect(report.integrity).toBe('ok');
   });
 
   test('warns (does not fail to open) on a legacy log holding a dangling retraction', async () => {

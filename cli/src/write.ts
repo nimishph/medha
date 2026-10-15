@@ -1,10 +1,15 @@
+import type { Medha, StatusLatch } from '@cntxt-labs/medha';
 import {
   type Decision,
   type EntityDefinition,
   type EntityKey,
   type Episode,
   type EvidentialHint,
+  entityKeyString,
+  guardFactor,
   InvalidArgumentError,
+  type LifecycleStatus,
+  newGuard,
   type StoreRegistries,
   UnknownKindError,
 } from '@cntxt-labs/medha-core';
@@ -156,6 +161,23 @@ export interface GuardReport {
   readonly note?: string | undefined;
 }
 
+/**
+ * A report without `--guard` falls back to the entity's current guard kind. When it has none, the
+ * report would be stored against kind `none` and change nothing, while the command printed "guard
+ * passed" (gh-17) — so it is refused instead, naming the flag that makes it count.
+ */
+async function requireExistingGuard(engine: Medha, key: EntityKey, now: number): Promise<void> {
+  const current = (await engine.hints([key], { now })).get(entityKeyString(key));
+  // G is 0.5 exactly when the guard kind is `none` (guardFactor, model §4.1).
+  const unguarded = current === undefined || current.components.guard === guardFactor(newGuard());
+  if (!unguarded) return;
+  throw new InvalidArgumentError('--guard', 'a guard kind (e.g. ci, review, tests)', undefined, {
+    hint:
+      `${keyLabel(key)} has no guard yet, so a report without --guard would not count. ` +
+      'Pass --guard <kind> naming the check that ran.',
+  });
+}
+
 export async function runGuard(
   options: GuardOptions,
   environment: Environment,
@@ -173,6 +195,9 @@ export async function runGuard(
     const key = keyFromFlags(options);
     requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
+    if (options.guard === undefined || options.guard.trim() === '') {
+      await requireExistingGuard(opened.engine, key, at);
+    }
     const author = resolveAuthor(options.author);
     const hint = await opened.engine.reportGuard(
       key,
@@ -274,6 +299,8 @@ export interface RetractReport {
   readonly seq: number;
   readonly episode: Episode;
   readonly hint: EvidentialHint;
+  /** Set when the retraction took the entity out of `quarantined` or `retired` (gh-22). */
+  readonly lifted?: { readonly from: LifecycleStatus; readonly to: LifecycleStatus };
 }
 
 export async function runRetract(
@@ -298,11 +325,13 @@ export async function runRetract(
     }
     const at = parseTimestamp(options.at, environment.now());
     const author = resolveAuthor(options.author);
+    // --id is optional for compatibility; given, a seq from another entity is refused (gh-22).
+    const key = options.id === undefined ? undefined : keyFromFlags(options);
     const outcome = await opened.engine.retract(
       targetSeq,
       options.reason,
       { now: at },
-      { ...(author === undefined ? {} : { author }) },
+      { ...(author === undefined ? {} : { author }), ...(key === undefined ? {} : { key }) },
     );
     return {
       home: opened.home,
@@ -311,6 +340,69 @@ export async function runRetract(
       seq: outcome.episode.seq,
       episode: outcome.episode,
       hint: outcome.hint,
+      ...(outcome.lifted === undefined ? {} : { lifted: outcome.lifted }),
+    };
+  } finally {
+    await opened.engine.close();
+  }
+}
+
+export interface ReinstateOptions extends WriteFlags {
+  readonly reason?: string;
+  readonly author?: string;
+  readonly at?: string | number;
+}
+
+export interface ReinstateReport {
+  readonly home: string;
+  readonly key: EntityKey;
+  /** The latch that was lifted. */
+  readonly latch: StatusLatch;
+  readonly seq: number;
+  /** The hint after the restore: the status the evidence now justifies. */
+  readonly hint: EvidentialHint;
+}
+
+/**
+ * `medha reinstate` (gh-22): a human lifts a latch (a retirement, or an override quarantine) with
+ * one audited `override: restore` episode, instead of retracting every failure. It refuses an
+ * entity that is not latched. Medha cannot tell who runs it, so keeping agents from it is the
+ * host's job (it has no MCP tool on purpose).
+ */
+export async function runReinstate(
+  options: ReinstateOptions,
+  environment: Environment,
+): Promise<ReinstateReport> {
+  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  try {
+    if (options.reason === undefined || options.reason.trim() === '') {
+      throw new InvalidArgumentError('--reason', 'why the latch is being lifted', options.reason);
+    }
+    const key = keyFromFlags(options);
+    requireConfiguredKind(opened.config.registries, key.kind);
+    const at = parseTimestamp(options.at, environment.now());
+    const detail = await opened.engine.show(key, { now: at });
+    if (detail.latch === undefined) {
+      throw new InvalidArgumentError(
+        '--id',
+        'a latched entity (retired, or quarantined by an override)',
+        `${keyLabel(key)} is ${detail.hint.status}`,
+        {
+          hint: detail.known
+            ? 'nothing to lift: a guard or drift quarantine lifts by itself when its cause clears'
+            : 'no such entity',
+        },
+      );
+    }
+    const author = resolveAuthor(options.author);
+    const hint = await opened.engine.override(key, 'restore', { now: at }, options.reason, author);
+    const after = await opened.engine.show(key, { now: at });
+    return {
+      home: opened.home,
+      key,
+      latch: detail.latch,
+      seq: after.recentEpisodes[0]?.seq ?? -1,
+      hint: hint ?? after.hint,
     };
   } finally {
     await opened.engine.close();
@@ -567,6 +659,29 @@ export function renderRetract(report: RetractReport): string {
     `  reason:   ${report.reason}\n` +
     `  trust:    ${fixed(report.hint.trustScore)}  status: ${report.hint.status}\n`
   );
+}
+
+/** The stderr warning when a retraction lifts a quarantine or retirement (gh-22). */
+export function retractWarning(report: RetractReport): string | undefined {
+  if (report.lifted === undefined) return undefined;
+  return (
+    `medha: warning: this retraction took ${keyLabel(report.hint.key)} out of ` +
+    `${report.lifted.from} (now ${report.lifted.to}). Lifting a latch is a human decision, and ` +
+    `medha cannot tell who ran this; 'medha reinstate --reason' records it as one.\n`
+  );
+}
+
+export function renderReinstate(report: ReinstateReport): string {
+  const lines = [
+    `medha: reinstated ${keyLabel(report.key)} (was ${report.latch.status} since #${report.latch.seq}; recorded as #${report.seq})`,
+    `  trust:    ${fixed(report.hint.trustScore)}  status: ${report.hint.status}`,
+  ];
+  if (report.hint.status === 'retired' || report.hint.status === 'quarantined') {
+    lines.push(
+      `  note:     the evidence still makes it ${report.hint.status}; the next episode stores that`,
+    );
+  }
+  return `${lines.join('\n')}\n`;
 }
 
 export function renderRemoveEpisode(report: RemoveEpisodeReport): string {

@@ -20,6 +20,9 @@ pub struct TrustComputationInput<'a> {
     pub status_override: Option<LifecycleStatus>,
     pub thresholds: &'a Thresholds,
     pub recency_config: &'a RecencyConfig,
+    /// Distinct authors of the failed trials, when the caller tracks them. `None` (not tracked)
+    /// satisfies a `min_distinct_authors_for_retired` of 1 and no higher.
+    pub rejecting_authors: Option<usize>,
 }
 
 pub struct TrustComputationResult {
@@ -33,7 +36,10 @@ pub fn compute_trust_and_status(
 ) -> Result<TrustComputationResult, CoreError> {
     let k = input.evidence.k;
     let n = input.evidence.n;
-    let trials_u64 = n.round() as u64;
+    // Floor, not round: the thresholds are integer minimums on a possibly fractional `n`
+    // (signal-value weighting), and `n >= T` holds exactly when `floor(n) >= T`. Rounding would
+    // count n = 2.8 as 3 trials and retire or drift-check a rule the TypeScript kernel leaves alone.
+    let trials_u64 = n.floor() as u64;
 
     let guarded = is_guarded(input.guard);
     let l = wilson_lower_bound(k, n, crate::thresholds::WILSON_Z)?;
@@ -58,13 +64,17 @@ pub fn compute_trust_and_status(
         t = round6(ceiling - 1e-6)?;
     }
 
-    // Terminal statuses zero trust
-    if input.stored_status == LifecycleStatus::Quarantined
-        || input.stored_status == LifecycleStatus::Retired
-    {
+    // Terminal statuses zero trust; their components are still reported, with durability 1
+    // (spec §5, "Terminal statuses").
+    let terminal = input.stored_status == LifecycleStatus::Quarantined
+        || input.stored_status == LifecycleStatus::Retired;
+    if terminal {
         t = 0.0;
     }
 
+    let enough_rejecting_authors = input.thresholds.min_distinct_authors_for_retired <= 1
+        || input.rejecting_authors.unwrap_or(0) as u64
+            >= input.thresholds.min_distinct_authors_for_retired;
     let status = derive_status(
         input.status_override,
         input.stored_status,
@@ -75,6 +85,7 @@ pub fn compute_trust_and_status(
         g,
         t,
         input.thresholds,
+        enough_rejecting_authors,
     );
 
     let breakdown = TrustScoreBreakdown {
@@ -82,7 +93,7 @@ pub fn compute_trust_and_status(
         wilson_lower: l,
         wilson_upper: u,
         recency: r,
-        durability: d,
+        durability: if terminal { 1.0 } else { d },
         guard_factor: g,
         effective_ceiling: ceiling,
         is_drifting: drift.is_drifting,
@@ -108,6 +119,7 @@ fn derive_status(
     g: f64,
     t: f64,
     thresholds: &Thresholds,
+    enough_rejecting_authors: bool,
 ) -> LifecycleStatus {
     // 1. Explicit override
     if let Some(over) = status_override {
@@ -133,8 +145,11 @@ fn derive_status(
     }
 
     // 5. Status for trust
-    // 5.1 Retirement threshold check (undecayed product L * G)
-    if trials >= thresholds.min_uses_for_retired && (l * g) < thresholds.retired_trust_threshold {
+    // 5.1 Retirement threshold check (undecayed product L * G), from enough distinct authors
+    if trials >= thresholds.min_uses_for_retired
+        && (l * g) < thresholds.retired_trust_threshold
+        && enough_rejecting_authors
+    {
         return LifecycleStatus::Retired;
     }
 

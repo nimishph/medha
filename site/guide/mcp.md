@@ -51,7 +51,7 @@ and it is the difference between an agent that uses medha deliberately and one t
 | `status` | Engine health: preflight integrity, status distribution, drift count. |
 | `retract_episode` | Retract an erroneous episode by sequence number, appending a masking episode. |
 | `remove_episode` | Hard-delete an episode from the log and resequence the rest. Requires `author` and `reason`, which are kept in the store's audit trail with the removed episode. |
-| `pack_context` | Pack active and probation entities into a context window within a token budget. |
+| `pack_context` | Pack trusted, active and probation entities into a context window within a token budget; quarantined and retired ones are left out. |
 | `primer` | Concise, token-frugal guidance on medha concepts, architecture, signals, guards, decisions, drift, config or sync — ask for what you need before you need it. |
 
 Every tool declares MCP annotations, so a client can tell reads from writes: `hints`, `list_entities`,

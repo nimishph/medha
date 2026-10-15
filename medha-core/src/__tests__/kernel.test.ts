@@ -42,7 +42,7 @@ import {
   SKIP,
   validateSignalSpec,
 } from '../signals.ts';
-import { DEFAULT_THETA0, RETIRED_TRUST_THRESHOLD } from '../thresholds.ts';
+import { DEFAULT_THETA0, MIN_USES_FOR_RETIRED, RETIRED_TRUST_THRESHOLD } from '../thresholds.ts';
 import { composeTrust, computeTrust, statusFor, trustOf } from '../trust.ts';
 import { wilsonLowerBound } from '../wilson.ts';
 
@@ -306,19 +306,27 @@ describe('lifecycle — model §5.1', () => {
     expect(state.status).toBe('probation');
   });
 
-  test('repeated rejections (n >= 3 with low undecayed trust) → retired', () => {
+  test('repeated rejections (n >= MIN_USES_FOR_RETIRED with low undecayed trust) → retired', () => {
     let state = freshState(KEY, START, { theta0: 0.2 });
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MIN_USES_FOR_RETIRED; i++) {
       state = applySignal(state, { spec: REJECT_RULE }, { now: START + i * 1000 }).state;
     }
-    expect(state.evidence.n).toBe(3);
+    expect(state.evidence.n).toBe(MIN_USES_FOR_RETIRED);
     expect(state.evidence.k).toBe(0);
     expect(state.status).toBe('retired');
   });
 
+  test('one rejection fewer than MIN_USES_FOR_RETIRED does not retire (gh-21, spec 2.0.0)', () => {
+    let state = freshState(KEY, START, { theta0: 0.2 });
+    for (let i = 0; i < MIN_USES_FOR_RETIRED - 1; i++) {
+      state = applySignal(state, { spec: REJECT_RULE }, { now: START + i * 1000 }).state;
+    }
+    expect(state.status).toBe('probation');
+  });
+
   test('SKIP signal does not update lastSignalAt and does not revive a retired entity', () => {
     let state = freshState(KEY, START, { theta0: 0.2 });
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < MIN_USES_FOR_RETIRED; i++) {
       state = applySignal(state, { spec: REJECT_RULE }, { now: START + i * 1000 }).state;
     }
     expect(state.status).toBe('retired');

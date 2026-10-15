@@ -212,13 +212,37 @@ diverges from their baseline show up in `medha drift`.
 ```
 probation ──► active ──► trusted
     │            │
-    └────────────┴──► quarantined / retired   (repeated rejection; trust below 0.1)
+    └────────────┴──► quarantined ──► retired
 ```
 
 | Status | Bar |
 |---|---|
 | `active` | trust ≥ 0.25 |
 | `trusted` | trust ≥ 0.6, at least 5 uses, and a passing guard |
+| `quarantined` | a guard failed, or the learned weight fell 0.4 or more below its baseline |
+| `retired` | at least 5 uses with the undecayed Wilson bound × guard below 0.1, or an explicit retire |
+
+**Quarantine is a pause.** Trust reads 0 while it lasts, and it lifts by itself when the cause
+clears: a guard passes, or the weight recovers.
+
+**Retirement is a latch.** Once retired, new evidence never changes the status or trust, so an agent
+cannot talk a failed rule back into use by recording successes. There are two ways in:
+
+1. *Directly*, when a rule with enough uses keeps failing (the default needs 5; set
+   `minDistinctAuthorsForRetired` on a kind so one reviewer cannot do it alone).
+2. *Through quarantine*: repeated failures quarantine a rule first, and when later successes lift
+   the drift, the numbers it is left with retire it. More failures alone keep it quarantined.
+
+Only a human lifts the latch: `medha reinstate --id <id> --reason "..."` records it as one audited
+episode, or retract the failures behind it (`medha retract --seq N --id <id>`, which refuses a seq
+from another entity and warns when it lifts a latch). `medha show` and `medha explain-threshold`
+print `latched:` with the episode that set it.
+
+**Medha cannot tell who is calling.** `--author` is a label the caller sets, and the latch stops an
+agent that follows instructions, not one that runs `retract`, `remove-episode`, `maintain restore`
+or `reinstate` anyway. Keeping agents away from those is a host permission: for example deny them
+in your agent's command allowlist, and leave `retract_episode` and `remove_episode` out of the MCP
+tools it may call. `reinstate` has no MCP tool, on purpose.
 
 ## Use it from an agent (MCP)
 
@@ -263,8 +287,9 @@ skill and four read-side slash commands (`/medha:hints`, `/medha:status`, `/medh
 
 ### Fitting trust into a prompt
 
-`medha pack --budget 2000` selects the active and probation rules that fit a token budget, so a
-host can inject the most trusted guidance without overrunning its context.
+`medha pack --budget 2000` selects the trusted, active and probation rules that fit a token budget
+(never quarantined or retired), so a host can inject the most trusted guidance without overrunning
+its context.
 
 ## Inspect and share
 
@@ -317,7 +342,7 @@ default.
 
 | Field | Keys (default) | What it does |
 |---|---|---|
-| `thresholds` | `active` (0.25), `trusted` (0.6), `minUsesForTrusted` (5), `retiredTrustThreshold` (0.1), `minUsesForRetired` (3), `unguardedCeiling` (0.5) | Where the lifecycle transitions sit for this kind. `unguardedCeiling` caps trust while no guard has passed; no threshold lets an unguarded entity become `trusted`. |
+| `thresholds` | `active` (0.25), `trusted` (0.6), `minUsesForTrusted` (5), `retiredTrustThreshold` (0.1), `minUsesForRetired` (5), `minDistinctAuthorsForRetired` (1), `unguardedCeiling` (0.5) | Where the lifecycle transitions sit for this kind. `unguardedCeiling` caps trust while no guard has passed; no threshold lets an unguarded entity become `trusted`. `minDistinctAuthorsForRetired` above 1 means failures from one author alone never retire the entity. |
 | `recency` | `halfLifeDays` (45), `floor` (0.3) | How fast old evidence fades, and the least it fades to. |
 | `evidenceWeighting` | `"count"` (default) or `"signal-value"` | Count each signal as one trial, or weight it by the signal's value. |
 | `signalLimits` | `minIntervalMs`, `maxSuccessesPerAuthor` (both off) | Limit how much one author can raise trust. Negative evidence is never limited. |

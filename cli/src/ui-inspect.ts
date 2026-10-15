@@ -7,8 +7,34 @@
  *
  * These are plain strings spliced into the page by `generateDashboardHtml`, so the client script
  * avoids backticks and `${}` (it builds strings by concatenation) and never writes a closing
- * script tag.
+ * script tag. The one `${}` is a splice made here, in TypeScript: the default model's numbers.
  */
+
+import {
+  ACTIVE_THRESHOLD,
+  MIN_USES_FOR_RETIRED,
+  MIN_USES_FOR_TRUSTED,
+  RECENCY_FLOOR,
+  RECENCY_HALF_LIFE_DAYS,
+  RETIRED_TRUST_THRESHOLD,
+  TRUSTED_THRESHOLD,
+  UNGUARDED_TRUST_CEILING,
+} from '@cntxt-labs/medha-core';
+
+/**
+ * The model the Inspect tab falls back to when the server sends none, taken from the kernel's
+ * constants so it cannot drift from them (it said minUsesForRetired 3 while the kernel said 5).
+ */
+const DEFAULT_MODEL = {
+  active: ACTIVE_THRESHOLD,
+  trusted: TRUSTED_THRESHOLD,
+  minUsesForTrusted: MIN_USES_FOR_TRUSTED,
+  minUsesForRetired: MIN_USES_FOR_RETIRED,
+  retiredTrustThreshold: RETIRED_TRUST_THRESHOLD,
+  unguardedCeiling: UNGUARDED_TRUST_CEILING,
+  recencyHalfLifeDays: RECENCY_HALF_LIFE_DAYS,
+  recencyFloor: RECENCY_FLOOR,
+};
 
 export const INSPECT_VIEW_CSS = `
     .inspect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem; }
@@ -123,8 +149,7 @@ export const INSPECT_VIEW_JS = String.raw`
       quarantined: { name: "Paused", color: "var(--quarantined)" },
       retired: { name: "Retired", color: "var(--retired)" }
     };
-    var DEFAULT_MODEL = { active: 0.25, trusted: 0.6, minUsesForTrusted: 5, minUsesForRetired: 3,
-      retiredTrustThreshold: 0.1, unguardedCeiling: 0.5, recencyHalfLifeDays: 45, recencyFloor: 0.3 };
+    var DEFAULT_MODEL = ${JSON.stringify(DEFAULT_MODEL)};
     var SIGNAL_TEXT = {
       APPLY: { label: "It worked", cls: "good", tip: "Counts as a try that succeeded." },
       REJECT_RULE: { label: "It didn't work", cls: "bad", tip: "Counts as a try that failed." },

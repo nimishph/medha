@@ -6,11 +6,13 @@ use crate::maintenance::{
     CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport,
 };
 use medha_core::decision::Decision;
+use medha_core::drift::ema_step;
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::packer::{
     pack_entities, PackCandidate, PackOutcome, PackPolicy, DEFAULT_EXPLORATION_RATIO,
 };
 use medha_core::round::round6;
+use medha_core::thresholds::DEFAULT_EMA_ALPHA;
 use medha_core::thresholds::{
     ACTIVE_THRESHOLD, MIN_USES_FOR_RETIRED, MIN_USES_FOR_TRUSTED, RETIRED_TRUST_THRESHOLD,
     TRUSTED_THRESHOLD,
@@ -18,11 +20,13 @@ use medha_core::thresholds::{
 use medha_core::types::{
     Anchor, EntityKey, LifecycleStatus, RecencyConfig, SignalSpec, Thresholds, TrustHint,
 };
-use medha_store::folding::{fold_episode_into_state, fresh_state};
+use medha_store::folding::{
+    durability_anchor_count, fold_episode_into_state, fresh_state, fresh_state_at,
+};
 use medha_store::types::EntityState;
 use medha_store::{
-    AppendResult, Episode, EpisodeInput, EpisodePayload, MemoryStore, SqliteStore,
-    SqliteStoreOptions, StorePort,
+    AppendResult, EntityDefinition, Episode, EpisodeInput, EpisodePayload, MemoryStore, OpenResult,
+    SqliteStore, SqliteStoreOptions, StoreError, StorePort, StoreRegistries,
 };
 use medha_sync::{
     FileSyncAdapter, GitRefSyncAdapter, NoopSyncAdapter, PullResult, PushResult, ReconcileResult,
@@ -37,6 +41,9 @@ pub struct EnginePackOptions {
     pub kind: Option<String>,
     #[serde(default)]
     pub namespace: Option<String>,
+    /// Only these entity ids (gh-23), so a host's own rule set stays authoritative.
+    #[serde(default)]
+    pub ids: Option<Vec<String>>,
     #[serde(default = "default_pack_exploration_ratio")]
     pub exploration_ratio: f64,
     #[serde(default)]
@@ -58,6 +65,10 @@ pub struct RecordInput {
     pub key: EntityKey,
     pub signal: String,
     pub at: i64,
+    /// Create the entity if it is unknown. Without it a signal for an unknown entity is still
+    /// logged, but the fold gives it no effect (spec §5.2), as the TypeScript engine does.
+    #[serde(default)]
+    pub ensure: bool,
     #[serde(default)]
     pub author: Option<String>,
     #[serde(default)]
@@ -89,6 +100,47 @@ pub struct ShowReport {
     pub known: bool,
     pub hint: TrustHint,
     pub recent_episodes: Vec<Episode>,
+    /// Set while the status holds whatever new evidence says (medha-x3g).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latch: Option<StatusLatch>,
+}
+
+/// A status that new evidence cannot change, and the episode that set it (medha-x3g): a stored
+/// `retired` (spec §6 step 2) or an override `quarantined` (step 1). Same shape as the TypeScript
+/// engine's `StatusLatch`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusLatch {
+    pub status: LifecycleStatus,
+    pub seq: u64,
+    pub at: i64,
+    /// `evidence` when the fold retired it; otherwise the episode type that did.
+    pub cause: String,
+    pub evidence: LatchEvidence,
+    /// `restore`, and for `evidence` also `retract`.
+    pub lifted_by: Vec<String>,
+}
+
+/// What a retraction did to the entity's status (gh-22).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RetractOutcome {
+    #[serde(flatten)]
+    pub appended: AppendResult,
+    /// Set when the retraction took the entity out of `quarantined` or `retired`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifted: Option<LiftedStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiftedStatus {
+    pub from: LifecycleStatus,
+    pub to: LifecycleStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LatchEvidence {
+    pub k: f64,
+    pub n: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -109,6 +161,8 @@ pub struct ThresholdExplanation {
     pub key: EntityKey,
     pub hint: TrustHint,
     pub gates: Vec<GateExplanation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latch: Option<StatusLatch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,6 +182,17 @@ pub struct MedhaEngine<S: StorePort> {
     sync: Box<dyn SyncPort>,
     config: MedhaConfig,
     signals: HashMap<String, SignalSpec>,
+    kinds: Vec<String>,
+    /// How the store opened. A corrupt log is readable only up to the break, so evidence reads
+    /// refuse it and `preflight` reports it.
+    opened: OpenResult,
+}
+
+/// The kinds every store knows, whatever its registries say (as in the TypeScript `KindRegistry`).
+const BUILTIN_KINDS: [&str; 3] = ["rule", "recipe", "tool"];
+
+fn builtin_kinds() -> Vec<String> {
+    BUILTIN_KINDS.iter().map(|k| k.to_string()).collect()
 }
 
 impl MedhaEngine<SqliteStore> {
@@ -138,7 +203,7 @@ impl MedhaEngine<SqliteStore> {
             registries: None,
             resilient_replay: false,
         });
-        store.open()?;
+        let opened = store.open()?;
 
         let config = MedhaConfig {
             path: Some(path),
@@ -152,6 +217,8 @@ impl MedhaEngine<SqliteStore> {
             sync: Box::new(NoopSyncAdapter),
             config,
             signals,
+            kinds: builtin_kinds(),
+            opened,
         })
     }
 
@@ -182,7 +249,7 @@ impl MedhaEngine<SqliteStore> {
 impl MedhaEngine<MemoryStore> {
     pub fn open_in_memory() -> Result<Self, MedhaError> {
         let mut store = MemoryStore::new(None);
-        store.open()?;
+        let opened = store.open()?;
 
         let config = MedhaConfig {
             backend: crate::config::BackendKind::Memory,
@@ -197,6 +264,8 @@ impl MedhaEngine<MemoryStore> {
             sync: Box::new(NoopSyncAdapter),
             config,
             signals,
+            kinds: builtin_kinds(),
+            opened,
         })
     }
 }
@@ -207,7 +276,7 @@ impl<S: StorePort> MedhaEngine<S> {
         file_path: impl AsRef<std::path::Path>,
         config: MedhaConfig,
     ) -> Self {
-        let _ = store.open();
+        let opened = store.open().unwrap_or(OpenResult::Ok);
         let sync = Box::new(FileSyncAdapter::new(file_path));
         let signals = medha_core::canonical_signals();
         Self {
@@ -215,6 +284,8 @@ impl<S: StorePort> MedhaEngine<S> {
             sync,
             config,
             signals,
+            kinds: builtin_kinds(),
+            opened,
         }
     }
 
@@ -223,7 +294,7 @@ impl<S: StorePort> MedhaEngine<S> {
         repo_dir: impl AsRef<std::path::Path>,
         config: MedhaConfig,
     ) -> Self {
-        let _ = store.open();
+        let opened = store.open().unwrap_or(OpenResult::Ok);
         let sync = Box::new(GitRefSyncAdapter::new(repo_dir));
         let signals = medha_core::canonical_signals();
         Self {
@@ -231,21 +302,76 @@ impl<S: StorePort> MedhaEngine<S> {
             sync,
             config,
             signals,
+            kinds: builtin_kinds(),
+            opened,
         }
     }
 
     pub fn new(store: S, sync: Box<dyn SyncPort>, config: MedhaConfig) -> Self {
         let signals = medha_core::canonical_signals();
+        let opened = OpenResult::Ok;
         Self {
             store,
             sync,
             config,
             signals,
+            kinds: builtin_kinds(),
+            opened,
         }
     }
 
     pub fn set_sync(&mut self, sync: Box<dyn SyncPort>) {
         self.sync = sync;
+    }
+
+    /// Resolve signals and kinds from the store's registries (`config.json`), as the TypeScript
+    /// engine does. Both engines open the same store, so a signal or kind it does not declare must
+    /// be refused here: written anyway, it makes the TypeScript engine read the store as corrupt.
+    pub fn use_registries(&mut self, registries: &StoreRegistries) {
+        if !registries.signal_specs.is_empty() {
+            self.signals = registries
+                .signal_specs
+                .iter()
+                .map(|spec| (spec.name.clone(), spec.clone()))
+                .collect();
+        }
+        let mut kinds = builtin_kinds();
+        for kind in &registries.kinds {
+            if !kinds.contains(kind) {
+                kinds.push(kind.clone());
+            }
+        }
+        self.kinds = kinds;
+    }
+
+    /// Refuse a read that answers from the evidence when the log opened corrupt: the store holds
+    /// only the episodes before the break, so the answer would quietly cover part of the evidence
+    /// (gh-18). `preflight` reports the break instead.
+    fn require_readable(&self) -> Result<(), MedhaError> {
+        match &self.opened {
+            OpenResult::Ok => Ok(()),
+            OpenResult::Corrupt { location } => Err(MedhaError::Store(StoreError::CorruptStore {
+                store_path: location.source.clone(),
+                at_seq: location.at_seq,
+                reason: "the log is unrecoverable from there, so any answer would cover only the \
+                         episodes before it; run `medha preflight`, then restore a snapshot"
+                    .to_string(),
+            })),
+        }
+    }
+
+    fn require_kind(&self, key: &EntityKey) -> Result<(), MedhaError> {
+        if self.kinds.contains(&key.kind) {
+            return Ok(());
+        }
+        Err(MedhaError::InvalidArgument {
+            name: "kind",
+            reason: format!(
+                "Unknown kind '{}' (registered: {})",
+                key.kind,
+                self.kinds.join(", ")
+            ),
+        })
     }
 
     pub fn store(&self) -> &S {
@@ -275,10 +401,12 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn list(&self) -> Result<Vec<EntityState>, MedhaError> {
+        self.require_readable()?;
         Ok(self.store.list()?)
     }
 
     pub fn hint(&self, key: &EntityKey, now: i64) -> Result<TrustHint, MedhaError> {
+        self.require_readable()?;
         let state = self
             .store
             .get(key)?
@@ -290,7 +418,7 @@ impl<S: StorePort> MedhaEngine<S> {
         let computation = compute_trust_and_status(TrustComputationInput {
             evidence: &state.evidence,
             guard: &state.guard,
-            distinct_anchor_count: state.anchors.len(),
+            distinct_anchor_count: durability_anchor_count(&state),
             ema: &state.ema,
             last_signal_at: state.last_signal_at,
             now,
@@ -298,6 +426,7 @@ impl<S: StorePort> MedhaEngine<S> {
             status_override: state.status_override,
             thresholds: &thresholds,
             recency_config: &recency_config,
+            rejecting_authors: None,
         })?;
 
         Ok(TrustHint {
@@ -333,12 +462,83 @@ impl<S: StorePort> MedhaEngine<S> {
         recent_episodes.reverse();
         recent_episodes.truncate(10);
 
+        let latch = self.latch_of(key)?;
         Ok(ShowReport {
             key: key.clone(),
             known,
             hint,
             recent_episodes,
+            latch,
         })
+    }
+
+    /// Replays the key's episodes the way the projection does (retractions masked) and reports
+    /// the latch still in force, if any. A guard-failure or drift quarantine is not one: it lifts
+    /// by itself when the cause clears.
+    pub fn latch_of(&self, key: &EntityKey) -> Result<Option<StatusLatch>, MedhaError> {
+        let log = self.store.episodes(None, None)?;
+        let retracted: std::collections::HashSet<u64> = log
+            .iter()
+            .filter_map(|e| match &e.payload {
+                EpisodePayload::Retract { target_seq, .. } => Some(*target_seq),
+                _ => None,
+            })
+            .collect();
+        let key_str = key.to_string_repr();
+        let mut state: Option<EntityState> = None;
+        let mut latch: Option<StatusLatch> = None;
+        for ep in log.iter().filter(|e| e.key.to_string_repr() == key_str) {
+            if retracted.contains(&ep.seq) {
+                continue;
+            }
+            let before = state.clone();
+            state = fold_episode_into_state(state, ep);
+            let Some(now) = &state else {
+                latch = None;
+                continue;
+            };
+            let was_retired = before
+                .as_ref()
+                .is_some_and(|s| s.status == LifecycleStatus::Retired);
+            let was_overridden = before
+                .as_ref()
+                .is_some_and(|s| s.status_override == Some(LifecycleStatus::Quarantined));
+            let entered_retired = now.status == LifecycleStatus::Retired && !was_retired;
+            let entered_override =
+                now.status_override == Some(LifecycleStatus::Quarantined) && !was_overridden;
+            if entered_retired || entered_override {
+                let cause = match &ep.payload {
+                    EpisodePayload::Override { .. } => "override",
+                    EpisodePayload::Sweep { .. } => "sweep",
+                    EpisodePayload::Baseline { .. } => "baseline",
+                    _ => "evidence",
+                };
+                let mut lifted_by = vec!["restore".to_string()];
+                if cause == "evidence" {
+                    lifted_by.push("retract".to_string());
+                }
+                latch = Some(StatusLatch {
+                    status: if entered_retired {
+                        LifecycleStatus::Retired
+                    } else {
+                        LifecycleStatus::Quarantined
+                    },
+                    seq: ep.seq,
+                    at: ep.at,
+                    cause: cause.to_string(),
+                    evidence: LatchEvidence {
+                        k: now.evidence.k,
+                        n: now.evidence.n,
+                    },
+                    lifted_by,
+                });
+            } else if now.status != LifecycleStatus::Retired
+                && now.status_override != Some(LifecycleStatus::Quarantined)
+            {
+                latch = None;
+            }
+        }
+        Ok(latch)
     }
 
     pub fn explain_threshold(
@@ -420,6 +620,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             hint,
             gates: vec![trusted_gate, active_gate, retired_gate],
+            latch: self.latch_of(key)?,
         })
     }
 
@@ -472,7 +673,7 @@ impl<S: StorePort> MedhaEngine<S> {
         let computation = compute_trust_and_status(TrustComputationInput {
             evidence: &next_state.evidence,
             guard: &next_state.guard,
-            distinct_anchor_count: next_state.anchors.len(),
+            distinct_anchor_count: durability_anchor_count(&next_state),
             ema: &next_state.ema,
             last_signal_at: next_state.last_signal_at,
             now,
@@ -480,6 +681,7 @@ impl<S: StorePort> MedhaEngine<S> {
             status_override: next_state.status_override,
             thresholds: &thresholds,
             recency_config: &recency_config,
+            rejecting_authors: None,
         })?;
 
         let projected_trust = computation.trust;
@@ -501,12 +703,26 @@ impl<S: StorePort> MedhaEngine<S> {
     // --- WRITE PLANE ---
 
     pub fn record(&mut self, input: RecordInput) -> Result<AppendResult, MedhaError> {
+        self.require_kind(&input.key)?;
         let spec = self.signals.get(&input.signal).cloned().ok_or_else(|| {
             MedhaError::InvalidArgument {
                 name: "signal",
                 reason: format!("Unknown signal '{}'", input.signal),
             }
         })?;
+
+        // Like the TypeScript write plane, the episode carries the weight-updater's result, so the
+        // fold applies it as written. Only the `ema` updater exists here; any other name falls
+        // back to it, as the TypeScript registry does for an updater it cannot load.
+        let base = match self.store.get(&input.key)? {
+            Some(state) => Some(state),
+            None if input.ensure => Some(fresh_state_at(input.key.clone(), input.at)),
+            None => None,
+        };
+        let weight = match &base {
+            Some(state) => Some(ema_step(Some(state.ema.mu), spec.value, DEFAULT_EMA_ALPHA)?),
+            None => None,
+        };
 
         let episode_input = EpisodeInput {
             key: input.key,
@@ -515,11 +731,11 @@ impl<S: StorePort> MedhaEngine<S> {
             payload: EpisodePayload::Signal {
                 spec,
                 anchors: input.anchors,
-                ensure: true,
+                ensure: input.ensure,
                 run_ref: input.run_ref,
                 note: input.note,
-                updater: None,
-                weight: None,
+                updater: weight.map(|_| "ema".to_string()),
+                weight,
                 case_id: input.case_id,
             },
         };
@@ -528,6 +744,7 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn guard(&mut self, input: GuardInput) -> Result<AppendResult, MedhaError> {
+        self.require_kind(&input.key)?;
         let episode_input = EpisodeInput {
             key: input.key,
             at: input.at,
@@ -550,6 +767,7 @@ impl<S: StorePort> MedhaEngine<S> {
         reason: &str,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
+        self.require_kind(key)?;
         let override_type = match status {
             LifecycleStatus::Retired => "retired".to_string(),
             LifecycleStatus::Quarantined => "quarantined".to_string(),
@@ -570,14 +788,44 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn retract(&mut self, seq: u64, reason: &str, at: i64) -> Result<AppendResult, MedhaError> {
+        Ok(self.retract_checked(seq, reason, at, None)?.appended)
+    }
+
+    /// Retract an episode; with `expect`, the target must belong to that entity (gh-22: a bare
+    /// seq can name another entity's episode). Reports when the retraction takes the entity out
+    /// of `quarantined` or `retired`, so the caller can say a latch was lifted.
+    pub fn retract_checked(
+        &mut self,
+        seq: u64,
+        reason: &str,
+        at: i64,
+        expect: Option<&EntityKey>,
+    ) -> Result<RetractOutcome, MedhaError> {
         let all_eps = self.store.episodes(None, None)?;
-        let target = all_eps
+        let target_key = all_eps
             .iter()
             .find(|e| e.seq == seq)
+            .map(|e| e.key.clone())
             .ok_or_else(|| MedhaError::NotFound(format!("Episode with sequence {}", seq)))?;
+        if let Some(expected) = expect {
+            if expected != &target_key {
+                return Err(MedhaError::InvalidArgument {
+                    name: "seq",
+                    reason: format!(
+                        "episode #{seq} belongs to {}, not {}; check the seq with `medha show`",
+                        target_key.to_string_repr(),
+                        expected.to_string_repr()
+                    ),
+                });
+            }
+        }
+        let before = match self.store.get(&target_key)? {
+            Some(_) => Some(self.hint(&target_key, at)?.status),
+            None => None,
+        };
 
         let episode_input = EpisodeInput {
-            key: target.key.clone(),
+            key: target_key.clone(),
             at,
             author: None,
             payload: EpisodePayload::Retract {
@@ -585,8 +833,41 @@ impl<S: StorePort> MedhaEngine<S> {
                 reason: reason.to_string(),
             },
         };
+        let appended = self.store.append(episode_input)?;
 
-        Ok(self.store.append(episode_input)?)
+        let after = self.hint(&target_key, at)?.status;
+        let lifted = match before {
+            Some(from @ (LifecycleStatus::Quarantined | LifecycleStatus::Retired))
+                if from != after =>
+            {
+                Some(LiftedStatus { from, to: after })
+            }
+            _ => None,
+        };
+        Ok(RetractOutcome { appended, lifted })
+    }
+
+    /// Lift a latch (a retirement, or an override quarantine) as a human decision: one audited
+    /// `override: restore` episode (gh-22). Refuses an entity that is not latched.
+    pub fn reinstate(
+        &mut self,
+        key: &EntityKey,
+        reason: &str,
+        at: i64,
+    ) -> Result<(StatusLatch, AppendResult), MedhaError> {
+        self.require_kind(key)?;
+        let latch = self
+            .latch_of(key)?
+            .ok_or_else(|| MedhaError::InvalidArgument {
+                name: "id",
+                reason: format!(
+                    "{} is not latched (retired, or quarantined by an override); a guard or drift \
+                 quarantine lifts by itself when its cause clears",
+                    key.to_string_repr()
+                ),
+            })?;
+        let appended = self.override_status(key, LifecycleStatus::Probation, reason, at)?;
+        Ok((latch, appended))
     }
 
     pub fn remove_episode(&mut self, seq: u64) -> Result<(), MedhaError> {
@@ -623,6 +904,7 @@ impl<S: StorePort> MedhaEngine<S> {
         description: Option<String>,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
+        self.require_kind(key)?;
         let episode_input = EpisodeInput {
             key: key.clone(),
             at,
@@ -631,6 +913,10 @@ impl<S: StorePort> MedhaEngine<S> {
                 provenance: provenance.to_string(),
                 theta0,
                 description,
+                evidence_refs: None,
+                anchor: None,
+                promoted: None,
+                promotion_reason: None,
                 note: None,
             },
         };
@@ -641,21 +927,22 @@ impl<S: StorePort> MedhaEngine<S> {
     pub fn define(
         &mut self,
         key: &EntityKey,
-        title: Option<String>,
-        description: Option<String>,
+        title: &str,
+        rationale: &str,
         tags: Option<Vec<String>>,
-        rationale: Option<String>,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
+        self.require_kind(key)?;
         let episode_input = EpisodeInput {
             key: key.clone(),
             at,
             author: None,
             payload: EpisodePayload::Define {
-                title,
-                description,
-                tags,
-                rationale,
+                definition: EntityDefinition {
+                    title: title.to_string(),
+                    rationale: rationale.to_string(),
+                    tags,
+                },
             },
         };
 
@@ -671,6 +958,7 @@ impl<S: StorePort> MedhaEngine<S> {
         decision: Decision,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
+        self.require_kind(key)?;
         let episode_input = EpisodeInput {
             key: key.clone(),
             at,
@@ -678,6 +966,7 @@ impl<S: StorePort> MedhaEngine<S> {
             payload: EpisodePayload::Decision {
                 case_id: case_id.to_string(),
                 parent_id,
+                detach: None,
                 condition: condition.to_string(),
                 decision,
             },
@@ -758,6 +1047,16 @@ impl<S: StorePort> MedhaEngine<S> {
         let mut issues = Vec::new();
         let mut corrupt_seq = None;
 
+        // The store stops reading at the first episode it cannot accept, so the episodes it hands
+        // back are always contiguous: the break is only visible in how it opened.
+        if let OpenResult::Corrupt { location } = &self.opened {
+            corrupt_seq = Some(location.at_seq);
+            issues.push(format!(
+                "Log is unrecoverable from seq {}: episodes from there on could not be read",
+                location.at_seq
+            ));
+        }
+
         // Check sequence continuity
         for (idx, ep) in episodes.iter().enumerate() {
             if ep.seq != idx as u64 {
@@ -781,6 +1080,7 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn pack(&self, options: EnginePackOptions, now: i64) -> Result<PackOutcome, MedhaError> {
+        self.require_readable()?;
         let entities = self.store.list()?;
         let mut candidates = Vec::new();
         for state in entities {
@@ -791,6 +1091,11 @@ impl<S: StorePort> MedhaEngine<S> {
             }
             if let Some(ref ns) = options.namespace {
                 if &state.key.namespace != ns {
+                    continue;
+                }
+            }
+            if let Some(ids) = &options.ids {
+                if !ids.iter().any(|id| id == &state.key.id) {
                     continue;
                 }
             }
