@@ -8,13 +8,15 @@
 //! - `logs`: episode logs written by another engine, as raw stored JSON. Each episode is parsed on
 //!   its own, so the response says exactly which ones this engine cannot read; the parsed ones are
 //!   folded and returned with their hints at `now`.
+//! - `merges`: pairs of entity-state lists, as the other engine folded them. Each pair is merged
+//!   with `merge_entity_states(local, incoming)` and the merged states are returned.
 //!
 //! It is a test fixture, not a supported interface: the shapes follow what the test needs.
 
 use std::io::{self, Read, Write};
 
 use medha::core::types::{Anchor, EntityKey, LifecycleStatus};
-use medha::store::{Episode, StorePort};
+use medha::store::{EntityState, Episode, StorePort};
 use medha::{GuardInput, MedhaEngine, RecordInput};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -25,6 +27,14 @@ struct Request {
     scripts: Vec<Script>,
     #[serde(default)]
     logs: Vec<Log>,
+    #[serde(default)]
+    merges: Vec<Merge>,
+}
+
+#[derive(Deserialize)]
+struct Merge {
+    local: Vec<EntityState>,
+    incoming: Vec<EntityState>,
 }
 
 #[derive(Deserialize)]
@@ -230,6 +240,14 @@ fn read_log(log: Log) -> Value {
     }
 }
 
+/// One state merge, as `medha sync` runs it.
+fn run_merge(merge: Merge) -> Value {
+    match medha::sync::merge_entity_states(&merge.local, &merge.incoming) {
+        Ok(states) => json!({ "states": states }),
+        Err(e) => json!({ "fatal": e.to_string() }),
+    }
+}
+
 fn main() {
     let mut input = String::new();
     if let Err(e) = io::stdin().read_to_string(&mut input) {
@@ -246,6 +264,7 @@ fn main() {
     let response = json!({
         "scripts": request.scripts.into_iter().map(run_script).collect::<Vec<_>>(),
         "logs": request.logs.into_iter().map(read_log).collect::<Vec<_>>(),
+        "merges": request.merges.into_iter().map(run_merge).collect::<Vec<_>>(),
     });
     let stdout = io::stdout();
     let mut out = stdout.lock();

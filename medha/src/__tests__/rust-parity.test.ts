@@ -15,6 +15,7 @@ import {
   validateEpisodeInput,
 } from '@cntxt-labs/medha-core';
 import { MemoryStore } from '@cntxt-labs/medha-store';
+import { mergeEntityStates } from '@cntxt-labs/medha-sync';
 import { Medha } from '../engine.ts';
 
 /**
@@ -25,6 +26,8 @@ import { Medha } from '../engine.ts';
  * 1. Same operations, same outcome: which ops are accepted, the folded states, and the hints.
  * 2. The Rust engine reads every episode the TypeScript engine writes, and folds it the same.
  * 3. The TypeScript engine reads every episode the Rust engine writes, and folds it the same.
+ *
+ * And, for `medha sync`: the two engines merge the same entity states into the same states.
  *
  * The TypeScript engine is the reference (it ships, and the spec vectors name its kernel the
  * reference runner). The Rust side runs through `crates/medha/examples/parity_driver.rs`; build it
@@ -320,12 +323,17 @@ interface RustLogRead {
 interface DriverResponse {
   readonly scripts: readonly (EngineRun & { readonly fatal?: string })[];
   readonly logs: readonly RustLogRead[];
+  readonly merges: readonly { readonly states?: readonly unknown[]; readonly fatal?: string }[];
 }
 
 /** One driver call; a driver that cannot run is reported, not thrown. */
 function runRust(request: {
   readonly scripts?: readonly Script[];
   readonly logs?: readonly { readonly episodes: readonly unknown[]; readonly now: number }[];
+  readonly merges?: readonly {
+    readonly local: readonly EntityState[];
+    readonly incoming: readonly EntityState[];
+  }[];
 }): DriverResponse | { readonly failure: string } {
   if (!('path' in driver)) return { failure: driver.problem };
   const child = Bun.spawnSync({
@@ -375,6 +383,8 @@ function normState(raw: unknown) {
     createdAt: field(s, 'createdAt', 'created_at'),
     lastNote: field(s, 'lastNote', 'last_note'),
     updater: s.updater,
+    authors: s.authors ?? null,
+    rejectingAuthors: field(s, 'rejectingAuthors', 'rejecting_authors'),
   };
 }
 
@@ -562,6 +572,54 @@ describe.skipIf(!('path' in driver))('TS/Rust engine parity (medha-50q.6)', () =
       return scripts.map((s, i) => compareTsRead(rust.scripts[i] as ScriptRun, s.now));
     });
     expect(divergence).toBeNull();
+  });
+});
+
+/**
+ * State pairs for the merge property: each seed's states against the next seed's (the scripts
+ * share keys, so most entities meet), and against themselves (merge is idempotent). Odd seeds give
+ * the states `rejectingAuthors`, as a kind with `minDistinctAuthorsForRetired` above 1 keeps them,
+ * which the scripts cannot produce yet (per-kind specs, medha-50q.7).
+ */
+function mergePairs(ts: readonly EngineRun[]) {
+  const withAuthors = (states: readonly EntityState[], authors: readonly string[]) =>
+    states.map((state) => ({ ...state, rejectingAuthors: [...authors].sort() }));
+  return ts.flatMap((run, i) => {
+    // The TS run's states are its own engine's, typed loosely only to compare with the driver's.
+    const own = run.states as readonly EntityState[];
+    const next = (ts[(i + 1) % ts.length] as EngineRun).states as readonly EntityState[];
+    const odd = SEEDS[i] !== undefined && SEEDS[i] % 2 === 1;
+    const local = odd ? withAuthors(own, ['carol', 'alice']) : own;
+    const incoming = odd ? withAuthors(next, ['bob', 'alice', '']) : next;
+    return [
+      { seed: SEEDS[i], local, incoming },
+      { seed: SEEDS[i], local, incoming: local },
+    ];
+  });
+}
+
+describe.skipIf(!('path' in driver))('TS/Rust state merge parity', () => {
+  test('both engines merge the same entity states into the same states', async () => {
+    const ts = await Promise.all(SEEDS.map(generate).map(runTs));
+    const pairs = mergePairs(ts);
+    const rust = runRust({ merges: pairs.map(({ local, incoming }) => ({ local, incoming })) });
+    expect('failure' in rust ? rust.failure : 'ok').toBe('ok');
+    if ('failure' in rust) return;
+    const divergence = pairs
+      .map(({ seed, local, incoming }, i) => {
+        const merged = rust.merges[i];
+        if (merged?.states === undefined) return `seed ${seed}: rust driver: ${merged?.fatal}`;
+        const d = firstDifference(
+          byKey(mergeEntityStates(local, incoming).map(normState)),
+          byKey(merged.states.map(normState)),
+          'merged',
+        );
+        return d === null
+          ? null
+          : `seed ${seed} (${local === incoming ? 'self-merge' : 'with the next seed'}) diverges: ${d}`;
+      })
+      .find((d) => d !== null);
+    expect(divergence ?? null).toBeNull();
   });
 });
 

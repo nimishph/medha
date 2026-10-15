@@ -287,6 +287,11 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
         .collect()
 }
 
+/// Merges two lists of folded entity states, for hosts that hold states but not the logs behind
+/// them (`medha sync` merges episode logs instead). The same as the TypeScript `mergeEntityStates`
+/// (rust-parity.test.ts checks it), and with its limits: states record no episode ids, so evidence
+/// is summed except that two identical states count once. Replicas that independently reached the
+/// same state are therefore counted once, and the merge is not associative.
 pub fn merge_entity_states(
     local: &[EntityState],
     incoming: &[EntityState],

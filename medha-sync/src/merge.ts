@@ -1,10 +1,13 @@
 /**
  * Deterministic merge algorithms for episodes and entity states, spec §7.2.
  *
- * Guarantees mathematical commutativity, associativity, and idempotency:
+ * The episode merge is the one `medha sync` runs, and it is commutative, associative and
+ * idempotent:
  *   merge(A, B) === merge(B, A)
  *   merge(merge(A, B), C) === merge(A, merge(B, C))
  *   merge(A, A) === A
+ *
+ * The entity-state merge is weaker; see `mergeEntityStates`.
  */
 
 import { isDeepStrictEqual } from 'node:util';
@@ -200,9 +203,17 @@ export function mergeEpisodes(local: readonly Episode[], incoming: readonly Epis
 }
 
 /**
- * 2-way commutative merge of two EntityState arrays.
- * Combines evidence (k, n, contextRejects), sample-weighted EMA mu, union of anchors,
- * and latest guard outcome.
+ * 2-way commutative merge of two EntityState arrays, for hosts that hold folded states but not the
+ * logs behind them (`medha sync` merges episode logs instead). Combines evidence (k, n,
+ * contextRejects), sample-weighted EMA mu, union of anchors and `rejectingAuthors`, and latest
+ * guard outcome.
+ *
+ * States carry no record of which episodes they contain, so this cannot tell shared evidence from
+ * new evidence. It sums, except that two identical states are read as one observation (so
+ * `merge(A, A) === A`). Two consequences: replicas that independently reached exactly the same
+ * state are counted once, and the merge is not associative (`merge(merge(A, A), B)` is A+B, while
+ * `merge(A, merge(A, B))` is A+A+B). Merge each replica's state in once; when the logs are at hand,
+ * merge those. The Rust `merge_entity_states` must give the same result (rust-parity.test.ts).
  */
 export function mergeEntityStates(
   local: readonly EntityState[],
