@@ -293,6 +293,7 @@ version = "0.7.5"
 dependencies = [
  "clap",
  "medha",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

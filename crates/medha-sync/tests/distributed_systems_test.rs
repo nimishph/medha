@@ -207,13 +207,13 @@ fn test_distributed_cross_replica_retraction_resolution() {
     r3.rebuild().unwrap();
 
     // Verify:
-    // 1. rule-bad was retracted (trials n == 0)
+    // 1. rule-bad was retracted: its only episode is masked, so no entity remains (as in the
+    //    TypeScript fold, a retraction never creates the entity its target would have)
     // 2. innocent rules were NOT retracted (trials n == 1 each)
     let states = r3.list().unwrap();
-    let bad_state = states.iter().find(|s| s.key.id == "rule-bad").unwrap();
-    assert_eq!(
-        bad_state.evidence.n, 0.0,
-        "Retracted episode must not contribute to trials"
+    assert!(
+        states.iter().all(|s| s.key.id != "rule-bad"),
+        "Retracted episode must not contribute: rule-bad had no other episode"
     );
 
     let inn1 = states

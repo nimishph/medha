@@ -7,8 +7,9 @@ pub use config::{
     BackendKind, MedhaConfig, CONFIG_FILE, CONFIG_LAYOUT_VERSION, MEDHA_HOME_DIR, SQLITE_FILE,
 };
 pub use engine::{
-    ConditionStatus, EnginePackOptions, GateExplanation, GuardInput, MedhaEngine, RecordInput,
-    ShowReport, SimulationReport, ThresholdExplanation,
+    ConditionStatus, EnginePackOptions, GateExplanation, GuardInput, LatchEvidence, LiftedStatus,
+    MedhaEngine, RecordInput, RetractOutcome, ShowReport, SimulationReport, StatusLatch,
+    ThresholdExplanation,
 };
 pub use errors::MedhaError;
 pub use maintenance::{CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport};

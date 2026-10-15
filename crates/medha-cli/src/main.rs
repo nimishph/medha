@@ -192,6 +192,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = home_dir.join(config.path.as_deref().unwrap_or(SQLITE_FILE));
     let mut engine =
         MedhaEngine::open_sqlite_with_sync(db_path.to_string_lossy().to_string(), &home_dir)?;
+    engine.use_registries(&config.registries);
 
     match cli.command {
         Commands::Init(_) => unreachable!(),
@@ -224,6 +225,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 key: key.clone(),
                 signal: args.signal.clone(),
                 at: now,
+                ensure: args.ensure,
                 author: args.author,
                 anchors: None,
                 run_ref: args.run_ref,
@@ -253,6 +255,25 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Commands::Guard(args) => {
             let key = EntityKey::new(&args.namespace, &args.kind, &args.id);
             let ok = if args.fail { false } else { args.ok };
+            // Without --guard the report reuses the entity's guard kind. With none yet, it would be
+            // stored against kind `none` and change nothing while printing "guard passed" (gh-17).
+            if args
+                .guard_kind
+                .as_deref()
+                .is_none_or(|k| k.trim().is_empty())
+            {
+                let has_guard = engine
+                    .get(&key)?
+                    .is_some_and(|s| !s.guard.kind.is_empty() && s.guard.kind != "none");
+                if !has_guard {
+                    return Err(format!(
+                        "Invalid --guard: {} has no guard yet, so a report without --guard would not count. \
+                         Pass --guard <kind> (e.g. ci, review, tests) naming the check that ran.",
+                        key.to_string_repr()
+                    )
+                    .into());
+                }
+            }
             let res = engine.guard(GuardInput {
                 key: key.clone(),
                 ok,
@@ -364,6 +385,78 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        Commands::Reinstate(args) => {
+            let key = EntityKey::new(&args.namespace, &args.kind, &args.id);
+            let (latch, appended) = engine.reinstate(&key, &args.reason, now)?;
+            let hint = engine.hint(&key, now)?;
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "key": key,
+                        "latch": latch,
+                        "seq": appended.episode.seq,
+                        "hint": hint,
+                    }))?
+                );
+            } else {
+                println!(
+                    "medha: reinstated {} (was {} since #{}; recorded as #{})",
+                    key.to_string_repr(),
+                    format!("{:?}", latch.status).to_lowercase(),
+                    latch.seq,
+                    appended.episode.seq
+                );
+                let status = format!("{:?}", hint.status).to_lowercase();
+                println!("  trust:    {:.3}  status: {}", hint.trust, status);
+                if status == "retired" || status == "quarantined" {
+                    println!(
+                        "  note:     the evidence still makes it {status}; the next episode stores that"
+                    );
+                }
+            }
+        }
+        Commands::Retract(args) => {
+            let expect = args
+                .id
+                .as_ref()
+                .map(|id| EntityKey::new(&args.namespace, &args.kind, id));
+            let outcome = engine.retract_checked(args.seq, &args.reason, now, expect.as_ref())?;
+            let key = outcome.appended.episode.key.clone();
+            let hint = engine.hint(&key, now)?;
+            if let Some(lifted) = &outcome.lifted {
+                eprintln!(
+                    "medha: warning: this retraction took {} out of {} (now {}). Lifting a latch is a \
+                     human decision, and medha cannot tell who ran this; 'medha reinstate --reason' \
+                     records it as one.",
+                    key.to_string_repr(),
+                    format!("{:?}", lifted.from).to_lowercase(),
+                    format!("{:?}", lifted.to).to_lowercase()
+                );
+            }
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "targetSeq": args.seq,
+                        "reason": args.reason,
+                        "seq": outcome.appended.episode.seq,
+                        "episode": outcome.appended.episode,
+                        "hint": hint,
+                        "lifted": outcome.lifted,
+                    }))?
+                );
+            } else {
+                println!(
+                    "medha: retracted episode #{} (recorded as #{})\n  reason:   {}\n  trust:    {:.3}  status: {}",
+                    args.seq,
+                    outcome.appended.episode.seq,
+                    args.reason,
+                    hint.trust,
+                    format!("{:?}", hint.status).to_lowercase()
+                );
+            }
+        }
         Commands::Sync(args) => match args.action {
             SyncAction::Status => {
                 let sync_report = engine.sync_status()?;
@@ -437,11 +530,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     println!("  issue:    {}", issue);
                 }
             }
+            // A failed preflight exits 1, as in the TypeScript CLI, so scripts can gate on it.
+            if !pre.ok {
+                exit(1);
+            }
         }
         Commands::List(args) => {
+            let ids = args.ids.as_deref().map(parse_ids).transpose()?;
             let all_states = engine.list()?;
             let mut hints = Vec::new();
             for s in all_states {
+                if let Some(ids) = &ids {
+                    if !ids.contains(&s.key.id) {
+                        continue;
+                    }
+                }
                 if let Some(ref k) = args.kind {
                     if &s.key.kind != k {
                         continue;
@@ -493,7 +596,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Status(_) => {
             let pre = engine.preflight()?;
-            let all_states = engine.list()?;
+            // A corrupt store cannot answer from the evidence (gh-18): report it, count nothing.
+            let all_states = if pre.ok { engine.list()? } else { Vec::new() };
             let mut by_status = std::collections::HashMap::new();
             let mut drifting = 0;
             for s in &all_states {
@@ -522,19 +626,30 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 );
             } else {
                 println!("medha: status for {}", home_dir.display());
+                let verdict = if pre.ok { "ok" } else { "failed" };
                 println!(
-                    "  preflight:  ok — {} episodes, {} entities, integrity ok",
-                    pre.total_episodes, pre.total_entities
+                    "  preflight:  {} — {} episodes, {} entities, integrity {}",
+                    verdict, pre.total_episodes, pre.total_entities, verdict
                 );
-                println!(
-                    "  by status:  probation {}, active {}, trusted {}, quarantined {}, retired {}",
-                    by_status.get("probation").unwrap_or(&0),
-                    by_status.get("active").unwrap_or(&0),
-                    by_status.get("trusted").unwrap_or(&0),
-                    by_status.get("quarantined").unwrap_or(&0),
-                    by_status.get("retired").unwrap_or(&0),
-                );
-                println!("  drifting:   {}", drifting);
+                if pre.ok {
+                    println!(
+                        "  by status:  probation {}, active {}, trusted {}, quarantined {}, retired {}",
+                        by_status.get("probation").unwrap_or(&0),
+                        by_status.get("active").unwrap_or(&0),
+                        by_status.get("trusted").unwrap_or(&0),
+                        by_status.get("quarantined").unwrap_or(&0),
+                        by_status.get("retired").unwrap_or(&0),
+                    );
+                    println!("  drifting:   {}", drifting);
+                } else {
+                    for issue in &pre.issues {
+                        println!("  issue:      {}", issue);
+                    }
+                    println!("  by status:  unavailable — run `medha preflight`");
+                }
+            }
+            if !pre.ok {
+                exit(1);
             }
         }
         Commands::Drift(args) => {
@@ -578,6 +693,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 budget: args.budget,
                 kind: args.kind,
                 namespace: args.namespace,
+                ids: args.ids.as_deref().map(parse_ids).transpose()?,
                 exploration_ratio,
                 seed: args.seed,
                 min_trust: 0.0,

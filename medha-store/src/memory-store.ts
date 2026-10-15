@@ -133,7 +133,10 @@ export class MemoryStore implements StorePort {
 
   async rebuild(): Promise<EntityState[]> {
     this.assertOpen('rebuild');
-    return foldLog(this.log);
+    // Fold with the store's kind registry, as the append path does: kind specs (evidence weighting,
+    // thresholds) shape the state, so a default fold would report a false mismatch.
+    const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
+    return foldLog(this.log, { kinds });
   }
 
   async replaceLog(

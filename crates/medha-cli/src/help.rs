@@ -23,6 +23,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "retract",
             "remove-episode",
             "override",
+            "reinstate",
         ],
     ),
     (

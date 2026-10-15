@@ -85,10 +85,15 @@ pub enum LifecycleStatus {
     Retired,
 }
 
+// Stored types serialize in the TypeScript engine's camelCase, because both engines read and write
+// the same `store.sqlite`. The snake_case aliases keep stores written by earlier Rust builds readable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GuardState {
     pub kind: String,
+    #[serde(default, alias = "last_ok")]
     pub last_ok: Option<bool>,
+    #[serde(default, alias = "last_ok_at")]
     pub last_ok_at: Option<i64>,
 }
 
@@ -103,9 +108,15 @@ impl Default for GuardState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EmaState {
     pub mu: f64,
     pub theta0: f64,
+    /// When the EMA last moved (epoch ms); the TypeScript state always carries it.
+    #[serde(default, alias = "updated_at")]
+    pub updated_at: i64,
+    /// Not part of the stored state: the TypeScript engine has no such field, and trust reads `n`.
+    #[serde(default, alias = "sample_count", skip_serializing)]
     pub sample_count: u64,
 }
 
@@ -114,15 +125,18 @@ impl Default for EmaState {
         Self {
             mu: crate::thresholds::DEFAULT_THETA0,
             theta0: crate::thresholds::DEFAULT_THETA0,
+            updated_at: 0,
             sample_count: 0,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct Evidence {
     pub k: f64,
     pub n: f64,
+    #[serde(default, alias = "context_rejects")]
     pub context_rejects: u64,
 }
 
@@ -134,6 +148,8 @@ pub struct Thresholds {
     pub unguarded_ceiling: f64,
     pub min_uses_for_retired: u64,
     pub retired_trust_threshold: f64,
+    /// Distinct authors needed among the failed trials before retirement (spec §6 step 5.1).
+    pub min_distinct_authors_for_retired: u64,
 }
 
 impl Default for Thresholds {
@@ -145,6 +161,7 @@ impl Default for Thresholds {
             unguarded_ceiling: crate::thresholds::UNGUARDED_TRUST_CEILING,
             min_uses_for_retired: crate::thresholds::MIN_USES_FOR_RETIRED,
             retired_trust_threshold: crate::thresholds::RETIRED_TRUST_THRESHOLD,
+            min_distinct_authors_for_retired: crate::thresholds::MIN_DISTINCT_AUTHORS_FOR_RETIRED,
         }
     }
 }

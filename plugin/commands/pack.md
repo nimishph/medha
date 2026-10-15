@@ -1,5 +1,5 @@
 ---
-description: Pack the most-trusted active and probation guidance into a context window.
+description: Pack the trusted, active and probation guidance that fits into a context window.
 ---
 
 Pack guidance into a token budget: $ARGUMENTS

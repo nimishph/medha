@@ -1,4 +1,4 @@
-pub const TRUST_SPEC_VERSION: &str = "1.5.0";
+pub const TRUST_SPEC_VERSION: &str = "2.0.0";
 
 /// Normal distribution quantile, 95% confidence.
 pub const WILSON_Z: f64 = 1.96;
@@ -45,8 +45,11 @@ pub const DEFAULT_THETA0: f64 = 0.5;
 /// Trust below this retires an entity.
 pub const RETIRED_TRUST_THRESHOLD: f64 = 0.1;
 
-/// Minimum trials before an entity can be retired by trust.
-pub const MIN_USES_FOR_RETIRED: u64 = 3;
+/// Minimum trials before an entity can be retired by trust: the same bar as `trusted` (spec 2.0.0).
+pub const MIN_USES_FOR_RETIRED: u64 = 5;
+
+/// Distinct rejecting authors needed before retirement by trust; 1 means no author requirement.
+pub const MIN_DISTINCT_AUTHORS_FOR_RETIRED: u64 = 1;
 
 /// Milliseconds in one day.
 pub const DAY_MS: f64 = 86_400_000.0;

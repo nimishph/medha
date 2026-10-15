@@ -5,10 +5,11 @@ import { join } from 'node:path';
 import { APPLY } from '@cntxt-labs/medha-core';
 import { bindEnvironment, type Environment } from './environment.ts';
 import { runInit } from './init.ts';
+import { openHome } from './open.ts';
 import { runReport } from './report.ts';
 import { generateDashboardHtml, startUiServer, type UiServerHandle } from './ui.ts';
 import { VERSION } from './version.ts';
-import { runGuard, runRecord } from './write.ts';
+import { runRecord } from './write.ts';
 
 const NOW = 1_700_000_000_000;
 
@@ -367,7 +368,15 @@ describe('medha ui dashboard & report', () => {
         env,
       );
     }
-    await runGuard({ dir: testDir, id: 'r1', namespace: 'team', ok: true }, env);
+    // The CLI refuses a guard with no name on an unguarded entity (gh-17), but the engine still
+    // accepts one and older stores hold them, so write it the way a library host would.
+    const opened = openHome(testDir);
+    await opened.engine.reportGuard(
+      { namespace: 'team', kind: 'rule', id: 'r1' },
+      { ok: true },
+      { now: env.now() },
+    );
+    await opened.engine.close();
 
     const server = await startUiServer({ dir: testDir, port: testPort, host: '127.0.0.1' }, env);
     const post = (body: unknown) =>

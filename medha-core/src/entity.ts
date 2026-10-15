@@ -82,6 +82,11 @@ export interface EntityState {
   readonly updater: UpdaterName;
   /** Author -> ledger (key `''` is anonymous). Absent unless the kind declares `signalLimits`. */
   readonly authors?: Readonly<Record<string, AuthorLedger>>;
+  /**
+   * Distinct authors of the failed trials, sorted (key `''` is anonymous). Absent unless the kind
+   * declares `thresholds.minDistinctAuthorsForRetired` above 1 (spec §6 step 5.1).
+   */
+  readonly rejectingAuthors?: readonly string[];
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
   /** The natural language note or rationale from the latest episode (if any). */

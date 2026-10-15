@@ -12,6 +12,7 @@ import { runCli } from './cli.ts';
 import type { Environment } from './environment.ts';
 import { type MedhaConfigV1, readConfig as readConfigOrNull, storeForConfig } from './layout.ts';
 import { serveMcp } from './mcp.ts';
+import { openHome } from './open.ts';
 import { VERSION } from './version.ts';
 
 /**
@@ -995,6 +996,114 @@ describe('medha write plane', () => {
     expect(lines.some((line) => /^ {4}#1 signal at \S+$/.test(line))).toBe(true);
   });
 
+  test('show and explain-threshold say when and why a status is latched (gh-20)', async () => {
+    const { env, out } = fresh();
+    await runCli(['init'], env);
+    const record = (signal: string, ensure = false) =>
+      runCli(['record', '--id', 'q1', '--signal', signal, ...(ensure ? ['--ensure'] : [])], env);
+    await record('REJECT_RULE', true);
+    for (let i = 0; i < 4; i++) await record('REJECT_RULE');
+    // Five failures pull the weight 0.4 below baseline: quarantined, which is not a latch.
+    let before = out().length;
+    expect(await runCli(['show', '--id', 'q1'], env)).toBe(0);
+    expect(out().slice(before)).toContain('status:   quarantined');
+    expect(out().slice(before)).not.toContain('latched:');
+
+    // The first success lifts the drift; the step leaving quarantine evaluates at T = 0 and stores
+    // probation (spec §9 status lag), so the next one, #6, is where the numbers retire it.
+    await record('APPLY');
+    for (let i = 0; i < 6; i++) await record('APPLY');
+    before = out().length;
+    expect(await runCli(['show', '--id', 'q1'], env)).toBe(0);
+    const show = out().slice(before);
+    expect(show).toContain('status:   retired');
+    expect(show).toContain('latched:  retired at #6 by evidence (2/7 successes)');
+    expect(show).toContain('retracts the failures behind it');
+
+    before = out().length;
+    expect(await runCli(['explain-threshold', '--id', 'q1', '--json'], env)).toBe(0);
+    const explain = JSON.parse(out().slice(before)) as { latch: { seq: number; cause: string } };
+    expect(explain.latch).toMatchObject({ seq: 6, cause: 'evidence' });
+  });
+
+  test('reinstate lifts a latch as one audited episode, and refuses an entity that is not latched (gh-22)', async () => {
+    const { env, out, err } = fresh();
+    await runCli(['init'], env);
+    expect(await runCli(['record', '--id', 'ok1', '--signal', 'APPLY', '--ensure'], env)).toBe(0);
+    expect(await runCli(['reinstate', '--id', 'ok1', '--reason', 'x'], env)).toBe(2);
+    expect(err()).toContain('a latched entity');
+
+    expect(await runCli(['record', '--id', 'r1', '--signal', 'APPLY', '--ensure'], env)).toBe(0);
+    // Retire it explicitly through the engine, as a sweep or host would.
+    const opened = openHome(env.cwd);
+    await opened.engine.override(
+      { namespace: '', kind: 'rule', id: 'r1' },
+      'retire',
+      { now: NOW },
+      'stale',
+    );
+    await opened.engine.close();
+
+    const before = out().length;
+    expect(
+      await runCli(['reinstate', '--id', 'r1', '--reason', 'reviewed: still right'], env),
+    ).toBe(0);
+    expect(out().slice(before)).toContain('reinstated rule/r1 (was retired since #2');
+    expect(await runCli(['show', '--id', 'r1', '--json'], env)).toBe(0);
+    const show = JSON.parse(out().slice(out().lastIndexOf('{\n  "home"'))) as {
+      detail: { latch?: unknown; recentEpisodes: { type: string; override?: string }[] };
+    };
+    expect(show.detail.latch).toBeUndefined();
+    expect(show.detail.recentEpisodes[0]).toMatchObject({ type: 'override', override: 'restore' });
+  });
+
+  test("retract --id refuses another entity's episode and warns when it lifts a latch (gh-22)", async () => {
+    const { env, err } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'a', '--signal', 'APPLY', '--ensure'], env); // #0
+    await runCli(['record', '--id', 'b', '--signal', 'REJECT_RULE', '--ensure'], env); // #1
+    for (let i = 0; i < 4; i++)
+      await runCli(['record', '--id', 'b', '--signal', 'REJECT_RULE'], env);
+    // b is now quarantined (five failures, weight 0.4 below baseline).
+    expect(await runCli(['retract', '--seq', '0', '--reason', 'x', '--id', 'b'], env)).toBe(2);
+    expect(err()).toContain('belongs to /rule/a');
+
+    // Quarantined since its third failure (#3): retracting later ones changes nothing, so no warning.
+    const retract = (seq: string) =>
+      runCli(['retract', '--seq', seq, '--reason', 'mis-recorded', '--id', 'b'], env);
+    let before = err().length;
+    expect(await retract('5')).toBe(0);
+    expect(await retract('4')).toBe(0);
+    expect(err().slice(before)).not.toContain('warning');
+    before = err().length;
+    expect(await retract('3')).toBe(0);
+    expect(err().slice(before)).toContain('took rule/b out of quarantined (now probation)');
+  });
+
+  test('list and pack take --ids so a host can keep stale entities out (gh-23)', async () => {
+    const { env, out, err } = fresh();
+    await runCli(['init'], env);
+    for (const id of ['live-a', 'live-b', 'deleted-c']) {
+      await runCli(['record', '--id', id, '--signal', 'APPLY', '--ensure'], env);
+    }
+    let before = out().length;
+    expect(await runCli(['list', '--ids', 'live-a, live-b', '--json'], env)).toBe(0);
+    const list = JSON.parse(out().slice(before)) as { page: { items: { key: { id: string } }[] } };
+    expect(list.page.items.map((i) => i.key.id).sort()).toEqual(['live-a', 'live-b']);
+
+    before = out().length;
+    expect(
+      await runCli(['pack', '--budget', '2000', '--ids', 'live-a', '--format', 'json'], env),
+    ).toBe(0);
+    const pack = JSON.parse(out().slice(before)) as {
+      outcome: { selected: { key: { id: string } }[] };
+    };
+    expect(pack.outcome.selected.map((s) => s.key.id)).toEqual(['live-a']);
+
+    expect(await runCli(['list', '--ids', ' , '], env)).toBe(2);
+    expect(err()).toContain('--ids');
+  });
+
   test('guard needs exactly one of --ok / --fail', async () => {
     const { env, err } = fresh();
     await runCli(['init'], env);
@@ -1002,6 +1111,29 @@ describe('medha write plane', () => {
     expect(await runCli(['guard', '--id', 'r1'], env)).toBe(2);
     expect(await runCli(['guard', '--id', 'r1', '--ok', '--guard', 'review'], env)).toBe(0);
     expect(err()).toContain('--ok/--fail');
+  });
+
+  test('guard without --guard is refused while the entity has no guard, not reported as passed (gh-17)', async () => {
+    const { env, out, err } = fresh();
+    await runCli(['init'], env);
+    await runCli(['record', '--id', 'g1', '--signal', 'APPLY', '--ensure'], env);
+    const guardFactorNow = async (): Promise<number> => {
+      const before = out().length;
+      expect(await runCli(['show', '--id', 'g1', '--json'], env)).toBe(0);
+      return JSON.parse(out().slice(before)).detail.hint.components.guard;
+    };
+
+    expect(await runCli(['guard', '--id', 'g1', '--ok'], env)).toBe(2);
+    expect(err()).toContain('--guard');
+    expect(err()).toContain('would not count');
+    expect(out()).not.toContain('guard passed');
+    expect(await guardFactorNow()).toBe(0.5);
+
+    // Once the entity has a guard, omitting --guard reuses it, and the report counts.
+    expect(await runCli(['guard', '--id', 'g1', '--ok', '--guard', 'harness'], env)).toBe(0);
+    expect(await guardFactorNow()).toBe(1);
+    expect(await runCli(['guard', '--id', 'g1', '--fail'], env)).toBe(0);
+    expect(await guardFactorNow()).toBe(0);
   });
 
   test('propose enters the entity on probation and requires --source', async () => {
@@ -1785,6 +1917,36 @@ describe('medha maintain plane', () => {
       preflight: { status: string };
     };
     expect(report.preflight.status).toBe('corrupt');
+  });
+
+  test('reads on a log that fails integrity fail loudly instead of answering from part of it (gh-18)', async () => {
+    const { env, out, err, home } = fresh();
+    expect(await runCli(['init', '--store', 'file'], env)).toBe(0);
+    await seedHome(env);
+    // The issue's repro: a log that no longer continues from seq 0.
+    const stateFile = join(home, 'state.jsonl');
+    const doc = JSON.parse(readFileSync(stateFile, 'utf8')) as { episodes: unknown[] };
+    doc.episodes = doc.episodes.slice(5);
+    writeFileSync(stateFile, JSON.stringify(doc));
+
+    for (const read of [
+      ['list'],
+      ['list', '--json'],
+      ['show', '--id', 't1'],
+      ['pack', '--budget', '500'],
+      ['drift'],
+      ['explain-threshold', '--id', 't1'],
+    ]) {
+      const before = err().length;
+      expect(await runCli(read, env), read.join(' ')).toBe(1);
+      expect(err().slice(before), read.join(' ')).toContain('STORE_LOG_CORRUPT');
+    }
+    expect(out()).not.toContain('medha: 0 entities');
+
+    // `status` is the health command: it reports the break and exits 1, like preflight.
+    const before = out().length;
+    expect(await runCli(['status'], env)).toBe(1);
+    expect(out().slice(before)).toContain('by status:  unavailable');
   });
 
   test('maintain compact folds history and names the folded range', async () => {

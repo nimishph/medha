@@ -109,6 +109,10 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .describe('Filter by lifecycle status.'),
         namespace: z.string().optional().describe('Filter by entity namespace.'),
         drifting: z.boolean().optional().describe('Filter to only drifting entities.'),
+        ids: z
+          .array(z.string())
+          .optional()
+          .describe('Only these entity ids (e.g. the rules your host still has).'),
         limit: z.number().int().positive().optional().describe('Page limit.'),
         cursor: z.string().optional().describe('Pagination cursor.'),
         compact: z
@@ -117,7 +121,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ kind, status, namespace, drifting, limit, cursor, compact }) =>
+    ({ kind, status, namespace, drifting, ids, limit, cursor, compact }) =>
       respond(async () => {
         const page = await engine.list(
           {
@@ -125,6 +129,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
             ...(status === undefined ? {} : { status: status as LifecycleStatus }),
             ...(namespace === undefined ? {} : { namespace }),
             ...(drifting === true ? { drifting: true } : {}),
+            ...(ids === undefined ? {} : { ids }),
           },
           { now: environment.now() },
           {
@@ -510,10 +515,19 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     'retract_episode',
     {
       description:
-        'Retract an erroneous episode by its sequence number, appending a masking retract episode.',
+        'Retract an erroneous episode by its sequence number, appending a masking retract episode. ' +
+        'Pass the entity (namespace/kind/id) so a mistyped seq that belongs to another entity is ' +
+        'refused. Do not use it to lift a quarantine or retirement: that is a human decision, and ' +
+        'the result says `lifted` when a retraction does it.',
       annotations: APPEND,
       inputSchema: {
         seq: z.number().int().nonnegative().describe('Sequence number of the episode to retract.'),
+        namespace: z.string().optional().describe('Entity namespace the episode must belong to.'),
+        kind: z
+          .string()
+          .optional()
+          .describe('Entity kind the episode must belong to. Default: rule.'),
+        id: z.string().optional().describe('Entity id the episode must belong to.'),
         reason: z.string().describe('Reason for retracting the episode.'),
         author: z.string().optional().describe('Author or agent identity retracting the episode.'),
         at: z
@@ -526,21 +540,27 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .describe('If true, return one-line hints and unindented JSON (fewer tokens).'),
       },
     },
-    ({ seq, reason, author, at, compact }) =>
+    ({ seq, namespace, kind, id, reason, author, at, compact }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
         const resolvedAuthor = resolveAuthor(author, environment.env);
+        const key =
+          id === undefined ? undefined : { namespace: namespace ?? '', kind: kind ?? 'rule', id };
         const outcome = await engine.retract(
           seq,
           reason,
           { now: effectiveNow },
-          { ...(resolvedAuthor === undefined ? {} : { author: resolvedAuthor }) },
+          {
+            ...(resolvedAuthor === undefined ? {} : { author: resolvedAuthor }),
+            ...(key === undefined ? {} : { key }),
+          },
         );
         return {
           retractedSeq: seq,
           reason,
           episode: outcome.episode,
           hint: compact === true ? compactHint(outcome.hint) : outcome.hint,
+          ...(outcome.lifted === undefined ? {} : { lifted: outcome.lifted }),
         };
       }, compact === true),
   );
@@ -569,12 +589,16 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     'pack_context',
     {
       description:
-        'Pack active and probation entities (rules, tools) into an evidential context window within a token budget.',
+        'Pack trusted, active and probation entities (rules, tools) into an evidential context window within a token budget; quarantined and retired ones are left out.',
       annotations: READ_ONLY,
       inputSchema: {
         budget: z.number().int().nonnegative().describe('Maximum token budget (e.g. 2000).'),
         kind: z.string().optional().describe('Filter by entity kind (default: rule).'),
         namespace: z.string().optional().describe('Filter by entity namespace.'),
+        ids: z
+          .array(z.string())
+          .optional()
+          .describe('Only these entity ids, so retired or deleted host rules are never packed.'),
         explorationRatio: z
           .number()
           .min(0)
@@ -588,7 +612,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .describe('Output format (default: markdown).'),
       },
     },
-    ({ budget, kind, namespace, explorationRatio, seed, format }) =>
+    ({ budget, kind, namespace, ids, explorationRatio, seed, format }) =>
       respond(async () => {
         const effectiveNow = environment.now();
         const outcome = await engine.pack(
@@ -596,6 +620,7 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
             budget,
             kind: kind ?? 'rule',
             ...(namespace === undefined ? {} : { namespace }),
+            ...(ids === undefined ? {} : { ids }),
             ...(explorationRatio === undefined ? {} : { explorationRatio }),
             ...(seed === undefined ? {} : { seed }),
           },

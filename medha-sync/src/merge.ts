@@ -1,12 +1,16 @@
 /**
  * Deterministic merge algorithms for episodes and entity states, spec §7.2.
  *
- * Guarantees mathematical commutativity, associativity, and idempotency:
+ * The episode merge is the one `medha sync` runs, and it is commutative, associative and
+ * idempotent:
  *   merge(A, B) === merge(B, A)
  *   merge(merge(A, B), C) === merge(A, merge(B, C))
  *   merge(A, A) === A
+ *
+ * The entity-state merge is weaker; see `mergeEntityStates`.
  */
 
+import { isDeepStrictEqual } from 'node:util';
 import {
   type Anchor,
   type EntityState,
@@ -199,9 +203,17 @@ export function mergeEpisodes(local: readonly Episode[], incoming: readonly Epis
 }
 
 /**
- * 2-way commutative merge of two EntityState arrays.
- * Combines evidence (k, n, contextRejects), sample-weighted EMA mu, union of anchors,
- * and latest guard outcome.
+ * 2-way commutative merge of two EntityState arrays, for hosts that hold folded states but not the
+ * logs behind them (`medha sync` merges episode logs instead). Combines evidence (k, n,
+ * contextRejects), sample-weighted EMA mu, union of anchors and `rejectingAuthors`, and latest
+ * guard outcome.
+ *
+ * States carry no record of which episodes they contain, so this cannot tell shared evidence from
+ * new evidence. It sums, except that two identical states are read as one observation (so
+ * `merge(A, A) === A`). Two consequences: replicas that independently reached exactly the same
+ * state are counted once, and the merge is not associative (`merge(merge(A, A), B)` is A+B, while
+ * `merge(A, merge(A, B))` is A+A+B). Merge each replica's state in once; when the logs are at hand,
+ * merge those. The Rust `merge_entity_states` must give the same result (rust-parity.test.ts).
  */
 export function mergeEntityStates(
   local: readonly EntityState[],
@@ -229,6 +241,11 @@ export function mergeEntityStates(
 }
 
 function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
+  // Idempotency: evidence is summed, so merging a state with a copy of itself would double it.
+  // Identical states are one observation, not two (the cost: two replicas that independently
+  // reached exactly the same state are also read as one).
+  if (isDeepStrictEqual(s1, s2)) return s1;
+
   const totalN = s1.evidence.n + s2.evidence.n;
   const totalK = s1.evidence.k + s2.evidence.k;
   const totalContextRejects = s1.evidence.contextRejects + s2.evidence.contextRejects;
@@ -270,6 +287,13 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
   const override = s1.override ?? s2.override ?? null;
   const retiredAt = s1.retiredAt ?? s2.retiredAt ?? null;
   const restoredAt = s1.restoredAt ?? s2.restoredAt ?? null;
+  const lastNote = s1.lastNote ?? s2.lastNote;
+  const authors = s1.authors ?? s2.authors;
+
+  const rejectingAuthors =
+    s1.rejectingAuthors || s2.rejectingAuthors
+      ? Array.from(new Set([...(s1.rejectingAuthors ?? []), ...(s2.rejectingAuthors ?? [])])).sort()
+      : undefined;
 
   // Lifecycle status
   let status: LifecycleStatus;
@@ -292,6 +316,9 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
         updater: s1.updater || s2.updater,
         createdAt: Math.min(s1.createdAt, s2.createdAt),
         lastSignalAt,
+        ...(rejectingAuthors ? { rejectingAuthors } : {}),
+        ...(authors ? { authors } : {}),
+        ...(lastNote !== undefined ? { lastNote } : {}),
       },
       updatedAt,
     );
@@ -318,5 +345,8 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
     updater: s1.updater || s2.updater,
     createdAt: Math.min(s1.createdAt, s2.createdAt),
     lastSignalAt,
+    ...(rejectingAuthors ? { rejectingAuthors } : {}),
+    ...(authors ? { authors } : {}),
+    ...(lastNote !== undefined ? { lastNote } : {}),
   };
 }

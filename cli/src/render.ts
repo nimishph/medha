@@ -1,3 +1,4 @@
+import type { StatusLatch } from '@cntxt-labs/medha';
 import type { EntityKey, ScoredDecisionCase } from '@cntxt-labs/medha-core';
 import { MedhaError } from '@cntxt-labs/medha-core';
 import { renderAgentFiles } from './agent-instructions.ts';
@@ -159,12 +160,32 @@ export function renderList(report: ListReport): string {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * The latch, in words (medha-x3g): without it, `retired, trust 0.000` beside a Wilson bound of 0.6
+ * reads like a bug rather than a decision.
+ */
+export function latchLines(latch: StatusLatch | undefined): string[] {
+  if (latch === undefined) return [];
+  const by =
+    latch.cause === 'evidence'
+      ? `by evidence (${latch.evidence.k}/${latch.evidence.n} successes)`
+      : `by ${latch.cause}`;
+  const lift = latch.liftedBy.includes('retract')
+    ? `a human restores it (medha reinstate) or retracts the failures behind it`
+    : `a human restores it (medha reinstate)`;
+  return [
+    `  latched:  ${latch.status} at #${latch.seq} ${by}; new evidence no longer changes its status or trust`,
+    `            lifted only when ${lift}`,
+  ];
+}
+
 export function renderShow(report: ShowReport): string {
   const { detail } = report;
   const h = detail.hint;
   const lines = [
     `medha: ${keyLabel(report.key)} ${detail.known ? '(known)' : '(unknown — probation prior)'}`,
     `  status:   ${h.status}`,
+    ...latchLines(detail.latch),
     `  trust:    ${fixed(h.trustScore)}  (wilson ${fixed(h.components.wilson)}, guard ${fixed(
       h.components.guard,
     )}, recency ${fixed(h.components.recency)}, durability ${fixed(
@@ -230,8 +251,12 @@ export function renderStatus(report: StatusReport): string {
     report.path === null ? `  store:      ephemeral (memory)` : `  store:      ${report.path}`,
     `  preflight:  ${p.status} — ${p.episodeCount} episodes, ${p.entityCount} entities, integrity ${p.integrity}`,
     `  last sweep: ${lastSweep}`,
-    `  by status:  ${byStatus}`,
-    `  drifting:   ${report.drifting}`,
+    ...(p.status === 'corrupt'
+      ? [
+          `  by status:  unavailable — the log is unrecoverable from seq ${p.location?.atSeq}; ` +
+            "run 'medha maintain preflight'",
+        ]
+      : [`  by status:  ${byStatus}`, `  drifting:   ${report.drifting}`]),
     `  registries: ${p.registries.kinds} kinds, ${p.registries.signals} signals, ${p.registries.anchors} anchors`,
     '  params:     read-only canonical defaults — run `medha params` to see them',
   ];
@@ -303,6 +328,7 @@ export function renderExplainThreshold(report: ExplainReport): string {
   const lines = [
     `medha: thresholds for ${keyLabel(report.key)} (${report.known ? 'known' : 'probation prior'})`,
     `  trust:    ${fixed(report.hint.trustScore)}  status: ${report.hint.status}`,
+    ...latchLines(report.latch),
   ];
   for (const gate of report.gates) {
     lines.push(`  ${gate.name}: ${gate.met ? 'MET' : 'not met'}`);

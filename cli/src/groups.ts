@@ -28,6 +28,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
       'retract',
       'remove-episode',
       'override',
+      'reinstate',
     ],
   },
   {

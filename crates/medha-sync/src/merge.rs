@@ -1,6 +1,6 @@
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
 use medha_core::round::round6;
-use medha_core::thresholds::{DEFAULT_THETA0, RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS};
+use medha_core::thresholds::{RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS};
 use medha_core::types::{Anchor, CoreError, EntityKey, LifecycleStatus, RecencyConfig, Thresholds};
 use medha_store::{EntityState, Episode, EpisodeInput, EpisodePayload};
 use std::collections::{HashMap, HashSet};
@@ -83,10 +83,20 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
         EpisodePayload::Proposal {
             provenance,
             description,
+            evidence_refs,
+            promoted,
             ..
         } => {
             parts.push(provenance.clone());
             parts.push(description.clone().unwrap_or_default());
+            if let Some(refs) = evidence_refs {
+                let mut sorted_refs = refs.clone();
+                sorted_refs.sort();
+                parts.push(sorted_refs.join(","));
+            }
+            if let Some(p) = promoted {
+                parts.push(p.to_string());
+            }
         }
         EpisodePayload::Sweep { action, reason } => {
             parts.push(action.clone());
@@ -103,15 +113,10 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
             parts.push(retract_target.to_string());
             parts.push(reason.clone());
         }
-        EpisodePayload::Define {
-            title,
-            tags,
-            rationale,
-            ..
-        } => {
-            parts.push(title.clone().unwrap_or_default());
-            parts.push(rationale.clone().unwrap_or_default());
-            let mut sorted_tags = tags.clone().unwrap_or_default();
+        EpisodePayload::Define { definition } => {
+            parts.push(definition.title.clone());
+            parts.push(definition.rationale.clone());
+            let mut sorted_tags = definition.tags.clone().unwrap_or_default();
             sorted_tags.sort();
             parts.push(sorted_tags.join(","));
         }
@@ -120,6 +125,7 @@ fn content_key(key: &EntityKey, at: i64, payload: &EpisodePayload, retract_targe
             parent_id,
             condition,
             decision,
+            ..
         } => {
             parts.push(case_id.clone());
             parts.push(parent_id.clone().unwrap_or_default());
@@ -281,6 +287,11 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
         .collect()
 }
 
+/// Merges two lists of folded entity states, for hosts that hold states but not the logs behind
+/// them (`medha sync` merges episode logs instead). The same as the TypeScript `mergeEntityStates`
+/// (rust-parity.test.ts checks it), and with its limits: states record no episode ids, so evidence
+/// is summed except that two identical states count once. Replicas that independently reached the
+/// same state are therefore counted once, and the merge is not associative.
 pub fn merge_entity_states(
     local: &[EntityState],
     incoming: &[EntityState],
@@ -307,6 +318,13 @@ pub fn merge_entity_states(
 }
 
 fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState, CoreError> {
+    // Idempotency: evidence is summed, so merging a state with a copy of itself would double it.
+    // Identical states are one observation, not two (the cost: two replicas that independently
+    // reached exactly the same state are also read as one).
+    if s1 == s2 {
+        return Ok(s1.clone());
+    }
+
     let total_n = s1.evidence.n + s2.evidence.n;
     let total_k = s1.evidence.k + s2.evidence.k;
     let total_context_rejects = s1.evidence.context_rejects + s2.evidence.context_rejects;
@@ -318,14 +336,13 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
     };
     let merged_mu = round6(merged_mu.clamp(0.0, 1.0))?;
 
-    let updated_at = match (s1.last_signal_at, s2.last_signal_at) {
-        (Some(t1), Some(t2)) => Some(t1.max(t2)),
-        (Some(t1), None) => Some(t1),
-        (None, Some(t2)) => Some(t2),
-        (None, None) => None,
-    };
+    // As the TypeScript reference: the EMA's clock (which every signal moves, unlike
+    // `last_signal_at`) is both the merged EMA's and the instant the merged status is judged at.
+    let updated_at = s1.ema.updated_at.max(s2.ema.updated_at);
 
-    let theta0 = DEFAULT_THETA0;
+    // The local replica's baseline. Resetting it to the default would move the drift reference,
+    // and with it quarantine, for an entity whose baseline was set by a `baseline` episode.
+    let theta0 = s1.ema.theta0;
 
     // Merge anchors uniquely
     let mut anchor_set: HashSet<String> = HashSet::new();
@@ -356,11 +373,13 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         }
         (Some(_), None) => s1.guard.clone(),
         (None, Some(_)) => s2.guard.clone(),
+        // Neither was reported with a time: the incoming guard only when it has a result and
+        // the local one has none.
         (None, None) => {
-            if s1.guard.last_ok.is_some() {
-                s1.guard.clone()
-            } else {
+            if s1.guard.last_ok.is_none() && s2.guard.last_ok.is_some() {
                 s2.guard.clone()
+            } else {
+                s1.guard.clone()
             }
         }
     };
@@ -396,14 +415,16 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
                 ema: &medha_core::types::EmaState {
                     mu: merged_mu,
                     theta0,
+                    updated_at,
                     sample_count: (total_n.round() as u64),
                 },
                 last_signal_at,
-                now: updated_at.unwrap_or(0),
+                now: updated_at,
                 stored_status: LifecycleStatus::Probation,
                 status_override,
                 thresholds: &thresholds,
                 recency_config: &recency_config,
+                rejecting_authors: None,
             })?;
             computation.status
         };
@@ -420,15 +441,30 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         ema: medha_core::types::EmaState {
             mu: merged_mu,
             theta0,
+            updated_at,
             sample_count: (total_n.round() as u64),
         },
         status,
         status_override,
+        retired_at: s1.retired_at.or(s2.retired_at),
+        restored_at: s1.restored_at.or(s2.restored_at),
+        created_at: s1.created_at.min(s2.created_at),
         last_signal_at,
         updater: if !s1.updater.is_empty() {
             s1.updater.clone()
         } else {
             s2.updater.clone()
+        },
+        last_note: s1.last_note.clone().or_else(|| s2.last_note.clone()),
+        authors: s1.authors.clone().or_else(|| s2.authors.clone()),
+        rejecting_authors: match (&s1.rejecting_authors, &s2.rejecting_authors) {
+            (None, None) => None,
+            (a, b) => {
+                let mut all: Vec<String> = a.iter().chain(b.iter()).flatten().cloned().collect();
+                all.sort();
+                all.dedup();
+                Some(all)
+            }
         },
         decision_tree: s1.decision_tree.clone(),
     })

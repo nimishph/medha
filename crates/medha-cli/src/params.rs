@@ -18,141 +18,121 @@ pub struct ParamsReport {
     pub params: Vec<ParamEntry>,
 }
 
-const SOURCE_EMA: &str = "medha-core: ema.ts";
-const SOURCE_SWEEP: &str = "medha: maintenance.ts";
-const SOURCE_THRESHOLDS: &str = "medha-core: thresholds.ts";
+use medha::core::thresholds::{
+    ACTIVE_THRESHOLD, DEFAULT_EMA_ALPHA, DEFAULT_THETA0, DRIFT_THRESHOLD, DURABILITY_GAIN,
+    DURABILITY_MAX, MIN_DISTINCT_AUTHORS_FOR_RETIRED, MIN_SAMPLES_FOR_DRIFT, MIN_USES_FOR_RETIRED,
+    MIN_USES_FOR_TRUSTED, RECENCY_FLOOR, RECENCY_HALF_LIFE_DAYS, RETIRED_TRUST_THRESHOLD,
+    SKIP_SIGNAL, TRUSTED_THRESHOLD, TRUST_SPEC_VERSION, UNGUARDED_TRUST_CEILING, WILSON_Z,
+};
 
+const SOURCE_THRESHOLDS: &str = "medha-core: thresholds.rs";
+
+fn param(name: &str, value: serde_json::Value, doc: &str) -> ParamEntry {
+    ParamEntry {
+        name: name.to_string(),
+        value,
+        unit: None,
+        source: SOURCE_THRESHOLDS.to_string(),
+        doc: doc.to_string(),
+    }
+}
+
+/// The parameter catalog, read from the constants the kernel uses: a hand-typed table drifted from
+/// them (it listed trusted 0.85 and active 0.50 against 0.6 and 0.25 in the kernel, gh-19).
 pub fn params_report(as_of: i64) -> ParamsReport {
+    use serde_json::json;
     ParamsReport {
         as_of,
-        note: "read-only: model parameters are canonical constants in medha-core — the lean engine has no mutable params store".to_string(),
+        note: format!(
+            "read-only: model parameters are canonical constants in medha-core \
+             (trust spec {TRUST_SPEC_VERSION}); per-kind overrides live in config.json"
+        ),
         params: vec![
-            ParamEntry {
-                name: "WILSON_Z".to_string(),
-                value: serde_json::json!(1.959964),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Normal quantile, 95% confidence".to_string(),
-            },
-            ParamEntry {
-                name: "TRUSTED_THRESHOLD".to_string(),
-                value: serde_json::json!(0.85),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Trust at/above this may become trusted (with guard 1.0 and enough uses)".to_string(),
-            },
-            ParamEntry {
-                name: "MIN_USES_FOR_TRUSTED".to_string(),
-                value: serde_json::json!(3),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Minimum trials before trusted is reachable".to_string(),
-            },
-            ParamEntry {
-                name: "ACTIVE_THRESHOLD".to_string(),
-                value: serde_json::json!(0.50),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Trust at/above this may become active".to_string(),
-            },
-            ParamEntry {
-                name: "RETIRED_TRUST_THRESHOLD".to_string(),
-                value: serde_json::json!(0.20),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Trust below this retires an entity".to_string(),
-            },
-            ParamEntry {
-                name: "UNGUARDED_TRUST_CEILING".to_string(),
-                value: serde_json::json!(0.85),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Hard ceiling on the trust of an unguarded entity (IV)".to_string(),
-            },
-            ParamEntry {
-                name: "SKIP_SIGNAL".to_string(),
-                value: serde_json::json!(0.0),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Neutral skip signal value".to_string(),
-            },
-            ParamEntry {
-                name: "RECENCY_HALF_LIFE_DAYS".to_string(),
-                value: serde_json::json!(30.0),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Recency decay half-life in days".to_string(),
-            },
-            ParamEntry {
-                name: "RECENCY_FLOOR".to_string(),
-                value: serde_json::json!(0.10),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Recency retention floor".to_string(),
-            },
-            ParamEntry {
-                name: "DURABILITY_GAIN".to_string(),
-                value: serde_json::json!(0.05),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Durability gain per distinct anchor".to_string(),
-            },
-            ParamEntry {
-                name: "DURABILITY_MAX".to_string(),
-                value: serde_json::json!(1.50),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Durability multiplier ceiling".to_string(),
-            },
-            ParamEntry {
-                name: "DEFAULT_THETA0".to_string(),
-                value: serde_json::json!(0.50),
-                unit: None,
-                source: SOURCE_THRESHOLDS.to_string(),
-                doc: "Author-declared baseline prior for a fresh entity".to_string(),
-            },
-            ParamEntry {
-                name: "DEFAULT_EMA_ALPHA".to_string(),
-                value: serde_json::json!(0.20),
-                unit: None,
-                source: SOURCE_EMA.to_string(),
-                doc: "Default EMA smoothing parameter".to_string(),
-            },
-            ParamEntry {
-                name: "MIN_SAMPLES_FOR_DRIFT".to_string(),
-                value: serde_json::json!(3),
-                unit: None,
-                source: SOURCE_EMA.to_string(),
-                doc: "Minimum trials before drift is detectable".to_string(),
-            },
-            ParamEntry {
-                name: "DRIFT_THRESHOLD".to_string(),
-                value: serde_json::json!(0.15),
-                unit: None,
-                source: SOURCE_EMA.to_string(),
-                doc: "|mu - theta0| at/above this flags drift".to_string(),
-            },
-            ParamEntry {
-                name: "DEFAULT_SWEEP_INTERVAL_MS".to_string(),
-                value: serde_json::json!(86400000),
-                unit: Some("ms".to_string()),
-                source: SOURCE_SWEEP.to_string(),
-                doc: "Session-start sweep cadence".to_string(),
-            },
-            ParamEntry {
-                name: "DEFAULT_FOLD_DAYS".to_string(),
-                value: serde_json::json!(14),
-                unit: Some("days".to_string()),
-                source: SOURCE_SWEEP.to_string(),
-                doc: "Episodes older than this fold into baselines".to_string(),
-            },
-            ParamEntry {
-                name: "DEFAULT_RETENTION_DAYS".to_string(),
-                value: serde_json::json!(90),
-                unit: Some("days".to_string()),
-                source: SOURCE_SWEEP.to_string(),
-                doc: "Stale entities older than this are retired".to_string(),
-            },
+            param(
+                "WILSON_Z",
+                json!(WILSON_Z),
+                "Normal quantile, 95% confidence",
+            ),
+            param(
+                "TRUSTED_THRESHOLD",
+                json!(TRUSTED_THRESHOLD),
+                "Trust at/above this may become trusted (with guard 1.0 and enough uses)",
+            ),
+            param(
+                "MIN_USES_FOR_TRUSTED",
+                json!(MIN_USES_FOR_TRUSTED),
+                "Minimum trials before trusted is reachable",
+            ),
+            param(
+                "ACTIVE_THRESHOLD",
+                json!(ACTIVE_THRESHOLD),
+                "Trust at/above this may become active",
+            ),
+            param(
+                "RETIRED_TRUST_THRESHOLD",
+                json!(RETIRED_TRUST_THRESHOLD),
+                "Undecayed trust (Wilson bound x guard) below this retires an entity",
+            ),
+            param(
+                "MIN_USES_FOR_RETIRED",
+                json!(MIN_USES_FOR_RETIRED),
+                "Minimum trials before an entity can be retired by trust",
+            ),
+            param(
+                "MIN_DISTINCT_AUTHORS_FOR_RETIRED",
+                json!(MIN_DISTINCT_AUTHORS_FOR_RETIRED),
+                "Distinct authors needed among the failed trials before retirement (1: none)",
+            ),
+            param(
+                "UNGUARDED_TRUST_CEILING",
+                json!(UNGUARDED_TRUST_CEILING),
+                "Hard ceiling on the trust of an unguarded entity (IV)",
+            ),
+            param(
+                "SKIP_SIGNAL",
+                json!(SKIP_SIGNAL),
+                "Neutral skip signal value",
+            ),
+            param(
+                "RECENCY_HALF_LIFE_DAYS",
+                json!(RECENCY_HALF_LIFE_DAYS),
+                "Recency decay half-life in days",
+            ),
+            param(
+                "RECENCY_FLOOR",
+                json!(RECENCY_FLOOR),
+                "Recency retention floor",
+            ),
+            param(
+                "DURABILITY_GAIN",
+                json!(DURABILITY_GAIN),
+                "Durability gain per distinct anchor",
+            ),
+            param(
+                "DURABILITY_MAX",
+                json!(DURABILITY_MAX),
+                "Durability multiplier ceiling",
+            ),
+            param(
+                "DEFAULT_THETA0",
+                json!(DEFAULT_THETA0),
+                "Author-declared baseline prior for a fresh entity",
+            ),
+            param(
+                "DEFAULT_EMA_ALPHA",
+                json!(DEFAULT_EMA_ALPHA),
+                "Default EMA smoothing parameter",
+            ),
+            param(
+                "MIN_SAMPLES_FOR_DRIFT",
+                json!(MIN_SAMPLES_FOR_DRIFT),
+                "Minimum trials before drift is detectable",
+            ),
+            param(
+                "DRIFT_THRESHOLD",
+                json!(DRIFT_THRESHOLD),
+                "|mu - theta0| at/above this flags drift",
+            ),
         ],
     }
 }

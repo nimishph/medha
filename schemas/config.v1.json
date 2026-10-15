@@ -139,8 +139,14 @@
                   "minUsesForRetired": {
                     "type": "integer",
                     "minimum": 1,
-                    "default": 3,
-                    "description": "Minimum trial count before low trust triggers retirement (default 3)."
+                    "default": 5,
+                    "description": "Minimum trial count before low trust triggers retirement (default 5)."
+                  },
+                  "minDistinctAuthorsForRetired": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1,
+                    "description": "Distinct authors needed among the failed trials before retirement (default 1: no requirement)."
                   },
                   "retiredTrustThreshold": {
                     "type": "number",

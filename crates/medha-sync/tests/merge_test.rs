@@ -190,6 +190,45 @@ fn test_dedupes_same_retraction_under_different_numbering() {
 }
 
 #[test]
+fn test_merge_entity_states_is_idempotent() {
+    let a = EntityState {
+        key: EntityKey::new("", "rule", "rule-1"),
+        evidence: medha_core::types::Evidence {
+            k: 4.0,
+            n: 4.0,
+            context_rejects: 0,
+        },
+        guard: medha_core::types::GuardState {
+            kind: "ast".to_string(),
+            last_ok: Some(true),
+            last_ok_at: Some(1000),
+        },
+        anchors: vec![Anchor::new("git-head", "sha-1")],
+        ema: medha_core::types::EmaState {
+            mu: 0.7,
+            theta0: 0.5,
+            updated_at: 0,
+            sample_count: 4,
+        },
+        status: LifecycleStatus::Probation,
+        status_override: None,
+        retired_at: None,
+        restored_at: None,
+        created_at: 0,
+        last_signal_at: Some(1000),
+        updater: "ema".to_string(),
+        last_note: None,
+        authors: None,
+        rejecting_authors: None,
+        decision_tree: Vec::new(),
+    };
+
+    let merged =
+        merge_entity_states(std::slice::from_ref(&a), std::slice::from_ref(&a)).expect("merge ok");
+    assert_eq!(merged, vec![a]);
+}
+
+#[test]
 fn test_merge_entity_states() {
     let s1 = EntityState {
         key: EntityKey::new("", "rule", "rule-1"),
@@ -207,12 +246,19 @@ fn test_merge_entity_states() {
         ema: medha_core::types::EmaState {
             mu: 0.8,
             theta0: 0.5,
+            updated_at: 0,
             sample_count: 10,
         },
         status: LifecycleStatus::Active,
         status_override: None,
+        retired_at: None,
+        restored_at: None,
+        created_at: 0,
         last_signal_at: Some(1000),
         updater: "ema".to_string(),
+        last_note: None,
+        authors: None,
+        rejecting_authors: None,
         decision_tree: Vec::new(),
     };
 
@@ -232,12 +278,19 @@ fn test_merge_entity_states() {
         ema: medha_core::types::EmaState {
             mu: 0.4,
             theta0: 0.5,
+            updated_at: 0,
             sample_count: 10,
         },
         status: LifecycleStatus::Probation,
         status_override: None,
+        retired_at: None,
+        restored_at: None,
+        created_at: 0,
         last_signal_at: Some(2000),
         updater: "ema".to_string(),
+        last_note: None,
+        authors: None,
+        rejecting_authors: None,
         decision_tree: Vec::new(),
     };
 

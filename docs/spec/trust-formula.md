@@ -1,6 +1,6 @@
 # Medha trust formula — specification
 
-**Spec version: 1.4.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
+**Spec version: 2.0.0** (`TRUST_SPEC_VERSION`; conformance vectors carry the version they target.)
 
 This document is the normative definition of how Medha turns an entity's history into a trust
 score, a lifecycle status, and the threshold gates. A port (Python, Go, …) is conformant when it
@@ -52,10 +52,11 @@ matches every vector.
 | `DRIFT_THRESHOLD` | 0.4 | \|μ − θ₀\| that flags drift |
 | `DEFAULT_THETA0` | 0.5 | baseline prior of a fresh entity |
 | `RETIRED_TRUST_THRESHOLD` | 0.1 | undecayed trust below which an entity retires |
-| `MIN_USES_FOR_RETIRED` | 3 | trials before retirement by trust |
+| `MIN_USES_FOR_RETIRED` | 5 | trials before retirement by trust (since 2.0.0; was 3) |
+| `MIN_DISTINCT_AUTHORS_FOR_RETIRED` | 1 | distinct authors of failed trials before retirement (1: no requirement) |
 
 A **kind spec** may override, per kind: `thresholds.{trusted, minUsesForTrusted, active,
-unguardedCeiling, minUsesForRetired, retiredTrustThreshold}`, `recency.{halfLifeDays, floor}`,
+unguardedCeiling, minUsesForRetired, retiredTrustThreshold, minDistinctAuthorsForRetired}`, `recency.{halfLifeDays, floor}`,
 `evidenceWeighting` (`'count'` default | `'signal-value'`), and `signalLimits` (§9.1, off by
 default). Overrides replace the default for that
 kind only; unspecified fields keep the defaults above.
@@ -63,7 +64,9 @@ kind only; unspecified fields keep the defaults above.
 ## 3. Entity state (inputs to the formula)
 
 `evidence.{k, n, contextRejects}`, `guard.{kind, lastOk, lastOkAt}`, `anchors[]`,
-`ema.{mu, theta0}`, `lastSignalAt` (nullable), `status`, `override` (nullable).
+`ema.{mu, theta0}`, `lastSignalAt` (nullable), `status`, `override` (nullable), and
+`rejectingAuthors` (sorted distinct author keys; kept only when the kind sets
+`minDistinctAuthorsForRetired` above 1, §9).
 
 ## 4. Components
 
@@ -142,8 +145,12 @@ Evaluated in this order; the first match wins (`statusFrom`):
 3. guard failed (`kind` guarded and `lastOk == false`) → `quarantined`.
 4. drifting **downward** (§7, `isDriftingDown`) → `quarantined`.
 5. `statusForTrust`:
-   1. `n >= minUsesForRetired` **and** `L · G < retiredTrustThreshold` → `retired`
-      (uses the *undecayed* product: age alone never retires).
+   1. `n >= minUsesForRetired` **and** `L · G < retiredTrustThreshold` **and** the failed trials
+      come from at least `minDistinctAuthorsForRetired` distinct authors (`|rejectingAuthors|`;
+      vacuous at the default 1) → `retired` (uses the *undecayed* product: age alone never retires).
+      Retirement latches (step 2): new evidence never lifts it, only a `restore` override or
+      retracting the failures behind it. So the bar is the same trial count as `trusted`: three
+      trials let one bad week retire a cold-start rule.
    2. `T >= trusted` **and** `n >= minUsesForTrusted` **and** the guard passed (guarded kind with
       `lastOk == true`) → `trusted`. An unguarded entity is never `trusted`, even if it carries
       `lastOk == true` from a report against kind `none` and a per-kind threshold is low enough.
@@ -202,8 +209,12 @@ Applying a signal `s` at time `t`:
   `k = round6(k + (countsAsSuccess ? max(0, value) : 0))`.
 - `contextRejects += 1` when the signal is `REJECT_CONTEXT`.
 - `mu = emaStep(mu, value, alpha)`.
-- `lastSignalAt = t`, **except** `SKIP`, which leaves it unchanged (Invariant III: SKIP never
-  counts as evidence and never refreshes recency).
+- `lastSignalAt = t` when `countsAsSuccess` (since 1.5.0); other signals leave it unchanged, so
+  `SKIP` never refreshes recency (Invariant III) and a failure never makes a dormant entity look
+  recent.
+- On a failed trial (`countsAsTrial` and not `countsAsSuccess`), when the kind sets
+  `minDistinctAuthorsForRetired` above 1, add the episode's `author` (`""` when absent) to
+  `rejectingAuthors` (since 2.0.0). With the default, no such state is kept.
 - On `countsAsSuccess`, merge the incoming anchors (or the week fallback) into `anchors`.
 - Recompute `status` per §6 at time `t`, **on the entity carrying its previous stored status**.
   Because §5 forces `T = 0` for a stored `quarantined`/`retired` status, the step that leaves
@@ -410,6 +421,7 @@ fields or new signals that leave existing vectors unchanged are **minor**. Wordi
 
 | Version | Change |
 | --- | --- |
+| 2.0.0 | `MIN_USES_FOR_RETIRED` 3 → 5, the same bar as `trusted`: one accept and two rejections retired a cold-start rule for good (gh-21). New per-kind `thresholds.minDistinctAuthorsForRetired` (default 1, off): retirement by trust also needs that many distinct authors among the failed trials, tracked as `rejectingAuthors` (§3, §6 step 5.1, §9). Major: `limits-never-throttle-negative` now ends `quarantined` (drift down at the fourth failure precedes retirement at the fifth); new vectors `retire-needs-min-uses`, `cold-start-not-retired-by-two-rejections`, `retire-needs-distinct-authors`, `retire-distinct-authors-met`, `rejecting-authors-ignore-successes-and-context`. Also: §9 now states the 1.5.0 recency rule. |
 | 1.5.0 | Recency refresh is gated on `countsAsSuccess: true`; `REJECT_RULE` no longer resets `lastSignalAt`, preserving trust monotonicity on dormant entities upon failure (medha-s7z.6). |
 | 1.4.0 | Decision-tree write-time validation is now normative (§11a.2): an explicitly supplied `caseId` must exist, and a `parentId` that is unknown, self-referential, or a descendant is refused, as is a sibling-duplicate condition. `detach` promotes a branch to the root, and an omitted `parentId` on an edit inherits rather than clears. Added `parentInheritance` vectors. §11a.4 states that the `human:` gate is advisory and that writer-facing text must not instruct a writer to pass it. No vector's expected trust/status output changed — hence minor. |
 | 1.3.0 | Drift gained an explicit direction; quarantine is gated on drift **down** only, so an entity that is diverging *upward* is no longer quarantined. `medha sweep` no longer retires on age or recency alone. |

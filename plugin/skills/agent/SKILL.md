@@ -77,7 +77,8 @@ A kind can carry its own policy. Set it at init with `medha init --config <file>
 ```
 
 - Allowed keys: `name`, `description`, `thresholds` (`active`, `trusted`, `minUsesForTrusted`,
-  `retiredTrustThreshold`, `minUsesForRetired`, `unguardedCeiling`), `recency` (`halfLifeDays`,
+  `retiredTrustThreshold`, `minUsesForRetired`, `minDistinctAuthorsForRetired`, `unguardedCeiling`),
+  `recency` (`halfLifeDays`,
   `floor`), `evidenceWeighting` (`count` | `signal-value`), `signalLimits` (`minIntervalMs`,
   `maxSuccessesPerAuthor`), `decisionPolicy` (`requireHumanFor`). An unknown key is an error.
 - A spec for a new kind registers it too; built-in kinds stay. Omitted fields keep their defaults.
@@ -131,6 +132,14 @@ replacement for it, so an entity can be `probation` while one branch is `trusted
 
 `probation → active → trusted`, and down to `quarantined` / `retired` on repeated rejection.
 `drift` lists entities whose recent behavior diverges from their baseline.
+
+- `quarantined` is a pause: it lifts by itself when a guard passes or the weight recovers.
+- `retired` is a latch: recording successes never brings it back, and you should not try. If you
+  think a retired rule is right, tell a human; only they lift it (`medha reinstate`, or retracting
+  the failures). `show` prints `latched:` with the episode that set it.
+- Never retract episodes to lift a quarantine or retirement yourself. Pass the entity to
+  `retract_episode` (`id`, plus `kind`/`namespace`) so a wrong seq is refused; if its result says
+  `lifted`, tell the human.
 
 ## Rules of thumb
 

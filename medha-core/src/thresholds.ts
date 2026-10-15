@@ -6,7 +6,7 @@
  */
 
 /** Version of docs/spec/trust-formula.md this kernel implements; conformance vectors target it. */
-export const TRUST_SPEC_VERSION = '1.5.0';
+export const TRUST_SPEC_VERSION = '2.0.0';
 
 /** Normal distribution quantile, 95% confidence. */
 export const WILSON_Z = 1.96;
@@ -53,8 +53,14 @@ export const DEFAULT_THETA0 = 0.5;
 /** Trust below this retires an entity (equivalently, the floor before quarantine). */
 export const RETIRED_TRUST_THRESHOLD = 0.1;
 
-/** Minimum trials before an entity can be retired by trust (requires repeated evidence of failure). */
-export const MIN_USES_FOR_RETIRED = 3;
+/**
+ * Minimum trials before an entity can be retired by trust (requires repeated evidence of failure).
+ * The same bar as `trusted` (spec 2.0.0): three trials let one bad week retire a cold-start rule.
+ */
+export const MIN_USES_FOR_RETIRED = 5;
+
+/** Distinct rejecting authors needed before retirement by trust; 1 means no author requirement. */
+export const MIN_DISTINCT_AUTHORS_FOR_RETIRED = 1;
 
 /** Milliseconds in one sidereal-ish week (7 days). Used for the anchor fallback epoch. */
 export const WEEK_MS = 7 * 24 * 60 * 60 * 1000;

@@ -20,6 +20,7 @@ import {
   type Medha,
   type PreflightReport,
   type ScoredDecisionCase,
+  type StatusLatch,
 } from '@cntxt-labs/medha';
 import {
   ACTIVE_THRESHOLD,
@@ -34,7 +35,9 @@ import {
   InvalidArgumentError,
   type KindSpec,
   type LifecycleStatus,
+  MIN_DISTINCT_AUTHORS_FOR_RETIRED,
   MIN_SAMPLES_FOR_DRIFT,
+  MIN_USES_FOR_RETIRED,
   MIN_USES_FOR_TRUSTED,
   type Page,
   RECENCY_FLOOR,
@@ -92,8 +95,22 @@ export interface ListOptions {
   readonly status?: string;
   readonly namespace?: string;
   readonly drifting?: boolean;
+  /** Comma-separated entity ids (gh-23). */
+  readonly ids?: string;
   readonly limit?: string;
   readonly cursor?: string;
+}
+
+/** `--ids a,b,c` → the ids; an empty list is refused rather than matching nothing (gh-23). */
+export function parseIds(raw: string): readonly string[] {
+  const ids = raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id !== '');
+  if (ids.length === 0) {
+    throw new InvalidArgumentError('--ids', 'a comma-separated list of entity ids', raw);
+  }
+  return ids;
 }
 
 export interface ListReport {
@@ -113,6 +130,7 @@ export async function runList(options: ListOptions, environment: Environment): P
       ...(options.status === undefined ? {} : { status: requireStatus(options.status) }),
       ...(options.namespace === undefined ? {} : { namespace: options.namespace }),
       ...(options.drifting === undefined ? {} : { drifting: options.drifting }),
+      ...(options.ids === undefined ? {} : { ids: parseIds(options.ids) }),
     };
     const request =
       options.limit === undefined
@@ -219,10 +237,9 @@ export async function runStatus(
   const opened = openHome(options.dir ?? environment.cwd, options.home);
   try {
     const now = environment.now();
-    const [preflight, all] = await Promise.all([
-      opened.engine.preflight({ now }),
-      pageAll(opened.engine, now),
-    ]);
+    const preflight = await opened.engine.preflight({ now });
+    // A corrupt store cannot answer from the evidence (gh-18): report it, and count nothing.
+    const all = preflight.status === 'corrupt' ? [] : await pageAll(opened.engine, now);
     const byStatus = Object.fromEntries(
       LIFECYCLE_STATUSES.map((status) => [
         status,
@@ -348,7 +365,19 @@ export function paramsReport(asOf: number, kindSpecs?: readonly KindSpec[]): Par
         name: 'RETIRED_TRUST_THRESHOLD',
         value: RETIRED_TRUST_THRESHOLD,
         source: SOURCE_THRESHOLDS,
-        doc: 'Trust below this retires an entity',
+        doc: 'Undecayed trust (Wilson bound x guard) below this retires an entity',
+      },
+      {
+        name: 'MIN_USES_FOR_RETIRED',
+        value: MIN_USES_FOR_RETIRED,
+        source: SOURCE_THRESHOLDS,
+        doc: 'Minimum trials before an entity can be retired by trust',
+      },
+      {
+        name: 'MIN_DISTINCT_AUTHORS_FOR_RETIRED',
+        value: MIN_DISTINCT_AUTHORS_FOR_RETIRED,
+        source: SOURCE_THRESHOLDS,
+        doc: 'Distinct authors needed among the failed trials before retirement (1: none)',
       },
       {
         name: 'UNGUARDED_TRUST_CEILING',
@@ -514,6 +543,8 @@ export interface ExplainReport {
   readonly known: boolean;
   readonly hint: EvidentialHint;
   readonly gates: readonly ThresholdGate[];
+  /** Set while the status holds whatever new evidence says (medha-x3g). */
+  readonly latch?: StatusLatch | undefined;
   /** Medha never decides — it reports which thresholds clear and why. */
   readonly note: string;
 }
@@ -555,6 +586,7 @@ export async function runExplainThreshold(
       known: detail.known,
       hint,
       gates,
+      ...(detail.latch === undefined ? {} : { latch: detail.latch }),
       note: 'Medha reports which thresholds clear and why; it never decides for the host.',
     };
   } finally {

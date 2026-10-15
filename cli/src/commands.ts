@@ -29,6 +29,7 @@ import {
   primerCommandArgs,
   proposeCommandArgs,
   recordCommandArgs,
+  reinstateCommandArgs,
   removeEpisodeCommandArgs,
   reportCommandArgs,
   retractCommandArgs,
@@ -84,13 +85,16 @@ import {
   renderGuard,
   renderPropose,
   renderRecord,
+  renderReinstate,
   renderRemoveEpisode,
   renderRetract,
+  retractWarning,
   runDecision,
   runDefine,
   runGuard,
   runPropose,
   runRecord,
+  runReinstate,
   runRemoveEpisode,
   runRetract,
 } from './write.ts';
@@ -159,6 +163,7 @@ export const listCommand = defineCommand({
         ...(args.status === undefined ? {} : { status: args.status }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
         ...(args.drifting === true ? { drifting: true } : {}),
+        ...(args.ids === undefined ? {} : { ids: args.ids }),
         ...(args.limit === undefined ? {} : { limit: args.limit }),
         ...(args.cursor === undefined ? {} : { cursor: args.cursor }),
       },
@@ -206,6 +211,8 @@ export const statusCommand = defineCommand({
       },
       environment,
     );
+    // Like `maintain preflight`: a corrupt store is reported, and the command exits 1.
+    if (report.preflight.status === 'corrupt') environment.exitCode = 1;
     environment.stdout(args.json === true ? toJson(report) : renderStatus(report));
   },
 });
@@ -291,7 +298,8 @@ export const explainThresholdCommand = defineCommand({
 export const packCommand = defineCommand({
   meta: {
     name: 'pack',
-    description: 'Pack active and probation entities into a token context budget.',
+    description:
+      'Pack trusted, active and probation entities into a token budget (quarantined and retired are left out).',
   },
   args: packCommandArgs,
   async run({ args }) {
@@ -304,6 +312,7 @@ export const packCommand = defineCommand({
         ...(args.budget === undefined ? {} : { budget: args.budget }),
         ...(args.kind === undefined ? {} : { kind: args.kind }),
         ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.ids === undefined ? {} : { ids: args.ids }),
         ...(args.exploration === undefined ? {} : { exploration: args.exploration }),
         ...(args.format === undefined ? {} : { format: args.format }),
         ...(args.seed === undefined ? {} : { seed: args.seed }),
@@ -550,6 +559,9 @@ export const retractCommand = defineCommand({
       {
         ...(args.dir === undefined ? {} : { dir: args.dir }),
         ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
         ...(args.seq === undefined ? {} : { seq: args.seq }),
         ...(args.reason === undefined ? {} : { reason: args.reason }),
         ...(args.author === undefined ? {} : { author: args.author }),
@@ -557,7 +569,35 @@ export const retractCommand = defineCommand({
       },
       environment,
     );
+    const warning = retractWarning(report);
+    if (warning !== undefined) environment.stderr(warning);
     environment.stdout(args.json === true ? toJson(report) : renderRetract(report));
+  },
+});
+
+export const reinstateCommand = defineCommand({
+  meta: {
+    name: 'reinstate',
+    description:
+      'Lift a retirement or override quarantine, as a human decision with a reason (audited).',
+  },
+  args: reinstateCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const report = await runReinstate(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        ...(args.id === undefined ? {} : { id: args.id }),
+        ...(args.reason === undefined ? {} : { reason: args.reason }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.at === undefined ? {} : { at: args.at }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderReinstate(report));
   },
 });
 
@@ -991,6 +1031,7 @@ export const commands = defineCommand({
     define: defineEntityCommand,
     decision: decisionCommand,
     retract: retractCommand,
+    reinstate: reinstateCommand,
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
     pack: packCommand,

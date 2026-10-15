@@ -577,6 +577,24 @@ function applySignalLimits(
   return { suppressed: false, state: { ...prev, authors: { ...prev.authors, [author]: next } } };
 }
 
+/**
+ * Spec §6 step 5.1 (since 2.0.0). When the kind requires more than one rejecting author before
+ * retirement, a failed trial adds its author (`''` when absent) to the state's sorted
+ * `rejectingAuthors`. Otherwise nothing is kept, as with `authors` for `signalLimits`.
+ */
+function trackRejectingAuthor(
+  prev: EntityState,
+  episode: Extract<Episode, { type: 'signal' }>,
+  kindSpec: KindSpec | undefined,
+): EntityState {
+  const required = kindSpec?.thresholds?.minDistinctAuthorsForRetired ?? 1;
+  if (required <= 1 || !episode.spec.countsAsTrial || episode.spec.countsAsSuccess) return prev;
+  const author = episode.author ?? '';
+  const known = prev.rejectingAuthors ?? [];
+  if (known.includes(author)) return prev;
+  return { ...prev, rejectingAuthors: [...known, author].sort() };
+}
+
 export function foldEpisode(
   prev: EntityState | undefined,
   episode: Episode,
@@ -596,7 +614,7 @@ export function foldEpisode(
       }
       const limited = applySignalLimits(prev, episode, kindSpec);
       if (limited.suppressed) return limited.state;
-      prev = limited.state;
+      prev = trackRejectingAuthor(limited.state, episode, kindSpec);
       const applied: SignalApplication =
         episode.anchors === undefined || episode.anchors === null
           ? { spec: episode.spec }

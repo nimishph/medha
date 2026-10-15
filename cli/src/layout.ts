@@ -159,6 +159,7 @@ export const CONFIG_KEYS = {
     'minUsesForTrusted',
     'minUsesForRetired',
     'retiredTrustThreshold',
+    'minDistinctAuthorsForRetired',
   ],
   recency: ['halfLifeDays', 'floor'],
   signalLimits: ['minIntervalMs', 'maxSuccessesPerAuthor'],

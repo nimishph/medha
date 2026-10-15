@@ -53,8 +53,9 @@ medha: canonical model parameters (read-only)
 | `TRUSTED_THRESHOLD` | 0.6 | Trust needed to be `trusted`. |
 | `MIN_USES_FOR_TRUSTED` | 5 | Uses needed alongside the trust bar. |
 | `UNGUARDED_TRUST_CEILING` | 0.5 | Hard cap on trust with no passing guard. |
-| `RETIRED_TRUST_THRESHOLD` | 0.1 | Sustained trust below which an entity retires. |
-| `MIN_USES_FOR_RETIRED` | 3 | Uses needed before retirement by trust. |
+| `RETIRED_TRUST_THRESHOLD` | 0.1 | Undecayed trust (Wilson bound × guard) below which an entity retires. |
+| `MIN_USES_FOR_RETIRED` | 5 | Uses needed before retirement by trust: the same bar as `trusted`. |
+| `MIN_DISTINCT_AUTHORS_FOR_RETIRED` | 1 | Distinct authors needed among the failures before retirement. 1 means no requirement; raise it per kind so one reviewer cannot retire a rule alone. |
 
 ### Recency
 

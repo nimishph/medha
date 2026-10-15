@@ -15,14 +15,14 @@ import math
 import pathlib
 import sys
 
-SPEC_VERSION = "1.5.0"
+SPEC_VERSION = "2.0.0"
 DAY_MS = 86_400_000
 WEEK_MS = 7 * DAY_MS
 
 D = dict(
     z=1.96, min_uses_trusted=5, trusted=0.6, active=0.25, unguarded_ceiling=0.5,
     half_life=45, floor=0.3, gain=0.15, dmax=1.5, alpha=0.1, min_samples_drift=3,
-    drift=0.4, theta0=0.5, retired=0.1, min_uses_retired=3,
+    drift=0.4, theta0=0.5, retired=0.1, min_uses_retired=5, min_authors_retired=1,
 )
 
 SIGNALS = {
@@ -143,6 +143,16 @@ def drifting_down(st):
         drift_down_delta(st["mu"], st["theta0"]) >= D["drift"]
 
 
+def min_rejecting_authors(ks):
+    return thr(ks, "minDistinctAuthorsForRetired", D["min_authors_retired"])
+
+
+def enough_rejecting_authors(st, ks):
+    """Spec section 6 step 5.1: retirement also needs this many distinct failing authors."""
+    need = min_rejecting_authors(ks)
+    return need <= 1 or len(st.get("rejectingAuthors", [])) >= need
+
+
 def status_from(st, t, comps, ks):
     if st["override"] == "retired":
         return "retired"
@@ -156,7 +166,8 @@ def status_from(st, t, comps, ks):
     if drifting_down(st):
         return "quarantined"
     if st["n"] >= thr(ks, "minUsesForRetired", D["min_uses_retired"]) and \
-            comps["wilson"] * comps["guard"] < thr(ks, "retiredTrustThreshold", D["retired"]):
+            comps["wilson"] * comps["guard"] < thr(ks, "retiredTrustThreshold", D["retired"]) and \
+            enough_rejecting_authors(st, ks):
         return "retired"
     if t >= thr(ks, "trusted", D["trusted"]) and \
             st["n"] >= thr(ks, "minUsesForTrusted", D["min_uses_trusted"]) and \
@@ -187,6 +198,7 @@ def observe(st, now, ks):
         driftDelta=drift_delta(st["mu"], st["theta0"]), isDrifting=drifting(st),
         evidence=dict(k=st["k"], n=st["n"], contextRejects=st["contextRejects"]),
         ema=dict(mu=st["mu"]), authors=st["authors"],
+        **({"rejectingAuthors": st["rejectingAuthors"]} if "rejectingAuthors" in st else {}),
     )
 
 
@@ -207,6 +219,9 @@ def fold_signal(st, step, ks):
             return st
         led["lastAt"], led["counted"] = at, led["counted"] + 1
         st["authors"][who] = led
+    if min_rejecting_authors(ks) > 1 and spec["trial"] and not spec["success"]:
+        who = step.get("author", "")
+        st["rejectingAuthors"] = sorted(set(st.get("rejectingAuthors", [])) | {who})
     if ks.get("evidenceWeighting") == "signal-value":
         tw = abs(spec["value"]) if spec["trial"] else 0
         sw = max(0, spec["value"]) if spec["success"] else 0
@@ -305,8 +320,28 @@ def scenarios():
     add("reject-context-not-a-trial", "REJECT_CONTEXT damps the EMA but no counters.",
         applies(6) + rejects(3, T0 + 10_000, "REJECT_CONTEXT") + [guard(True, T0 + 20_000)],
         T0 + 21_000, guardKind="ci", theta0=0.9)
-    add("retire-by-failure", "n >= 3 and undecayed L*G < 0.1: retired.",
+    add("retire-by-failure", "n >= 5 and undecayed L*G < 0.1: retired.",
         rejects(6, T0) + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.0)
+    add("retire-needs-min-uses", "Four failures (n = 4 < 5) do not retire, however low the bound (spec 2.0.0).",
+        rejects(4, T0) + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.0)
+    add("cold-start-not-retired-by-two-rejections",
+        "gh-21: one accept then two rejections from two authors left a rule retired for good at n = 3. "
+        "With the 2.0.0 default (5) it stays on probation.",
+        [dict(signal="APPLY", at=T0, author="a1"), dict(signal="REJECT_RULE", at=T0 + 1000, author="r1"),
+         dict(signal="REJECT_RULE", at=T0 + 2000, author="r2")], T0 + 3000)
+    authors = lambda n: dict(thresholds=dict(minDistinctAuthorsForRetired=n))
+    add("retire-needs-distinct-authors", "minDistinctAuthorsForRetired=2: six failures from one author do not retire.",
+        [dict(signal="REJECT_RULE", at=T0 + i * 1000, author="r1") for i in range(6)]
+        + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.0, kindSpec=authors(2))
+    add("retire-distinct-authors-met", "minDistinctAuthorsForRetired=2: failures from two authors retire.",
+        [dict(signal="REJECT_RULE", at=T0 + i * 1000, author=f"r{i % 2}") for i in range(6)]
+        + [guard(True, T0 + 10_000)], T0 + 11_000, guardKind="ci", theta0=0.0, kindSpec=authors(2))
+    add("rejecting-authors-ignore-successes-and-context",
+        "Only failed trials name rejecting authors: an accept and a REJECT_CONTEXT from other authors "
+        "do not count towards minDistinctAuthorsForRetired.",
+        [dict(signal="APPLY", at=T0, author="r2"), dict(signal="REJECT_CONTEXT", at=T0 + 500, author="r3")]
+        + [dict(signal="REJECT_RULE", at=T0 + 1000 + i * 1000, author="r1") for i in range(8)]
+        + [guard(True, T0 + 20_000)], T0 + 21_000, guardKind="ci", theta0=0.0, kindSpec=authors(2))
     add("age-alone-never-retires", "A dormant entity is not retired by decay.",
         applies(3) + [guard(True, T0 + 5000)], T0 + 900 * DAY_MS, guardKind="ci", theta0=1.0)
     add("drift-quarantines", "Learned weight moves >= 0.4 *below* the baseline with n >= 3.",

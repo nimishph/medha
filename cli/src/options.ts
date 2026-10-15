@@ -81,6 +81,11 @@ export const listCommandArgs: ArgsDef = {
   },
   namespace: { type: 'string', description: 'Filter: entity namespace.' },
   drifting: { type: 'boolean', description: 'Filter: only entities currently drifting.' },
+  ids: {
+    type: 'string',
+    description:
+      'Filter: only these entity ids, comma-separated (e.g. the rules your host still has).',
+  },
   limit: { type: 'string', description: 'Page size (default 1000).' },
   cursor: { type: 'string', description: 'Opaque next-page token from a previous --json list.' },
 };
@@ -300,7 +305,12 @@ export const guardCommandArgs: ArgsDef = {
   ...readKeyArgs,
   ok: { type: 'boolean', description: 'The guard passed.' },
   fail: { type: 'boolean', description: 'The guard failed.' },
-  guard: { type: 'string', description: 'Guard kind, e.g. harness, review, audit.' },
+  guard: {
+    type: 'string',
+    description:
+      'Guard kind, e.g. harness, review, audit. Required until the entity has one: a report ' +
+      'against no guard would not count, so it is refused.',
+  },
   author: {
     type: 'string',
     description: 'Author or agent identifier recording this guard report.',
@@ -376,8 +386,24 @@ export const decisionCommandArgs: ArgsDef = {
   },
 };
 
+export const reinstateCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  reason: {
+    type: 'string',
+    description: 'Why a human is lifting the latch; kept in the audit log.',
+    required: true,
+  },
+  author: { type: 'string', description: 'Who is lifting it (a label: medha cannot verify it).' },
+  at: {
+    type: 'string',
+    description: 'Historical timestamp (ISO 8601 string or epoch ms) for backfilling.',
+  },
+};
+
 export const retractCommandArgs: ArgsDef = {
   ...readCommonArgs,
+  ...readKeyArgs,
   seq: { type: 'string', description: 'Episode sequence number to retract.', required: true },
   reason: { type: 'string', description: 'Reason for the retraction.', required: true },
   author: { type: 'string', description: 'Author or agent identifier recording this retraction.' },
@@ -399,6 +425,11 @@ export const packCommandArgs: ArgsDef = {
   budget: { type: 'string', description: 'Token budget cap (e.g. --budget 2000).' },
   kind: { type: 'string', description: 'Filter: entity kind (default: rule).' },
   namespace: { type: 'string', description: 'Filter: entity namespace.' },
+  ids: {
+    type: 'string',
+    description:
+      "Only these entity ids, comma-separated (keeps your host's rule set authoritative).",
+  },
   exploration: {
     type: 'string',
     description: 'Budget ratio reserved for probation exploration (default: 0.15).',
