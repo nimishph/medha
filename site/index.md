@@ -50,6 +50,12 @@ features:
       the log, so the record always stays auditable.
 ---
 
+<div style="display: flex; gap: 8px; justify-content: center; margin: 24px 0 16px 0; flex-wrap: wrap;">
+  <a href="https://www.npmjs.com/package/@cntxt-labs/medha-cli"><img src="https://img.shields.io/npm/v/%40cntxt-labs%2Fmedha-cli.svg?style=flat-square" alt="npm version" /></a>
+  <a href="https://www.npmjs.com/package/@cntxt-labs/medha-cli"><img src="https://img.shields.io/npm/dm/%40cntxt-labs%2Fmedha-cli.svg?style=flat-square" alt="npm downloads" /></a>
+  <a href="https://github.com/nimishph/medha/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="license" /></a>
+</div>
+
 ## The name
 
 **medhā** (मेधा). *medhā* (f.): “mental vigour or power, intelligence, prudence, wisdom”; in the plural, the products of intelligence: thoughts, opinions.

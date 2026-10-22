@@ -6,10 +6,12 @@
 //! weighting, signal limits) are not applied here (medha-50q.7), and the decision tree is kept on
 //! the state rather than folded from the log (medha-50q.10).
 
-use crate::types::{EntityState, Episode, EpisodePayload};
+use crate::types::{EntityState, Episode, EpisodePayload, StoreRegistries};
 use medha_core::decision::DecisionCase;
 use medha_core::drift::ema_step;
+use medha_core::fold::{AuthorLedger, KindSpec};
 use medha_core::formula::{compute_trust_and_status, TrustComputationInput};
+use medha_core::round::round6;
 use medha_core::thresholds::{DEFAULT_EMA_ALPHA, DEFAULT_THETA0, WEEK_MS};
 use medha_core::types::{
     Anchor, EmaState, EntityKey, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,
@@ -64,8 +66,19 @@ pub fn durability_anchor_count(state: &EntityState) -> usize {
 /// The status the state justifies at `now`, given the status it already carries (the fold's
 /// status lag: the stored status is an input, so a retirement latches).
 pub fn status_for(state: &EntityState, now: i64) -> LifecycleStatus {
-    let thresholds = Thresholds::default();
-    let recency_config = RecencyConfig::default();
+    status_for_with_spec(state, now, None)
+}
+
+/// The status the state justifies at `now` with an optional KindSpec.
+pub fn status_for_with_spec(
+    state: &EntityState,
+    now: i64,
+    kind_spec: Option<&KindSpec>,
+) -> LifecycleStatus {
+    let default_thresholds = Thresholds::default();
+    let default_recency = RecencyConfig::default();
+    let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+    let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
     compute_trust_and_status(TrustComputationInput {
         evidence: &state.evidence,
         guard: &state.guard,
@@ -75,8 +88,8 @@ pub fn status_for(state: &EntityState, now: i64) -> LifecycleStatus {
         now,
         stored_status: state.status,
         status_override: state.status_override,
-        thresholds: &thresholds,
-        recency_config: &recency_config,
+        thresholds,
+        recency_config,
         rejecting_authors: state.rejecting_authors.as_ref().map(Vec::len),
     })
     .map(|res| res.status)
@@ -124,7 +137,17 @@ pub fn fold_episode_into_state(
     current: Option<EntityState>,
     episode: &Episode,
 ) -> Option<EntityState> {
+    fold_episode_with_registries(current, episode, None)
+}
+
+/// Fold one episode into the prior state of its key, using registered kind specifications.
+pub fn fold_episode_with_registries(
+    current: Option<EntityState>,
+    episode: &Episode,
+    registries: Option<&StoreRegistries>,
+) -> Option<EntityState> {
     let at = episode.at;
+    let kind_spec = registries.and_then(|r| r.kind_spec(&episode.key.kind));
     match &episode.payload {
         EpisodePayload::Signal {
             spec,
@@ -142,13 +165,78 @@ pub fn fold_episode_into_state(
                 None => return None,
             };
 
+            let author = episode.author.as_deref().unwrap_or("");
+            if let Some(lim) = kind_spec.and_then(|ks| ks.signal_limits.as_ref()) {
+                if spec.counts_as_success {
+                    let mut authors_map: HashMap<String, AuthorLedger> = state
+                        .authors
+                        .as_ref()
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default();
+
+                    let mut led = authors_map.get(author).cloned().unwrap_or_default();
+                    let too_soon = lim
+                        .min_interval_ms
+                        .map(|m| led.last_at.map(|l| at - l < m).unwrap_or(false))
+                        .unwrap_or(false);
+                    let over_cap = lim
+                        .max_successes_per_author
+                        .map(|c| led.counted >= c)
+                        .unwrap_or(false);
+
+                    if too_soon || over_cap {
+                        led.suppressed += 1;
+                        authors_map.insert(author.to_string(), led);
+                        state.authors = serde_json::to_value(authors_map).ok();
+                        return Some(state);
+                    }
+
+                    led.last_at = Some(at);
+                    led.counted += 1;
+                    authors_map.insert(author.to_string(), led);
+                    state.authors = serde_json::to_value(authors_map).ok();
+                }
+            }
+
+            let min_authors = kind_spec
+                .map(|ks| ks.thresholds.min_distinct_authors_for_retired)
+                .unwrap_or(1);
+            if min_authors > 1 && spec.counts_as_trial && !spec.counts_as_success {
+                let mut known = state.rejecting_authors.unwrap_or_default();
+                let who = author.to_string();
+                if !known.contains(&who) {
+                    known.push(who);
+                    known.sort();
+                }
+                state.rejecting_authors = Some(known);
+            }
+
             if let Some(cid) = case_id {
                 if let Some(branch) = state.decision_tree.iter_mut().find(|c| &c.id == cid) {
-                    if spec.counts_as_success {
-                        branch.evidence.k += 1.0;
-                    }
-                    if spec.counts_as_trial {
-                        branch.evidence.n += 1.0;
+                    if kind_spec.and_then(|ks| ks.evidence_weighting.as_deref())
+                        == Some("signal-value")
+                    {
+                        let tw = if spec.counts_as_trial {
+                            spec.value.abs()
+                        } else {
+                            0.0
+                        };
+                        let sw = if spec.counts_as_success {
+                            spec.value.max(0.0)
+                        } else {
+                            0.0
+                        };
+                        branch.evidence.k =
+                            round6(branch.evidence.k + sw).unwrap_or(branch.evidence.k + sw);
+                        branch.evidence.n =
+                            round6(branch.evidence.n + tw).unwrap_or(branch.evidence.n + tw);
+                    } else {
+                        if spec.counts_as_success {
+                            branch.evidence.k += 1.0;
+                        }
+                        if spec.counts_as_trial {
+                            branch.evidence.n += 1.0;
+                        }
                     }
                     if let Ok(new_mu) = ema_step(Some(branch.ema.mu), spec.value, DEFAULT_EMA_ALPHA)
                     {
@@ -157,11 +245,28 @@ pub fn fold_episode_into_state(
                 }
             }
 
-            if spec.counts_as_success {
-                state.evidence.k += 1.0;
-            }
-            if spec.counts_as_trial {
-                state.evidence.n += 1.0;
+            if kind_spec.and_then(|ks| ks.evidence_weighting.as_deref()) == Some("signal-value") {
+                let tw = if spec.counts_as_trial {
+                    spec.value.abs()
+                } else {
+                    0.0
+                };
+                let sw = if spec.counts_as_success {
+                    spec.value.max(0.0)
+                } else {
+                    0.0
+                };
+                state.evidence.k =
+                    round6(state.evidence.k + sw).unwrap_or(state.evidence.k + sw);
+                state.evidence.n =
+                    round6(state.evidence.n + tw).unwrap_or(state.evidence.n + tw);
+            } else {
+                if spec.counts_as_success {
+                    state.evidence.k += 1.0;
+                }
+                if spec.counts_as_trial {
+                    state.evidence.n += 1.0;
+                }
             }
             if spec.name == "REJECT_CONTEXT" {
                 state.evidence.context_rejects += 1;
@@ -194,7 +299,7 @@ pub fn fold_episode_into_state(
             if note.is_some() {
                 state.last_note = note.clone();
             }
-            state.status = status_for(&state, at);
+            state.status = status_for_with_spec(&state, at, kind_spec);
             Some(state)
         }
         EpisodePayload::Guard {
@@ -216,7 +321,7 @@ pub fn fold_episode_into_state(
             if note.is_some() {
                 state.last_note = note.clone();
             }
-            state.status = status_for(&state, at);
+            state.status = status_for_with_spec(&state, at, kind_spec);
             Some(state)
         }
         EpisodePayload::Override {
@@ -264,7 +369,7 @@ pub fn fold_episode_into_state(
         EpisodePayload::Baseline { state: baseline } => {
             // The checkpoint reproduces the folded prefix; its status is re-derived at its clock.
             let mut state = baseline.clone();
-            state.status = status_for(&state, at);
+            state.status = status_for_with_spec(&state, at, kind_spec);
             Some(state)
         }
         EpisodePayload::Decision {
@@ -307,6 +412,15 @@ pub fn fold_episode_into_state(
 
 /// Rebuild every entity state from a log, in seq order, with retracted episodes masked.
 pub fn fold_log(episodes: &[Episode]) -> HashMap<String, EntityState> {
+    fold_log_with_registries(episodes, None)
+}
+
+/// Rebuild every entity state from a log, in seq order, with retracted episodes masked,
+/// taking registered kind specifications into account.
+pub fn fold_log_with_registries(
+    episodes: &[Episode],
+    registries: Option<&StoreRegistries>,
+) -> HashMap<String, EntityState> {
     let mut ordered: Vec<&Episode> = episodes.iter().collect();
     ordered.sort_by_key(|e| e.seq);
 
@@ -325,7 +439,7 @@ pub fn fold_log(episodes: &[Episode]) -> HashMap<String, EntityState> {
         }
         let key_str = ep.key.to_string_repr();
         let curr = projection.remove(&key_str);
-        if let Some(next) = fold_episode_into_state(curr, ep) {
+        if let Some(next) = fold_episode_with_registries(curr, ep, registries) {
             projection.insert(key_str, next);
         }
     }

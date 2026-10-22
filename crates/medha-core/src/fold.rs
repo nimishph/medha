@@ -8,25 +8,52 @@ use crate::types::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct AuthorLedger {
+    #[serde(default, alias = "last_at")]
     pub last_at: Option<i64>,
+    #[serde(default)]
     pub counted: u64,
+    #[serde(default)]
     pub suppressed: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct SignalLimits {
+    #[serde(default, alias = "min_interval_ms")]
     pub min_interval_ms: Option<i64>,
+    #[serde(default, alias = "max_successes_per_author")]
     pub max_successes_per_author: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KindDecisionPolicy {
+    #[serde(default, alias = "require_human_for")]
+    pub require_human_for: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct KindSpec {
+    #[serde(default, alias = "kind")]
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
     pub thresholds: Thresholds,
+    #[serde(default)]
     pub recency: RecencyConfig,
+    #[serde(default, alias = "evidence_weighting")]
     pub evidence_weighting: Option<String>,
+    #[serde(default, alias = "signal_limits")]
     pub signal_limits: Option<SignalLimits>,
+    #[serde(default, alias = "decision_policy")]
+    pub decision_policy: Option<KindDecisionPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

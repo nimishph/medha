@@ -1,0 +1,9 @@
+{"planId":"plan/robust-migrations-property-tests","status":"accepted"}
+{"id":"req-cli-parity","revision":"r_5da6edd15d17a1ce"}
+{"id":"req-decision-trees","revision":"r_87c24f0adb8e9eaf"}
+{"id":"req-engine-parity","revision":"r_6973c3a26f07db78"}
+{"id":"req-maintenance-plane","revision":"r_13efd1c7ddc29586"}
+{"id":"req-retract-weight-consistency","revision":"r_657ce07847d00f9a"}
+{"id":"req-rust-kind-specs","revision":"r_076bef2308e6cbac"}
+{"id":"req-snapshot-migrations","revision":"r_ed09f22dbe271cb8"}
+{"id":"req-trust-property-tests","revision":"r_d62e7c55f38dc34d"}

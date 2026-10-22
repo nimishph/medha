@@ -1,5 +1,9 @@
 # medha
 
+[![npm version](https://img.shields.io/npm/v/%40cntxt-labs%2Fmedha-cli.svg?style=flat-square)](https://www.npmjs.com/package/@cntxt-labs/medha-cli)
+[![npm downloads](https://img.shields.io/npm/dm/%40cntxt-labs%2Fmedha-cli.svg?style=flat-square)](https://www.npmjs.com/package/@cntxt-labs/medha-cli)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](https://github.com/nimishph/medha/blob/main/LICENSE)
+
 **Evidential memory for the rules, recipes and tools your agents rely on.**
 
 Agents accumulate rules ("never leave `console.log` in a commit"), recipes ("how we run migrations")

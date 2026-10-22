@@ -13,15 +13,11 @@ use medha_core::packer::{
 };
 use medha_core::round::round6;
 use medha_core::thresholds::DEFAULT_EMA_ALPHA;
-use medha_core::thresholds::{
-    ACTIVE_THRESHOLD, MIN_USES_FOR_RETIRED, MIN_USES_FOR_TRUSTED, RETIRED_TRUST_THRESHOLD,
-    TRUSTED_THRESHOLD,
-};
 use medha_core::types::{
     Anchor, EntityKey, LifecycleStatus, RecencyConfig, SignalSpec, Thresholds, TrustHint,
 };
 use medha_store::folding::{
-    durability_anchor_count, fold_episode_into_state, fresh_state, fresh_state_at,
+    durability_anchor_count, fold_episode_with_registries, fresh_state, fresh_state_at,
 };
 use medha_store::types::EntityState;
 use medha_store::{
@@ -341,7 +337,13 @@ impl<S: StorePort> MedhaEngine<S> {
                 kinds.push(kind.clone());
             }
         }
+        for ks in &registries.kind_specs {
+            if !kinds.contains(&ks.name) {
+                kinds.push(ks.name.clone());
+            }
+        }
         self.kinds = kinds;
+        self.store.set_registries(registries.clone());
     }
 
     /// Refuse a read that answers from the evidence when the log opened corrupt: the store holds
@@ -412,8 +414,11 @@ impl<S: StorePort> MedhaEngine<S> {
             .get(key)?
             .unwrap_or_else(|| fresh_state(key.clone()));
 
-        let thresholds = Thresholds::default();
-        let recency_config = RecencyConfig::default();
+        let default_thresholds = Thresholds::default();
+        let default_recency = RecencyConfig::default();
+        let kind_spec = self.store.registries().kind_spec(&key.kind);
+        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+        let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
 
         let computation = compute_trust_and_status(TrustComputationInput {
             evidence: &state.evidence,
@@ -424,9 +429,9 @@ impl<S: StorePort> MedhaEngine<S> {
             now,
             stored_status: state.status,
             status_override: state.status_override,
-            thresholds: &thresholds,
-            recency_config: &recency_config,
-            rejecting_authors: None,
+            thresholds,
+            recency_config,
+            rejecting_authors: state.rejecting_authors.as_ref().map(Vec::len),
         })?;
 
         Ok(TrustHint {
@@ -492,7 +497,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 continue;
             }
             let before = state.clone();
-            state = fold_episode_into_state(state, ep);
+            state = fold_episode_with_registries(state, ep, Some(self.store.registries()));
             let Some(now) = &state else {
                 latch = None;
                 continue;
@@ -552,13 +557,17 @@ impl<S: StorePort> MedhaEngine<S> {
             .unwrap_or_else(|| fresh_state(key.clone()));
         let hint = self.hint(key, now)?;
 
+        let default_thresholds = Thresholds::default();
+        let kind_spec = self.store.registries().kind_spec(&key.kind);
+        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+
         let is_guarded = !state.guard.kind.is_empty() && state.guard.kind != "none";
         let guard_passed = state.guard.last_ok == Some(true);
         let trials_u64 = state.evidence.n.round() as u64;
 
         // 1. Trusted Gate
-        let t_cond1 = hint.trust >= TRUSTED_THRESHOLD;
-        let t_cond2 = trials_u64 >= MIN_USES_FOR_TRUSTED;
+        let t_cond1 = hint.trust >= thresholds.trusted;
+        let t_cond2 = trials_u64 >= thresholds.min_uses_for_trusted;
         let t_cond3 = is_guarded && guard_passed;
         let trusted_met = t_cond1 && t_cond2 && t_cond3;
 
@@ -567,11 +576,11 @@ impl<S: StorePort> MedhaEngine<S> {
             met: trusted_met,
             conditions: vec![
                 ConditionStatus {
-                    label: format!("trust {:.3} >= {:.2}", hint.trust, TRUSTED_THRESHOLD),
+                    label: format!("trust {:.3} >= {:.2}", hint.trust, thresholds.trusted),
                     met: t_cond1,
                 },
                 ConditionStatus {
-                    label: format!("uses {} >= {}", trials_u64, MIN_USES_FOR_TRUSTED),
+                    label: format!("uses {} >= {}", trials_u64, thresholds.min_uses_for_trusted),
                     met: t_cond2,
                 },
                 ConditionStatus {
@@ -582,20 +591,20 @@ impl<S: StorePort> MedhaEngine<S> {
         };
 
         // 2. Active Gate
-        let a_cond1 = hint.trust >= ACTIVE_THRESHOLD;
+        let a_cond1 = hint.trust >= thresholds.active;
         let active_gate = GateExplanation {
             name: "active".to_string(),
             met: a_cond1,
             conditions: vec![ConditionStatus {
-                label: format!("trust {:.3} >= {:.2}", hint.trust, ACTIVE_THRESHOLD),
+                label: format!("trust {:.3} >= {:.2}", hint.trust, thresholds.active),
                 met: a_cond1,
             }],
         };
 
         // 3. Retired Gate
-        let r_cond1 = trials_u64 >= MIN_USES_FOR_RETIRED;
+        let r_cond1 = trials_u64 >= thresholds.min_uses_for_retired;
         let l_times_g = hint.breakdown.wilson_lower * hint.breakdown.guard_factor;
-        let r_cond2 = l_times_g < RETIRED_TRUST_THRESHOLD;
+        let r_cond2 = l_times_g < thresholds.retired_trust_threshold;
         let retired_met = r_cond1 && r_cond2;
 
         let retired_gate = GateExplanation {
@@ -603,13 +612,13 @@ impl<S: StorePort> MedhaEngine<S> {
             met: retired_met,
             conditions: vec![
                 ConditionStatus {
-                    label: format!("uses {} >= {}", trials_u64, MIN_USES_FOR_RETIRED),
+                    label: format!("uses {} >= {}", trials_u64, thresholds.min_uses_for_retired),
                     met: r_cond1,
                 },
                 ConditionStatus {
                     label: format!(
                         "undecayed L*G {:.3} < {:.2}",
-                        l_times_g, RETIRED_TRUST_THRESHOLD
+                        l_times_g, thresholds.retired_trust_threshold
                     ),
                     met: r_cond2,
                 },
@@ -664,11 +673,18 @@ impl<S: StorePort> MedhaEngine<S> {
             },
         };
 
-        let next_state = fold_episode_into_state(Some(current_state), &sim_episode)
-            .unwrap_or_else(|| fresh_state(key.clone()));
+        let next_state = fold_episode_with_registries(
+            Some(current_state),
+            &sim_episode,
+            Some(self.store.registries()),
+        )
+        .unwrap_or_else(|| fresh_state(key.clone()));
 
-        let thresholds = Thresholds::default();
-        let recency_config = RecencyConfig::default();
+        let default_thresholds = Thresholds::default();
+        let default_recency = RecencyConfig::default();
+        let kind_spec = self.store.registries().kind_spec(&key.kind);
+        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+        let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
 
         let computation = compute_trust_and_status(TrustComputationInput {
             evidence: &next_state.evidence,
@@ -679,9 +695,9 @@ impl<S: StorePort> MedhaEngine<S> {
             now,
             stored_status: next_state.status,
             status_override: next_state.status_override,
-            thresholds: &thresholds,
-            recency_config: &recency_config,
-            rejecting_authors: None,
+            thresholds,
+            recency_config,
+            rejecting_authors: next_state.rejecting_authors.as_ref().map(Vec::len),
         })?;
 
         let projected_trust = computation.trust;

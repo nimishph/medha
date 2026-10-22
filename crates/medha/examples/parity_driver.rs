@@ -16,7 +16,7 @@
 use std::io::{self, Read, Write};
 
 use medha::core::types::{Anchor, EntityKey, LifecycleStatus};
-use medha::store::{EntityState, Episode, StorePort};
+use medha::store::{EntityState, Episode, StorePort, StoreRegistries};
 use medha::{GuardInput, MedhaEngine, RecordInput};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -41,12 +41,16 @@ struct Merge {
 struct Script {
     ops: Vec<Op>,
     now: i64,
+    #[serde(default)]
+    registries: Option<StoreRegistries>,
 }
 
 #[derive(Deserialize)]
 struct Log {
     episodes: Vec<Value>,
     now: i64,
+    #[serde(default)]
+    registries: Option<StoreRegistries>,
 }
 
 #[derive(Deserialize)]
@@ -197,6 +201,9 @@ fn run_script(script: Script) -> Value {
         Ok(engine) => engine,
         Err(e) => return json!({ "fatal": e.to_string() }),
     };
+    if let Some(reg) = &script.registries {
+        engine.use_registries(reg);
+    }
     let results: Vec<Value> = script
         .ops
         .into_iter()
@@ -226,6 +233,9 @@ fn read_log(log: Log) -> Value {
         Ok(engine) => engine,
         Err(e) => return json!({ "fatal": e.to_string() }),
     };
+    if let Some(reg) = &log.registries {
+        engine.use_registries(reg);
+    }
     if let Err(e) = engine.store_mut().replace_log(&parsed) {
         return json!({ "fatal": e.to_string(), "errors": errors });
     }

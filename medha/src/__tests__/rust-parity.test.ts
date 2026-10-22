@@ -6,6 +6,7 @@ import {
   type EntityKey,
   type EntityState,
   type Episode,
+  CANONICAL_SIGNALS,
   episodeToInput,
   foldLog,
   KindRegistry,
@@ -104,6 +105,7 @@ type Op =
       readonly signal: string;
       readonly at: number;
       readonly ensure: boolean;
+      readonly author?: string;
       readonly anchor?: { readonly kind: string; readonly value: string };
       readonly note?: string;
     }
@@ -142,6 +144,11 @@ type Op =
 interface Script {
   readonly ops: readonly Op[];
   readonly now: number;
+  readonly registries?: {
+    readonly kinds?: readonly string[];
+    readonly kindSpecs?: readonly any[];
+    readonly signalSpecs?: readonly any[];
+  };
 }
 
 const KEYS: readonly EntityKey[] = [
@@ -247,7 +254,7 @@ interface EngineRun {
 }
 
 async function runTs(script: Script): Promise<EngineRun> {
-  const store = new MemoryStore();
+  const store = new MemoryStore(script.registries ? { registries: script.registries } : {});
   const medha = new Medha({ store });
   const results: string[] = [];
   for (const op of script.ops) {
@@ -257,6 +264,7 @@ async function runTs(script: Script): Promise<EngineRun> {
         case 'record':
           await medha.record(op.key, op.signal, ctx, {
             ensure: op.ensure,
+            ...(op.author === undefined ? {} : { author: op.author }),
             ...(op.anchor === undefined ? {} : { anchor: op.anchor }),
             ...(op.note === undefined ? {} : { note: op.note }),
           });
@@ -329,7 +337,11 @@ interface DriverResponse {
 /** One driver call; a driver that cannot run is reported, not thrown. */
 function runRust(request: {
   readonly scripts?: readonly Script[];
-  readonly logs?: readonly { readonly episodes: readonly unknown[]; readonly now: number }[];
+  readonly logs?: readonly {
+    readonly episodes: readonly unknown[];
+    readonly now: number;
+    readonly registries?: unknown;
+  }[];
   readonly merges?: readonly {
     readonly local: readonly EntityState[];
     readonly incoming: readonly EntityState[];
@@ -480,9 +492,15 @@ function compareRustRead(ts: EngineRun, read: RustLogRead): string | null {
 }
 
 /** Property 3: the TypeScript kernel reading the log the Rust engine wrote. */
-function compareTsRead(rust: EngineRun & { readonly fatal?: string }, now: number): string | null {
+function compareTsRead(
+  rust: EngineRun & { readonly fatal?: string },
+  now: number,
+  registries?: { readonly kinds?: readonly string[]; readonly kindSpecs?: readonly any[] },
+): string | null {
   if (rust.fatal !== undefined) return `rust driver: ${rust.fatal}`;
-  const validation = { kinds: new KindRegistry(), signals: new SignalRegistry() };
+  const kinds = new KindRegistry(registries?.kindSpecs ?? registries?.kinds);
+  const signals = new SignalRegistry([...CANONICAL_SIGNALS, ...(registries?.signalSpecs ?? [])]);
+  const validation = { kinds, signals };
   const log = rust.log as Episode[];
   for (const episode of log) {
     try {
@@ -493,14 +511,14 @@ function compareTsRead(rust: EngineRun & { readonly fatal?: string }, now: numbe
   }
   let states: EntityState[];
   try {
-    states = foldLog(log, validation.kinds);
+    states = foldLog(log, kinds);
   } catch (failure) {
     return `ts cannot fold the rust log: ${(failure as Error).message}`;
   }
   return (
     firstDifference(byKey(states.map(normState)), byKey(rust.states.map(normState)), 'states') ??
     firstDifference(
-      byKey(states.map((s) => normHint(buildHint(s, now)))),
+      byKey(states.map((s) => normHint(buildHint(s, now, kinds.get(s.key.kind))))),
       byKey(rust.hints.map(normHint)),
       'hints',
     )
@@ -569,9 +587,198 @@ describe.skipIf(!('path' in driver))('TS/Rust engine parity (medha-50q.6)', () =
     const divergence = await firstDivergence((scripts) => {
       const rust = runRust({ scripts });
       if ('failure' in rust) return scripts.map(() => rust.failure);
-      return scripts.map((s, i) => compareTsRead(rust.scripts[i] as ScriptRun, s.now));
+      return scripts.map((s, i) => compareTsRead(rust.scripts[i] as ScriptRun, s.now, s.registries));
     });
     expect(divergence).toBeNull();
+  });
+});
+
+describe.skipIf(!('path' in driver))('TS/Rust per-kind specs parity (medha-50q.7)', () => {
+  test('both engines agree on custom kindSpecs: signal limits, weighting, thresholds and recency', async () => {
+    const registries = {
+      kinds: ['rule', 'recipe', 'tool', 'weighted', 'limited', 'custom-thresh'],
+      kindSpecs: [
+        {
+          name: 'weighted',
+          evidenceWeighting: 'signal-value',
+        },
+        {
+          name: 'limited',
+          signalLimits: {
+            minIntervalMs: 1000,
+            maxSuccessesPerAuthor: 2,
+          },
+        },
+        {
+          name: 'custom-thresh',
+          thresholds: {
+            trusted: 0.85,
+            minUsesForTrusted: 5,
+            active: 0.6,
+            minUsesForRetired: 4,
+            retiredTrustThreshold: 0.25,
+            minDistinctAuthorsForRetired: 2,
+          },
+          recency: {
+            halfLifeDays: 14,
+            floor: 0.1,
+          },
+        },
+      ],
+      signalSpecs: [
+        ...CANONICAL_SIGNALS,
+        {
+          name: 'ADOPTED',
+          value: 0.6,
+          countsAsTrial: true,
+          countsAsSuccess: true,
+        },
+        {
+          name: 'HEURISTIC',
+          value: 0.3,
+          countsAsTrial: true,
+          countsAsSuccess: true,
+        },
+        {
+          name: 'FLAKY',
+          value: -0.5,
+          countsAsTrial: true,
+          countsAsSuccess: false,
+        },
+      ],
+    };
+
+    const ops: Op[] = [
+      // 1. weighted entity: signals with fractional weights (ADOPTED 0.6, HEURISTIC 0.3, FLAKY -0.5)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'weighted', id: 'w1' },
+        signal: 'ADOPTED',
+        at: T0,
+        ensure: true,
+      },
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'weighted', id: 'w1' },
+        signal: 'HEURISTIC',
+        at: T0 + 1000,
+        ensure: true,
+      },
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'weighted', id: 'w1' },
+        signal: 'FLAKY',
+        at: T0 + 2000,
+        ensure: true,
+      },
+
+      // 2. limited entity: author rate limiting (minIntervalMs = 1000, maxSuccessesPerAuthor = 2)
+      // Alice first success (counted)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'limited', id: 'lim1' },
+        signal: 'APPLY',
+        author: 'alice',
+        at: T0 + 100,
+        ensure: true,
+      },
+      // Alice second success too soon at +500ms (suppressed by minIntervalMs)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'limited', id: 'lim1' },
+        signal: 'APPLY',
+        author: 'alice',
+        at: T0 + 600,
+        ensure: true,
+      },
+      // Alice second counted success at +1800ms (counted)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'limited', id: 'lim1' },
+        signal: 'APPLY',
+        author: 'alice',
+        at: T0 + 1800,
+        ensure: true,
+      },
+      // Alice third success at +3500ms (suppressed by maxSuccessesPerAuthor)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'limited', id: 'lim1' },
+        signal: 'APPLY',
+        author: 'alice',
+        at: T0 + 3500,
+        ensure: true,
+      },
+      // Bob success (counted under bob's ledger)
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'limited', id: 'lim1' },
+        signal: 'APPLY',
+        author: 'bob',
+        at: T0 + 3600,
+        ensure: true,
+      },
+
+      // 3. custom-thresh entity: minDistinctAuthorsForRetired = 2, custom thresholds
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'custom-thresh', id: 'ct1' },
+        signal: 'APPLY',
+        author: 'alice',
+        at: T0 + 100,
+        ensure: true,
+      },
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'custom-thresh', id: 'ct1' },
+        signal: 'REJECT_RULE',
+        author: 'alice',
+        at: T0 + 200,
+        ensure: true,
+      },
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'custom-thresh', id: 'ct1' },
+        signal: 'REJECT_RULE',
+        author: 'bob',
+        at: T0 + 300,
+        ensure: true,
+      },
+      {
+        op: 'record',
+        key: { namespace: '', kind: 'custom-thresh', id: 'ct1' },
+        signal: 'REJECT_RULE',
+        author: 'alice',
+        at: T0 + 400,
+        ensure: true,
+      },
+    ];
+
+    const script: Script = {
+      ops,
+      now: T0 + 14 * 24 * HOUR,
+      registries,
+    };
+
+    const tsRun = await runTs(script);
+    const rust = runRust({ scripts: [script] });
+    expect('failure' in rust ? rust.failure : 'ok').toBe('ok');
+    if ('failure' in rust) return;
+
+    const rustRun = rust.scripts[0] as ScriptRun;
+    const diff = compareRuns(tsRun, rustRun);
+    expect(diff).toBeNull();
+
+    // Cross-reading
+    const rustRead = runRust({ logs: [{ episodes: tsRun.log, now: script.now, registries }] });
+    expect('failure' in rustRead ? rustRead.failure : 'ok').toBe('ok');
+    if (!('failure' in rustRead)) {
+      const readDiff = compareRustRead(tsRun, rustRead.logs[0] as RustLogRead);
+      expect(readDiff).toBeNull();
+    }
+
+    const tsReadDiff = compareTsRead(rustRun, script.now, registries);
+    expect(tsReadDiff).toBeNull();
   });
 });
 

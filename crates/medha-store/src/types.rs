@@ -191,6 +191,8 @@ pub struct StoreRegistries {
     pub signal_specs: Vec<SignalSpec>,
     #[serde(default, alias = "anchor_kinds")]
     pub anchor_kinds: Vec<String>,
+    #[serde(default, alias = "kind_specs")]
+    pub kind_specs: Vec<medha_core::fold::KindSpec>,
 }
 
 impl Default for StoreRegistries {
@@ -199,7 +201,14 @@ impl Default for StoreRegistries {
             kinds: vec!["rule".to_string(), "recipe".to_string(), "tool".to_string()],
             signal_specs: medha_core::canonical_signals().into_values().collect(),
             anchor_kinds: vec!["git".to_string(), "week".to_string()],
+            kind_specs: Vec::new(),
         }
+    }
+}
+
+impl StoreRegistries {
+    pub fn kind_spec(&self, kind: &str) -> Option<&medha_core::fold::KindSpec> {
+        self.kind_specs.iter().find(|s| s.name == kind)
     }
 }
 
