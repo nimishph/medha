@@ -3,19 +3,22 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildHint,
+  CANONICAL_SIGNALS,
   type EntityKey,
   type EntityState,
   type Episode,
-  CANONICAL_SIGNALS,
   episodeToInput,
   foldLog,
   KindRegistry,
+  type KindSpec,
   mulberry32,
   type SeededRng,
   SignalRegistry,
+  type SignalSpec,
+  type StoreRegistries,
   validateEpisodeInput,
 } from '@cntxt-labs/medha-core';
-import { MemoryStore } from '@cntxt-labs/medha-store';
+import { MemoryStore, resolveRegistries } from '@cntxt-labs/medha-store';
 import { mergeEntityStates } from '@cntxt-labs/medha-sync';
 import { Medha } from '../engine.ts';
 
@@ -146,8 +149,8 @@ interface Script {
   readonly now: number;
   readonly registries?: {
     readonly kinds?: readonly string[];
-    readonly kindSpecs?: readonly any[];
-    readonly signalSpecs?: readonly any[];
+    readonly kindSpecs?: readonly KindSpec[];
+    readonly signalSpecs?: readonly SignalSpec[];
   };
 }
 
@@ -254,7 +257,11 @@ interface EngineRun {
 }
 
 async function runTs(script: Script): Promise<EngineRun> {
-  const store = new MemoryStore(script.registries ? { registries: script.registries } : {});
+  const store = new MemoryStore(
+    script.registries
+      ? { registries: resolveRegistries(script.registries as StoreRegistries) }
+      : {},
+  );
   const medha = new Medha({ store });
   const results: string[] = [];
   for (const op of script.ops) {
@@ -495,7 +502,7 @@ function compareRustRead(ts: EngineRun, read: RustLogRead): string | null {
 function compareTsRead(
   rust: EngineRun & { readonly fatal?: string },
   now: number,
-  registries?: { readonly kinds?: readonly string[]; readonly kindSpecs?: readonly any[] },
+  registries?: Script['registries'],
 ): string | null {
   if (rust.fatal !== undefined) return `rust driver: ${rust.fatal}`;
   const kinds = new KindRegistry(registries?.kindSpecs ?? registries?.kinds);
@@ -587,7 +594,9 @@ describe.skipIf(!('path' in driver))('TS/Rust engine parity (medha-50q.6)', () =
     const divergence = await firstDivergence((scripts) => {
       const rust = runRust({ scripts });
       if ('failure' in rust) return scripts.map(() => rust.failure);
-      return scripts.map((s, i) => compareTsRead(rust.scripts[i] as ScriptRun, s.now, s.registries));
+      return scripts.map((s, i) =>
+        compareTsRead(rust.scripts[i] as ScriptRun, s.now, s.registries),
+      );
     });
     expect(divergence).toBeNull();
   });
@@ -595,7 +604,7 @@ describe.skipIf(!('path' in driver))('TS/Rust engine parity (medha-50q.6)', () =
 
 describe.skipIf(!('path' in driver))('TS/Rust per-kind specs parity (medha-50q.7)', () => {
   test('both engines agree on custom kindSpecs: signal limits, weighting, thresholds and recency', async () => {
-    const registries = {
+    const registries: NonNullable<Script['registries']> = {
       kinds: ['rule', 'recipe', 'tool', 'weighted', 'limited', 'custom-thresh'],
       kindSpecs: [
         {
