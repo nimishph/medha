@@ -39,7 +39,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
         ],
     ),
     ("Feed an agent", &["pack", "mcp"]),
-    ("Dashboard and reports", &["ui", "report"]),
+    ("Dashboard and reports", &["ui", "report", "docs"]),
     (
         "Maintain and share",
         &[
