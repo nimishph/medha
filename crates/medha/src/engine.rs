@@ -56,6 +56,22 @@ fn default_pack_exploration_ratio() -> f64 {
     DEFAULT_EXPLORATION_RATIO
 }
 
+impl Default for EnginePackOptions {
+    fn default() -> Self {
+        Self {
+            budget: 2000,
+            kind: None,
+            namespace: None,
+            ids: None,
+            exploration_ratio: DEFAULT_EXPLORATION_RATIO,
+            seed: None,
+            min_trust: 0.0,
+            allow_quarantined: false,
+            allow_retired: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordInput {
     pub key: EntityKey,
@@ -1000,6 +1016,23 @@ impl<S: StorePort> MedhaEngine<S> {
                     context_targets: None,
                 },
             },
+        };
+
+        Ok(self.store.append(episode_input)?)
+    }
+
+    pub fn define_entity(
+        &mut self,
+        key: &EntityKey,
+        definition: EntityDefinition,
+        at: i64,
+    ) -> Result<AppendResult, MedhaError> {
+        self.require_kind(key)?;
+        let episode_input = EpisodeInput {
+            key: key.clone(),
+            at,
+            author: None,
+            payload: EpisodePayload::Define { definition },
         };
 
         Ok(self.store.append(episode_input)?)

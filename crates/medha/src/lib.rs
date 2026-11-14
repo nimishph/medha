@@ -1,8 +1,10 @@
+pub mod client;
 pub mod config;
 pub mod engine;
 pub mod errors;
 pub mod maintenance;
 
+pub use client::{AgentSession, ClientStatusReport, MedhaClient, MedhaClientBuilder};
 pub use config::{
     BackendKind, MedhaConfig, CONFIG_FILE, CONFIG_LAYOUT_VERSION, MEDHA_HOME_DIR, SQLITE_FILE,
 };
