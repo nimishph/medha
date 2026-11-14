@@ -14,6 +14,7 @@ export * from '@cntxt-labs/medha-core';
  */
 
 export * from '@cntxt-labs/medha-sync';
+export * from './client.ts';
 export * from './engine.ts';
 export * from './maintenance.ts';
 export * from './snapshot-migrations.ts';

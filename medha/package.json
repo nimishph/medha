@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Evidential-memory engine facade: planes, sweep, exploration helper, CLI and MCP.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts"
   },
   "dependencies": {
     "@cntxt-labs/medha-core": "workspace:*",
