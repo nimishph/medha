@@ -11,6 +11,7 @@
       "!examples",
       "!docs/spec/vectors",
       "!**/.beads",
+      "!**/.agents",
       "!site",
       "!plugin"
     ]

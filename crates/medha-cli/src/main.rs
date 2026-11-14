@@ -564,6 +564,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 hints.push(h);
             }
+            hints.sort_by(|a, b| {
+                b.trust
+                    .partial_cmp(&a.trust)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| a.key.to_string_repr().cmp(&b.key.to_string_repr()))
+            });
             if let Some(lim) = args.limit {
                 hints.truncate(lim);
             }

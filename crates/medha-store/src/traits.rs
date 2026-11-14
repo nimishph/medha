@@ -7,6 +7,7 @@ use crate::types::{
 pub trait StorePort {
     fn name(&self) -> &'static str;
     fn registries(&self) -> &StoreRegistries;
+    fn set_registries(&mut self, registries: StoreRegistries);
     fn is_open(&self) -> bool;
     fn open(&mut self) -> Result<OpenResult, StoreError>;
     fn close(&mut self) -> Result<(), StoreError>;

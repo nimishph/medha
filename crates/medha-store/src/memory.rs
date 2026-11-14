@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::errors::StoreError;
-use crate::folding::{fold_episode_into_state, fold_log};
+use crate::folding::{fold_episode_with_registries, fold_log_with_registries};
 use crate::traits::StorePort;
 use crate::types::{
     AppendResult, EntityKey, EntityState, Episode, EpisodeInput, EpisodePayload, OpenResult,
@@ -42,13 +42,13 @@ impl MemoryStore {
         self.next_seq = episode.seq + 1;
 
         if let EpisodePayload::Retract { .. } = &episode.payload {
-            self.projection = fold_log(&self.log);
+            self.projection = fold_log_with_registries(&self.log, Some(&self.registries));
             return self.projection.get(&episode.key.to_string_repr()).cloned();
         }
 
         let key_str = episode.key.to_string_repr();
         let curr = self.projection.remove(&key_str);
-        if let Some(next) = fold_episode_into_state(curr, &episode) {
+        if let Some(next) = fold_episode_with_registries(curr, &episode, Some(&self.registries)) {
             self.projection.insert(key_str, next.clone());
             Some(next)
         } else {
@@ -64,6 +64,13 @@ impl StorePort for MemoryStore {
 
     fn registries(&self) -> &StoreRegistries {
         &self.registries
+    }
+
+    fn set_registries(&mut self, registries: StoreRegistries) {
+        self.registries = registries;
+        if self.opened {
+            self.projection = fold_log_with_registries(&self.log, Some(&self.registries));
+        }
     }
 
     fn is_open(&self) -> bool {
@@ -129,7 +136,7 @@ impl StorePort for MemoryStore {
 
     fn rebuild(&mut self) -> Result<Vec<EntityState>, StoreError> {
         self.assert_open("rebuild")?;
-        self.projection = fold_log(&self.log);
+        self.projection = fold_log_with_registries(&self.log, Some(&self.registries));
         let mut states: Vec<EntityState> = self.projection.values().cloned().collect();
         states.sort_by_key(|a| a.key.to_string_repr());
         Ok(states)

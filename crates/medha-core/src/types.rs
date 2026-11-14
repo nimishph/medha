@@ -140,15 +140,48 @@ pub struct Evidence {
     pub context_rejects: u64,
 }
 
+fn default_trusted() -> f64 {
+    crate::thresholds::TRUSTED_THRESHOLD
+}
+fn default_min_uses_for_trusted() -> u64 {
+    crate::thresholds::MIN_USES_FOR_TRUSTED
+}
+fn default_active() -> f64 {
+    crate::thresholds::ACTIVE_THRESHOLD
+}
+fn default_unguarded_ceiling() -> f64 {
+    crate::thresholds::UNGUARDED_TRUST_CEILING
+}
+fn default_min_uses_for_retired() -> u64 {
+    crate::thresholds::MIN_USES_FOR_RETIRED
+}
+fn default_retired_trust_threshold() -> f64 {
+    crate::thresholds::RETIRED_TRUST_THRESHOLD
+}
+fn default_min_distinct_authors_for_retired() -> u64 {
+    crate::thresholds::MIN_DISTINCT_AUTHORS_FOR_RETIRED
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Thresholds {
+    #[serde(default = "default_trusted")]
     pub trusted: f64,
+    #[serde(default = "default_min_uses_for_trusted", alias = "min_uses_for_trusted")]
     pub min_uses_for_trusted: u64,
+    #[serde(default = "default_active")]
     pub active: f64,
+    #[serde(default = "default_unguarded_ceiling", alias = "unguarded_ceiling")]
     pub unguarded_ceiling: f64,
+    #[serde(default = "default_min_uses_for_retired", alias = "min_uses_for_retired")]
     pub min_uses_for_retired: u64,
+    #[serde(default = "default_retired_trust_threshold", alias = "retired_trust_threshold")]
     pub retired_trust_threshold: f64,
     /// Distinct authors needed among the failed trials before retirement (spec §6 step 5.1).
+    #[serde(
+        default = "default_min_distinct_authors_for_retired",
+        alias = "min_distinct_authors_for_retired"
+    )]
     pub min_distinct_authors_for_retired: u64,
 }
 
@@ -166,9 +199,19 @@ impl Default for Thresholds {
     }
 }
 
+fn default_half_life_days() -> f64 {
+    crate::thresholds::RECENCY_HALF_LIFE_DAYS
+}
+fn default_recency_floor() -> f64 {
+    crate::thresholds::RECENCY_FLOOR
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecencyConfig {
+    #[serde(default = "default_half_life_days", alias = "half_life_days")]
     pub half_life_days: f64,
+    #[serde(default = "default_recency_floor")]
     pub floor: f64,
 }
 
