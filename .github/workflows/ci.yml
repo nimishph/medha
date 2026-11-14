@@ -28,6 +28,7 @@ jobs:
       # The TS/Rust parity test (medha/src/__tests__/rust-parity.test.ts) drives this binary; with
       # MEDHA_REQUIRE_PARITY set, a missing or stale driver fails the run instead of skipping.
       - run: cargo build -p medha --example parity_driver
+      - run: bun run plugin:check
       - run: bun run check
         env:
           MEDHA_REQUIRE_PARITY: '1'
