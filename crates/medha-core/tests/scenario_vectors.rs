@@ -132,6 +132,8 @@ fn test_all_scenarios_conformance() {
             thresholds: &kind_spec.thresholds,
             recency_config: &kind_spec.recency,
             rejecting_authors: Some(state.rejecting_authors.len()),
+            observed_roles: Some(&state.observed_roles),
+            convergence_gates: kind_spec.convergence_gates.as_ref(),
         })
         .unwrap_or_else(|e| panic!("Scenario '{}' final observation failed: {:?}", name, e));
 

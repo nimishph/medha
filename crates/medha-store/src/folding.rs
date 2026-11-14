@@ -44,6 +44,7 @@ pub fn fresh_state_at(key: EntityKey, at: i64) -> EntityState {
         last_note: None,
         authors: None,
         rejecting_authors: None,
+        observed_roles: None,
         decision_tree: Vec::new(),
     }
 }
@@ -91,6 +92,8 @@ pub fn status_for_with_spec(
         thresholds,
         recency_config,
         rejecting_authors: state.rejecting_authors.as_ref().map(Vec::len),
+        observed_roles: state.observed_roles.as_deref(),
+        convergence_gates: kind_spec.and_then(|ks| ks.convergence_gates.as_ref()),
     })
     .map(|res| res.status)
     .unwrap_or(state.status)
@@ -209,6 +212,22 @@ pub fn fold_episode_with_registries(
                     known.sort();
                 }
                 state.rejecting_authors = Some(known);
+            }
+
+            if spec.counts_as_success && !author.is_empty() {
+                let role = if let Some((r, _)) = author.split_once(':') {
+                    r.trim().to_lowercase()
+                } else {
+                    author.trim().to_lowercase()
+                };
+                if !role.is_empty() {
+                    let mut known = state.observed_roles.unwrap_or_default();
+                    if !known.contains(&role) {
+                        known.push(role);
+                        known.sort();
+                    }
+                    state.observed_roles = Some(known);
+                }
             }
 
             if let Some(cid) = case_id {

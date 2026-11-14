@@ -135,3 +135,75 @@ export function neverPromotePolicy(): PromotionPolicy {
     reason: 'never promote policy',
   });
 }
+
+/** An empirical incident trajectory to distill into evidential memory (medha-c8z.5). */
+export interface TrajectoryEvidence {
+  readonly id: string;
+  readonly title: string;
+  readonly commitSha?: string | undefined;
+  readonly resolved?: boolean | undefined;
+  readonly lessons?:
+    | readonly {
+        readonly id: string;
+        readonly text: string;
+        readonly kind?: string | undefined;
+      }[]
+    | undefined;
+}
+
+/**
+ * Distills empirical incident trajectories and session retrospectives into candidate
+ * rules and recipes with commit anchors, filed on probation (medha-c8z.5).
+ */
+export class TrajectoryDistillerMiner implements MinerPort<TrajectoryEvidence> {
+  readonly name = 'trajectory-distiller';
+
+  async mine(
+    evidence: AsyncIterable<TrajectoryEvidence> | Iterable<TrajectoryEvidence>,
+    _context: Context,
+  ): Promise<readonly Proposal[]> {
+    const proposals: Proposal[] = [];
+    for await (const item of evidence) {
+      if (!item?.id) continue;
+      const commitAnchor: Anchor | undefined = item.commitSha
+        ? { kind: 'commit', value: item.commitSha }
+        : undefined;
+      const provenance = `trajectory-distiller:${item.id}`;
+
+      if (Array.isArray(item.lessons) && item.lessons.length > 0) {
+        for (const lesson of item.lessons) {
+          if (!lesson.id || !lesson.text) continue;
+          proposals.push({
+            key: {
+              namespace: '',
+              kind: lesson.kind ?? 'rule',
+              id: lesson.id,
+            },
+            description: lesson.text,
+            anchor: commitAnchor,
+            provenance,
+            theta0: 0.35,
+            author: 'trajectory-distiller',
+            note: `Distilled from incident ${item.id}: ${item.title}`,
+          });
+        }
+      } else {
+        // Fallback: single synthetic proposal from the incident title/resolution
+        proposals.push({
+          key: {
+            namespace: '',
+            kind: 'recipe',
+            id: `incident-${item.id.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          },
+          description: item.title,
+          anchor: commitAnchor,
+          provenance,
+          theta0: 0.35,
+          author: 'trajectory-distiller',
+          note: `Distilled from incident ${item.id}`,
+        });
+      }
+    }
+    return proposals;
+  }
+}

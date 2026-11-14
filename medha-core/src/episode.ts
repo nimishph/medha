@@ -595,6 +595,23 @@ function trackRejectingAuthor(
   return { ...prev, rejectingAuthors: [...known, author].sort() };
 }
 
+/** Track distinct agent roles among successes for epistemic convergence gates (medha-c8z.3). */
+function trackObservedRole(
+  prev: EntityState,
+  episode: Extract<Episode, { type: 'signal' }>,
+): EntityState {
+  if (!episode.spec.countsAsSuccess) return prev;
+  const author = episode.author ?? '';
+  if (!author) return prev;
+  const role = author.includes(':')
+    ? (author.split(':')[0]?.trim().toLowerCase() ?? '')
+    : author.trim().toLowerCase();
+  if (!role) return prev;
+  const known = prev.observedRoles ?? [];
+  if (known.includes(role)) return prev;
+  return { ...prev, observedRoles: [...known, role].sort() };
+}
+
 export function foldEpisode(
   prev: EntityState | undefined,
   episode: Episode,
@@ -615,6 +632,7 @@ export function foldEpisode(
       const limited = applySignalLimits(prev, episode, kindSpec);
       if (limited.suppressed) return limited.state;
       prev = trackRejectingAuthor(limited.state, episode, kindSpec);
+      prev = trackObservedRole(prev, episode);
       const applied: SignalApplication =
         episode.anchors === undefined || episode.anchors === null
           ? { spec: episode.spec }

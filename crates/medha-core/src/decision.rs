@@ -65,6 +65,8 @@ pub fn score_decision_case(
         thresholds,
         recency_config,
         rejecting_authors: None,
+        observed_roles: None,
+        convergence_gates: None,
     })?;
 
     Ok(ScoredDecisionCase {

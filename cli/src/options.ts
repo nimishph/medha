@@ -439,6 +439,44 @@ export const packCommandArgs: ArgsDef = {
     description: 'Output format: markdown | compact | json (default: markdown).',
   },
   seed: { type: 'string', description: 'Random seed for reproducible exploration sampling.' },
+  files: {
+    type: 'string',
+    description: 'Comma-separated file paths for selective context matching (medha-c8z.1).',
+  },
+  language: {
+    type: 'string',
+    description: 'Active language ID (e.g. typescript, rust) for context matching (medha-c8z.1).',
+  },
+  query: {
+    type: 'string',
+    description: 'Task query or domain keywords for context matching (medha-c8z.1).',
+  },
+  pitfalls: {
+    type: 'boolean',
+    description: 'Include high-confidence negative evidence pitfalls radar (medha-c8z.4).',
+    default: false,
+  },
+};
+
+export const distillCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  file: {
+    type: 'string',
+    description: 'Path to trajectory or incident transcript file (JSON or text).',
+  },
+  incident: {
+    type: 'string',
+    description: 'Incident or session identifier.',
+  },
+  commit: {
+    type: 'string',
+    description: 'Resolving commit SHA anchor.',
+  },
+  autoFile: {
+    type: 'boolean',
+    description: 'Automatically file distilled proposals on probation in the store.',
+    default: false,
+  },
 };
 
 export const uiCommandArgs: ArgsDef = {

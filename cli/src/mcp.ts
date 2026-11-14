@@ -1,8 +1,11 @@
+import { spawnSync } from 'node:child_process';
 import type { Medha } from '@cntxt-labs/medha';
 import {
   type Decision,
+  InvalidArgumentError,
   type LifecycleStatus,
   MedhaError,
+  type TrajectoryEvidence,
   toMedhaError,
 } from '@cntxt-labs/medha-core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -606,15 +609,52 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           .optional()
           .describe('Proportion of budget for exploring probation entities (default: 0.15).'),
         seed: z.number().int().optional().describe('Seed for deterministic exploration sampling.'),
+        files: z
+          .array(z.string())
+          .optional()
+          .describe('Active file paths or globs for selective context matching (medha-c8z.1).'),
+        languages: z
+          .array(z.string())
+          .optional()
+          .describe('Active programming languages for context matching (medha-c8z.1).'),
+        query: z
+          .string()
+          .optional()
+          .describe('Task query or keywords for context matching (medha-c8z.1).'),
+        pitfalls: z
+          .boolean()
+          .optional()
+          .describe('Include high-confidence negative-evidence pitfalls radar (medha-c8z.4).'),
         format: z
           .enum(['markdown', 'compact', 'json'])
           .optional()
           .describe('Output format (default: markdown).'),
       },
     },
-    ({ budget, kind, namespace, ids, explorationRatio, seed, format }) =>
+    ({
+      budget,
+      kind,
+      namespace,
+      ids,
+      explorationRatio,
+      seed,
+      files,
+      languages,
+      query,
+      pitfalls,
+      format,
+    }) =>
       respond(async () => {
         const effectiveNow = environment.now();
+        const contextFilter =
+          files !== undefined || languages !== undefined || query !== undefined
+            ? {
+                ...(files !== undefined ? { files } : {}),
+                ...(languages !== undefined ? { languages } : {}),
+                ...(query !== undefined ? { query } : {}),
+              }
+            : undefined;
+
         const outcome = await engine.pack(
           {
             budget,
@@ -623,6 +663,8 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
             ...(ids === undefined ? {} : { ids }),
             ...(explorationRatio === undefined ? {} : { explorationRatio }),
             ...(seed === undefined ? {} : { seed }),
+            ...(contextFilter === undefined ? {} : { contextFilter }),
+            ...(pitfalls === true ? { pitfalls: true } : {}),
           },
           { now: effectiveNow, ...(seed === undefined ? {} : { seed }) },
         );
@@ -644,6 +686,187 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
           selectedCount: outcome.selected.length,
           contextText: text,
           outcome,
+        };
+      }),
+  );
+
+  // 14. hints_for_context (medha-c8z.1)
+  server.registerTool(
+    'hints_for_context',
+    {
+      description:
+        'Context-aware hint matching: selectively fetches and packs rules relevant to active files, language, or task query (medha-c8z.1).',
+      annotations: READ_ONLY,
+      inputSchema: {
+        files: z.array(z.string()).optional().describe('Active files or paths in workspace.'),
+        languages: z.array(z.string()).optional().describe('Active programming language IDs.'),
+        query: z.string().optional().describe('Current task description or domain keywords.'),
+        budget: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Token budget cap (default: 2000).'),
+        kind: z.string().optional().describe('Filter by entity kind (default: rule).'),
+        compact: z.boolean().optional().describe('If true, return compact output.'),
+      },
+    },
+    ({ files, languages, query, budget, kind, compact }) =>
+      respond(async () => {
+        const outcome = await engine.hintsForContext(
+          { files, languages, query },
+          { budget: budget ?? 2000, kind: kind ?? 'rule' },
+          { now: environment.now() },
+        );
+        return compact === true
+          ? {
+              selectedCount: outcome.selected.length,
+              totalCost: outcome.totalCost,
+              selected: outcome.selected.map((s) => ({
+                key: s.key,
+                trust: s.hint.trustScore,
+                status: s.hint.status,
+                admittedBy: s.admittedBy,
+              })),
+            }
+          : outcome;
+      }, compact === true),
+  );
+
+  // 15. verify_guard (medha-c8z.2)
+  server.registerTool(
+    'verify_guard',
+    {
+      description:
+        'Evaluate or execute an automated verification guard check on an entity, recording pass/fail outcome into memory (medha-c8z.2).',
+      annotations: APPEND,
+      inputSchema: {
+        id: z.string().describe('Entity id to guard.'),
+        guard: z.string().describe('Guard name (e.g. test, lint, ast).'),
+        ok: z
+          .boolean()
+          .optional()
+          .describe('Explicit pass (true) or fail (false) boolean outcome.'),
+        command: z
+          .string()
+          .optional()
+          .describe('Executable shell command to run to verify the guard.'),
+        kind: z.string().optional().describe('Entity kind. Default: rule.'),
+        namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
+      },
+    },
+    ({ id, guard, ok, command, kind, namespace }) =>
+      respond(async () => {
+        let pass = ok;
+        if (pass === undefined && command !== undefined && command.trim() !== '') {
+          const res = spawnSync(command, { shell: true, encoding: 'utf8', timeout: 30000 });
+          pass = res.status === 0;
+        }
+        if (pass === undefined) {
+          throw new InvalidArgumentError(
+            'ok or command',
+            'must provide either an explicit ok boolean or a command to execute',
+            undefined,
+          );
+        }
+        const hint = await engine.reportGuard(
+          { namespace: namespace ?? '', kind: kind ?? 'rule', id },
+          { ok: pass, kind: guard },
+          { now: environment.now() },
+        );
+        return {
+          id,
+          guard,
+          ok: pass,
+          hint,
+          lifted: pass && hint.status !== 'quarantined',
+        };
+      }),
+  );
+
+  // 16. detect_pitfalls (medha-c8z.4)
+  server.registerTool(
+    'detect_pitfalls',
+    {
+      description:
+        'Negative-evidence radar: detect known traps, anti-patterns, and repeatedly failing rules or guards (medha-c8z.4).',
+      annotations: READ_ONLY,
+      inputSchema: {
+        minFailures: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Minimum failure trials required (default: 5).'),
+        kind: z.string().optional().describe('Filter by entity kind.'),
+        namespace: z.string().optional().describe('Filter by entity namespace.'),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Cap on number of pitfalls returned (default: 10).'),
+      },
+    },
+    ({ minFailures, kind, namespace, limit }) =>
+      respond(() =>
+        engine.detectPitfalls(
+          {
+            minFailures: minFailures ?? 5,
+            ...(kind === undefined ? {} : { kind }),
+            ...(namespace === undefined ? {} : { namespace }),
+            ...(limit === undefined ? {} : { limit }),
+          },
+          { now: environment.now() },
+        ),
+      ),
+  );
+
+  // 17. distill_trajectory (medha-c8z.5)
+  server.registerTool(
+    'distill_trajectory',
+    {
+      description:
+        'Autonomous session retrospective distillation: extracts empirical lessons from incident trajectories into candidate rules with commit anchors (medha-c8z.5).',
+      annotations: APPEND,
+      inputSchema: {
+        id: z.string().describe('Incident or session identifier.'),
+        title: z.string().describe('Summary of the resolved incident or session.'),
+        commitSha: z.string().optional().describe('Resolving git commit SHA anchor.'),
+        lessons: z
+          .array(
+            z.object({
+              id: z.string().describe('Rule/recipe identifier.'),
+              text: z.string().describe('Distilled lesson or rule text.'),
+              kind: z.string().optional().describe('Entity kind (default: rule).'),
+            }),
+          )
+          .optional()
+          .describe('List of distilled empirical lessons.'),
+        autoFile: z
+          .boolean()
+          .optional()
+          .describe('If true, record candidate proposals on probation in the store.'),
+      },
+    },
+    ({ id, title, commitSha, lessons, autoFile }) =>
+      respond(async () => {
+        const trajectory: TrajectoryEvidence = {
+          id,
+          title,
+          ...(commitSha === undefined ? {} : { commitSha }),
+          ...(lessons === undefined ? {} : { lessons }),
+        };
+        const res = await engine.distillTrajectory(
+          trajectory,
+          { autoFile: autoFile === true },
+          { now: environment.now() },
+        );
+        return {
+          incidentId: id,
+          proposals: res.proposals,
+          filedCount: res.filedCount,
+          autoFiled: autoFile === true,
         };
       }),
   );

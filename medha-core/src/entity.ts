@@ -87,6 +87,11 @@ export interface EntityState {
    * declares `thresholds.minDistinctAuthorsForRetired` above 1 (spec §6 step 5.1).
    */
   readonly rejectingAuthors?: readonly string[];
+  /**
+   * Distinct agent roles observed across accepted signals, sorted (e.g. ['coder', 'reviewer', 'tester']).
+   * Maintained for multi-agent epistemic convergence gates (medha-c8z.3).
+   */
+  readonly observedRoles?: readonly string[];
   readonly createdAt: number;
   readonly lastSignalAt: number | null;
   /** The natural language note or rationale from the latest episode (if any). */

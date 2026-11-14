@@ -3,7 +3,7 @@ use crate::formula::{compute_trust_and_status, TrustComputationInput};
 use crate::round::round6;
 use crate::thresholds::{DEFAULT_EMA_ALPHA, WEEK_MS};
 use crate::types::{
-    CoreError, EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, SignalSpec,
+    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus, RecencyConfig, SignalSpec,
     Thresholds,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -54,6 +54,8 @@ pub struct KindSpec {
     pub signal_limits: Option<SignalLimits>,
     #[serde(default, alias = "decision_policy")]
     pub decision_policy: Option<KindDecisionPolicy>,
+    #[serde(default, alias = "convergence_gates")]
+    pub convergence_gates: Option<KindConvergenceGates>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +71,8 @@ pub struct EntityFoldState {
     /// Distinct authors of the failed trials; kept only when the kind requires more than one
     /// rejecting author before retirement (spec §6 step 5.1).
     pub rejecting_authors: BTreeSet<String>,
+    /// Distinct agent roles observed among successes (medha-c8z.3).
+    pub observed_roles: Vec<String>,
 }
 
 impl Default for EntityFoldState {
@@ -83,6 +87,7 @@ impl Default for EntityFoldState {
             status_override: None,
             authors: HashMap::new(),
             rejecting_authors: BTreeSet::new(),
+            observed_roles: Vec::new(),
         }
     }
 }
@@ -260,6 +265,17 @@ pub fn fold_signal_step(
     }
 
     if spec.counts_as_success {
+        if let Some(auth) = author {
+            let role = if let Some((r, _)) = auth.split_once(':') {
+                r.trim().to_lowercase()
+            } else {
+                auth.trim().to_lowercase()
+            };
+            if !role.is_empty() && !state.observed_roles.contains(&role) {
+                state.observed_roles.push(role);
+                state.observed_roles.sort();
+            }
+        }
         state.last_signal_at = Some(at);
     }
 
@@ -276,6 +292,8 @@ pub fn fold_signal_step(
         thresholds: &kind_spec.thresholds,
         recency_config: &kind_spec.recency,
         rejecting_authors: Some(state.rejecting_authors.len()),
+        observed_roles: Some(&state.observed_roles),
+        convergence_gates: kind_spec.convergence_gates.as_ref(),
     })?;
 
     state.status = res.status;
@@ -307,6 +325,8 @@ pub fn fold_guard_step(
         thresholds: &kind_spec.thresholds,
         recency_config: &kind_spec.recency,
         rejecting_authors: Some(state.rejecting_authors.len()),
+        observed_roles: Some(&state.observed_roles),
+        convergence_gates: kind_spec.convergence_gates.as_ref(),
     })?;
 
     state.status = res.status;

@@ -17,3 +17,6 @@ site/overview.md
 site/agent-skill.md
 site/cli.md
 site/integrations.md
+
+.agents/
+.anvesa/

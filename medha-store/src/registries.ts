@@ -16,7 +16,8 @@ import {
 
 /** The effective registries of a store: built-ins always present, host lists additive. */
 export function resolveRegistries(host: StoreRegistries | undefined): StoreRegistries {
-  const kinds = [...new Set([...BUILTIN_KINDS, ...(host?.kinds ?? [])])];
+  const hostKinds = host?.kinds ?? host?.kindSpecs?.map((s) => s.name) ?? [];
+  const kinds = [...new Set([...BUILTIN_KINDS, ...hostKinds])];
   const canonical = new Set(CANONICAL_SIGNALS.map((s) => s.name));
   const additive = (host?.signalSpecs ?? []).filter((s) => !canonical.has(s.name));
   const anchorKinds = [...new Set(['week', ...(host?.anchorKinds ?? [])])];

@@ -240,6 +240,8 @@ pub fn compute_trust_and_status(
         thresholds: &th,
         recency_config: &rc,
         rejecting_authors: None,
+        observed_roles: None,
+        convergence_gates: None,
     })
     .map_err(|e| napi::Error::from_reason(e.to_string()))?;
 

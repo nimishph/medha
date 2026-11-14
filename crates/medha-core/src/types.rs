@@ -260,3 +260,14 @@ pub struct TrustHint {
     pub is_drifting: bool,
     pub breakdown: TrustScoreBreakdown,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct KindConvergenceGates {
+    #[serde(default, alias = "min_distinct_roles_for_active")]
+    pub min_distinct_roles_for_active: Option<usize>,
+    #[serde(default, alias = "min_distinct_roles_for_trusted")]
+    pub min_distinct_roles_for_trusted: Option<usize>,
+    #[serde(default, alias = "required_roles_for_trusted")]
+    pub required_roles_for_trusted: Option<Vec<String>>,
+}

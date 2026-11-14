@@ -12,6 +12,7 @@ import {
 import {
   decisionCommandArgs,
   defineCommandArgs,
+  distillCommandArgs,
   driftCommandArgs,
   explainThresholdCommandArgs,
   guardCommandArgs,
@@ -316,12 +317,41 @@ export const packCommand = defineCommand({
         ...(args.exploration === undefined ? {} : { exploration: args.exploration }),
         ...(args.format === undefined ? {} : { format: args.format }),
         ...(args.seed === undefined ? {} : { seed: args.seed }),
+        ...(args.files === undefined ? {} : { files: args.files }),
+        ...(args.language === undefined ? {} : { language: args.language }),
+        ...(args.query === undefined ? {} : { query: args.query }),
+        ...(args.pitfalls === true ? { pitfalls: true } : {}),
       },
       environment,
     );
     environment.stdout(
       args.json === true || report.format === 'json' ? toJson(report) : renderPack(report),
     );
+  },
+});
+
+export const distillCommand = defineCommand({
+  meta: {
+    name: 'distill',
+    description:
+      'Distill an incident trajectory or retrospective trace into candidate rules with commit anchors (medha-c8z.5).',
+  },
+  args: distillCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runDistill, renderDistill } = await import('./distill.ts');
+    const report = await runDistill(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.file === undefined ? {} : { file: args.file }),
+        ...(args.incident === undefined ? {} : { incident: args.incident }),
+        ...(args.commit === undefined ? {} : { commit: args.commit }),
+        ...(args.autoFile === true ? { autoFile: true } : {}),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(report) : renderDistill(report));
   },
 });
 
@@ -1032,6 +1062,7 @@ export const commands = defineCommand({
     decision: decisionCommand,
     retract: retractCommand,
     reinstate: reinstateCommand,
+    distill: distillCommand,
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
     pack: packCommand,

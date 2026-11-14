@@ -4,7 +4,7 @@ use crate::guard::{guard_factor, is_guarded};
 use crate::recency::recency_factor;
 use crate::round::round6;
 use crate::types::{
-    CoreError, EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,
+    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus, RecencyConfig, Thresholds,
     TrustScoreBreakdown,
 };
 use crate::wilson::{wilson_lower_bound, wilson_upper_bound};
@@ -23,6 +23,10 @@ pub struct TrustComputationInput<'a> {
     /// Distinct authors of the failed trials, when the caller tracks them. `None` (not tracked)
     /// satisfies a `min_distinct_authors_for_retired` of 1 and no higher.
     pub rejecting_authors: Option<usize>,
+    /// Distinct agent roles observed among successes (medha-c8z.3).
+    pub observed_roles: Option<&'a [String]>,
+    /// Kind convergence gates for multi-agent validation (medha-c8z.3).
+    pub convergence_gates: Option<&'a KindConvergenceGates>,
 }
 
 pub struct TrustComputationResult {
@@ -86,6 +90,8 @@ pub fn compute_trust_and_status(
         t,
         input.thresholds,
         enough_rejecting_authors,
+        input.observed_roles,
+        input.convergence_gates,
     );
 
     let breakdown = TrustScoreBreakdown {
@@ -120,6 +126,8 @@ fn derive_status(
     t: f64,
     thresholds: &Thresholds,
     enough_rejecting_authors: bool,
+    observed_roles: Option<&[String]>,
+    convergence_gates: Option<&KindConvergenceGates>,
 ) -> LifecycleStatus {
     // 1. Explicit override
     if let Some(over) = status_override {
@@ -154,16 +162,43 @@ fn derive_status(
     }
 
     // 5.2 Trusted threshold check
+    let passes_trusted_gates = match convergence_gates {
+        Some(gates) => {
+            let min_roles = gates.min_distinct_roles_for_trusted.unwrap_or(1);
+            let role_count = observed_roles.map(|r| r.len()).unwrap_or(0);
+            let has_enough_roles = role_count >= min_roles;
+            let has_required_roles = match &gates.required_roles_for_trusted {
+                Some(reqs) => reqs.iter().all(|req| {
+                    observed_roles
+                        .map(|roles| roles.iter().any(|r| r == req))
+                        .unwrap_or(false)
+                }),
+                None => true,
+            };
+            has_enough_roles && has_required_roles
+        }
+        None => true,
+    };
+
     if t >= thresholds.trusted
         && trials >= thresholds.min_uses_for_trusted
         && guarded
         && guard.last_ok == Some(true)
+        && passes_trusted_gates
     {
         return LifecycleStatus::Trusted;
     }
 
     // 5.3 Active threshold check
-    if t >= thresholds.active {
+    let passes_active_gates = match convergence_gates {
+        Some(gates) => match gates.min_distinct_roles_for_active {
+            Some(min_roles) => observed_roles.map(|r| r.len()).unwrap_or(0) >= min_roles,
+            None => true,
+        },
+        None => true,
+    };
+
+    if t >= thresholds.active && passes_active_gates {
         return LifecycleStatus::Active;
     }
 
