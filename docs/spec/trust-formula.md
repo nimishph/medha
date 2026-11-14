@@ -405,6 +405,15 @@ mechanism (e.g. a later `define`/`decision` simply superseding, which latest-wri
 gives them). Until resolved, a host wanting to correct a bad definition or decision should submit a
 newer one for the same key/`caseId`, not rely on `retract`.
 
+### 11a.6 Retraction semantics: counts-only and immutable historical weights
+
+A `retract` episode masks its target sequence number so that the retracted signal contributes zero
+trials, zero successes, and no durability anchors to the fold. However, subsequent signal episodes
+retain their recorded historical weights (`weight` field), reflecting the state of the entity at the
+time those historical observations occurred. Retraction operates on evidence counts ($k/n$) and anchors
+('counts-only' semantics enforced between TypeScript and Rust across log replays); it does not
+retroactively rewrite the immutable weights embedded in later historical episodes (medha-50q.8).
+
 ## 11. Conformance vectors
 
 Vectors are language-neutral JSON under `docs/spec/vectors/` (format defined with them in

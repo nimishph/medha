@@ -886,14 +886,31 @@ impl<S: StorePort> MedhaEngine<S> {
         Ok((latch, appended))
     }
 
+    pub const REMOVED_EPISODES_META_KEY: &'static str = "audit:removedEpisodes";
+
     pub fn remove_episode(&mut self, seq: u64) -> Result<(), MedhaError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        self.remove_episode_with_audit(seq, None, None, now)?;
+        Ok(())
+    }
+
+    pub fn remove_episode_with_audit(
+        &mut self,
+        seq: u64,
+        author: Option<String>,
+        reason: Option<String>,
+        now: i64,
+    ) -> Result<bool, MedhaError> {
         let episodes = self.store.episodes(None, None)?;
+        let mut target_ep = None;
         let mut filtered = Vec::new();
-        let mut found = false;
         let mut new_seq = 0;
         for ep in episodes {
             if ep.seq == seq {
-                found = true;
+                target_ep = Some(ep);
                 continue;
             }
             let mut updated = ep;
@@ -901,15 +918,33 @@ impl<S: StorePort> MedhaEngine<S> {
             new_seq += 1;
             filtered.push(updated);
         }
-        if !found {
+        let Some(target) = target_ep else {
             return Err(MedhaError::NotFound(format!(
                 "Episode with sequence {}",
                 seq
             )));
-        }
+        };
         self.store.replace_log(&filtered)?;
         self.store.rebuild()?;
-        Ok(())
+
+        // Audit logging: record removed episode trace in meta (matching TS removedEpisodes)
+        let mut audit: Vec<serde_json::Value> = self
+            .store
+            .get_meta(Self::REMOVED_EPISODES_META_KEY)?
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
+        audit.push(serde_json::json!({
+            "removedAt": now,
+            "author": author,
+            "reason": reason,
+            "episode": target,
+        }));
+        if let Ok(serialized) = serde_json::to_string(&audit) {
+            let _ = self
+                .store
+                .set_meta(Self::REMOVED_EPISODES_META_KEY, &serialized);
+        }
+        Ok(true)
     }
 
     pub fn propose(
@@ -1035,7 +1070,7 @@ impl<S: StorePort> MedhaEngine<S> {
         let states = self.store.list()?;
         let mut new_eps = Vec::new();
 
-        for (seq, s) in states.into_iter().enumerate() {
+        for (seq, s) in states.iter().cloned().enumerate() {
             new_eps.push(Episode {
                 seq: seq as u64,
                 key: s.key.clone(),
@@ -1043,6 +1078,27 @@ impl<S: StorePort> MedhaEngine<S> {
                 author: None,
                 payload: EpisodePayload::Baseline { state: s },
             });
+        }
+
+        // Bake-and-verify: verify fold-equivalence in memory before replacing the log
+        let verified_states = medha_store::folding::fold_log_with_registries(
+            &new_eps,
+            Some(self.store.registries()),
+        );
+        for s in &states {
+            let key_str = s.key.to_string_repr();
+            if let Some(folded) = verified_states.get(&key_str) {
+                if (folded.evidence.k - s.evidence.k).abs() > 1e-6
+                    || (folded.evidence.n - s.evidence.n).abs() > 1e-6
+                {
+                    return Err(MedhaError::Store(medha_store::StoreError::CorruptStore {
+                        store_path: "compact".into(),
+                        at_seq: 0,
+                        reason: "bake-and-verify failed: fold-equivalence violation on compaction"
+                            .into(),
+                    }));
+                }
+            }
         }
 
         let after_count = new_eps.len();
