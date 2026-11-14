@@ -425,6 +425,8 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
                 thresholds: &thresholds,
                 recency_config: &recency_config,
                 rejecting_authors: None,
+                observed_roles: None,
+                convergence_gates: None,
             })?;
             computation.status
         };
@@ -458,6 +460,15 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         last_note: s1.last_note.clone().or_else(|| s2.last_note.clone()),
         authors: s1.authors.clone().or_else(|| s2.authors.clone()),
         rejecting_authors: match (&s1.rejecting_authors, &s2.rejecting_authors) {
+            (None, None) => None,
+            (a, b) => {
+                let mut all: Vec<String> = a.iter().chain(b.iter()).flatten().cloned().collect();
+                all.sort();
+                all.dedup();
+                Some(all)
+            }
+        },
+        observed_roles: match (&s1.observed_roles, &s2.observed_roles) {
             (None, None) => None,
             (a, b) => {
                 let mut all: Vec<String> = a.iter().chain(b.iter()).flatten().cloned().collect();

@@ -220,6 +220,7 @@ fn test_merge_entity_states_is_idempotent() {
         last_note: None,
         authors: None,
         rejecting_authors: None,
+        observed_roles: None,
         decision_tree: Vec::new(),
     };
 
@@ -259,6 +260,7 @@ fn test_merge_entity_states() {
         last_note: None,
         authors: None,
         rejecting_authors: None,
+        observed_roles: None,
         decision_tree: Vec::new(),
     };
 
@@ -291,6 +293,7 @@ fn test_merge_entity_states() {
         last_note: None,
         authors: None,
         rejecting_authors: None,
+        observed_roles: None,
         decision_tree: Vec::new(),
     };
 

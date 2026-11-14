@@ -15,6 +15,14 @@ export interface PackOptions {
   readonly exploration?: string | number;
   readonly format?: string;
   readonly seed?: string | number;
+  /** Comma-separated file paths or globs for selective context matching (medha-c8z.1). */
+  readonly files?: string;
+  /** Active programming language ID (medha-c8z.1). */
+  readonly language?: string;
+  /** Active task query or prompt keywords (medha-c8z.1). */
+  readonly query?: string;
+  /** Include high-confidence negative-evidence pitfalls radar (medha-c8z.4). */
+  readonly pitfalls?: boolean;
 }
 
 export interface PackReport {
@@ -63,6 +71,22 @@ export async function runPack(options: PackOptions, environment: Environment): P
     const format: 'markdown' | 'compact' | 'json' =
       formatRaw === 'compact' || formatRaw === 'json' ? formatRaw : 'markdown';
 
+    const contextFilter =
+      options.files !== undefined || options.language !== undefined || options.query !== undefined
+        ? {
+            ...(options.files !== undefined
+              ? {
+                  files: options.files
+                    .split(',')
+                    .map((f) => f.trim())
+                    .filter(Boolean),
+                }
+              : {}),
+            ...(options.language !== undefined ? { languages: [options.language.trim()] } : {}),
+            ...(options.query !== undefined ? { query: options.query.trim() } : {}),
+          }
+        : undefined;
+
     const outcome = await opened.engine.pack(
       {
         budget,
@@ -71,6 +95,8 @@ export async function runPack(options: PackOptions, environment: Environment): P
         ...(options.ids === undefined ? {} : { ids: parseIds(options.ids) }),
         explorationRatio,
         ...(seed === undefined ? {} : { seed }),
+        ...(contextFilter === undefined ? {} : { contextFilter }),
+        ...(options.pitfalls === true ? { pitfalls: true } : {}),
       },
       { now: environment.now(), ...(seed === undefined ? {} : { seed }) },
     );
@@ -107,6 +133,14 @@ export function renderPack(report: PackReport): string {
         );
       }
     }
+    if (outcome.pitfalls && outcome.pitfalls.length > 0) {
+      lines.push('');
+      lines.push('  PITFALLS (high-confidence negative evidence):');
+      for (const p of outcome.pitfalls) {
+        const guardStr = p.failingGuard ? ` (guard '${p.failingGuard}' failed)` : '';
+        lines.push(`  ! ${p.status.padEnd(11)} ${keyLabel(p.key)}${guardStr} — ${p.reason}`);
+      }
+    }
     return `${lines.join('\n')}\n`;
   }
 
@@ -124,6 +158,18 @@ export function renderPack(report: PackReport): string {
       const noteStr = item.hint.lastNote !== undefined ? `\n  > Note: ${item.hint.lastNote}` : '';
       lines.push(
         `- **${keyLabel(item.key)}**${tag} (trust: ${fixed(item.hint.trustScore)}, cost: ${item.cost}, admitted: ${item.admittedBy})${noteStr}`,
+      );
+    }
+  }
+
+  if (outcome.pitfalls && outcome.pitfalls.length > 0) {
+    lines.push('');
+    lines.push('## Known Pitfalls & Anti-Patterns (High-Confidence Traps)');
+    lines.push('The following approaches have repeatedly failed; avoid them:');
+    for (const p of outcome.pitfalls) {
+      const noteStr = p.lastNote ? `\n  > Lesson: ${p.lastNote}` : '';
+      lines.push(
+        `- **${keyLabel(p.key)}** [${p.status}] (${p.trials} trials, ${p.successes} successes)${noteStr}`,
       );
     }
   }

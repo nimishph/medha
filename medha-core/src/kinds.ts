@@ -54,6 +54,26 @@ export interface KindDecisionPolicy {
   readonly requireHumanFor?: readonly Decision['type'][] | 'apply';
 }
 
+/**
+ * Epistemic signal weighting and role archetypes for multi-agent systems (medha-c8z.3).
+ */
+export interface KindAgentRoles {
+  /** Epistemic signal weighting per agent role (e.g. { reviewer: 1.5, tester: 1.2, coder: 0.8 }). */
+  readonly roleWeights?: Readonly<Record<string, number>> | undefined;
+}
+
+/**
+ * Epistemic multi-agent convergence gates required before status transitions (medha-c8z.3).
+ */
+export interface KindConvergenceGates {
+  /** Minimum number of distinct agent roles required among successes to leave probation for active (default 1). */
+  readonly minDistinctRolesForActive?: number | undefined;
+  /** Minimum number of distinct agent roles required among successes to reach trusted (default 1). */
+  readonly minDistinctRolesForTrusted?: number | undefined;
+  /** Specific agent roles that must be represented among observed successes to reach trusted (e.g. ['tester', 'reviewer']). */
+  readonly requiredRolesForTrusted?: readonly string[] | undefined;
+}
+
 export interface KindSpec {
   readonly name: string;
   readonly description?: string;
@@ -62,6 +82,8 @@ export interface KindSpec {
   readonly evidenceWeighting?: EvidenceWeightingMode;
   readonly signalLimits?: KindSignalLimits;
   readonly decisionPolicy?: KindDecisionPolicy;
+  readonly agentRoles?: KindAgentRoles;
+  readonly convergenceGates?: KindConvergenceGates;
 }
 
 const DECISION_TYPES = ['apply', 'ignore', 'probability'] as const;
@@ -195,6 +217,72 @@ export class KindRegistry {
               'decisionPolicy.requireHumanFor[]',
               "'apply' | 'ignore' | 'probability'",
               type,
+            );
+          }
+        }
+      }
+    }
+
+    if (nameOrSpec.agentRoles !== undefined) {
+      if (typeof nameOrSpec.agentRoles !== 'object' || nameOrSpec.agentRoles === null) {
+        throw new InvalidArgumentError('kind spec.agentRoles', 'an object', nameOrSpec.agentRoles);
+      }
+      if (nameOrSpec.agentRoles.roleWeights !== undefined) {
+        if (
+          typeof nameOrSpec.agentRoles.roleWeights !== 'object' ||
+          nameOrSpec.agentRoles.roleWeights === null
+        ) {
+          throw new InvalidArgumentError(
+            'agentRoles.roleWeights',
+            'an object',
+            nameOrSpec.agentRoles.roleWeights,
+          );
+        }
+        for (const [role, weight] of Object.entries(nameOrSpec.agentRoles.roleWeights)) {
+          if (typeof weight !== 'number' || !Number.isFinite(weight) || weight <= 0) {
+            throw new InvalidArgumentError(
+              `agentRoles.roleWeights.${role}`,
+              'a positive number',
+              weight,
+            );
+          }
+        }
+      }
+    }
+
+    if (nameOrSpec.convergenceGates !== undefined) {
+      if (typeof nameOrSpec.convergenceGates !== 'object' || nameOrSpec.convergenceGates === null) {
+        throw new InvalidArgumentError(
+          'kind spec.convergenceGates',
+          'an object',
+          nameOrSpec.convergenceGates,
+        );
+      }
+      for (const field of ['minDistinctRolesForActive', 'minDistinctRolesForTrusted'] as const) {
+        const val = nameOrSpec.convergenceGates[field];
+        if (val !== undefined && (!Number.isInteger(val) || val < 1)) {
+          throw new InvalidArgumentError(
+            `convergenceGates.${field}`,
+            'a positive integer >= 1',
+            val,
+          );
+        }
+      }
+      const reqRoles = nameOrSpec.convergenceGates.requiredRolesForTrusted;
+      if (reqRoles !== undefined) {
+        if (!Array.isArray(reqRoles)) {
+          throw new InvalidArgumentError(
+            'convergenceGates.requiredRolesForTrusted',
+            'an array of strings',
+            reqRoles,
+          );
+        }
+        for (const r of reqRoles) {
+          if (typeof r !== 'string' || r.trim() === '') {
+            throw new InvalidArgumentError(
+              'convergenceGates.requiredRolesForTrusted[]',
+              'a non-empty string',
+              r,
             );
           }
         }

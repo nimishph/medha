@@ -432,6 +432,8 @@ impl<S: StorePort> MedhaEngine<S> {
             thresholds,
             recency_config,
             rejecting_authors: state.rejecting_authors.as_ref().map(Vec::len),
+            observed_roles: state.observed_roles.as_deref(),
+            convergence_gates: kind_spec.and_then(|ks| ks.convergence_gates.as_ref()),
         })?;
 
         Ok(TrustHint {
@@ -698,6 +700,8 @@ impl<S: StorePort> MedhaEngine<S> {
             thresholds,
             recency_config,
             rejecting_authors: next_state.rejecting_authors.as_ref().map(Vec::len),
+            observed_roles: next_state.observed_roles.as_deref(),
+            convergence_gates: kind_spec.and_then(|ks| ks.convergence_gates.as_ref()),
         })?;
 
         let projected_trust = computation.trust;
@@ -993,6 +997,7 @@ impl<S: StorePort> MedhaEngine<S> {
                     title: title.to_string(),
                     rationale: rationale.to_string(),
                     tags,
+                    context_targets: None,
                 },
             },
         };

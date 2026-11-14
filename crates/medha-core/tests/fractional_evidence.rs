@@ -35,6 +35,8 @@ fn status_for(k: f64, n: f64, mu: f64) -> LifecycleStatus {
         thresholds: &thresholds,
         recency_config: &recency_config,
         rejecting_authors: None,
+        observed_roles: None,
+        convergence_gates: None,
     })
     .expect("trust computes")
     .status

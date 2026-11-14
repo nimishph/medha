@@ -103,13 +103,27 @@ pub enum EpisodePayload {
     },
 }
 
-/// A host-authored definition (title, rationale, tags). Never evidential.
+/// Context targets for selective packing (medha-c8z.1).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextTargets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub languages: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keywords: Option<Vec<String>>,
+}
+
+/// A host-authored definition (title, rationale, tags, context targets). Never evidential.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EntityDefinition {
     pub title: String,
     pub rationale: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
+    #[serde(default, alias = "context_targets", skip_serializing_if = "Option::is_none")]
+    pub context_targets: Option<ContextTargets>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -170,6 +184,9 @@ pub struct EntityState {
     /// retirement (spec §6 step 5.1). Kept as written: this engine does not apply kind specs yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rejecting_authors: Option<Vec<String>>,
+    /// Distinct agent roles observed among successes (medha-c8z.3).
+    #[serde(default, alias = "observed_roles", skip_serializing_if = "Option::is_none")]
+    pub observed_roles: Option<Vec<String>>,
     #[serde(
         default,
         alias = "decision_tree",

@@ -14,6 +14,7 @@ import {
   assignSeq,
   buildHint,
   type Context,
+  type ContextFilter,
   type CorruptLocation,
   convergingSourcesPolicy,
   DAY_MS,
@@ -28,6 +29,7 @@ import {
   episodeToInput,
   evaluateGates,
   findDanglingRetractions,
+  findPitfalls,
   foldDecisionTree,
   foldDefinitions,
   foldEpisode,
@@ -50,6 +52,7 @@ import {
   type Page,
   type PageRequest,
   PermissionDeniedError,
+  type Pitfall,
   type PromotionContext,
   type PromotionDecision,
   type PromotionPolicy,
@@ -66,6 +69,8 @@ import {
   type SyncPort,
   sanitizeContext,
   scoreDecisionTree,
+  TrajectoryDistillerMiner,
+  type TrajectoryEvidence,
   validateDecisionTreeEdit,
   validateSignalSpec,
   wilsonWidth,
@@ -592,6 +597,11 @@ export class Medha {
     const estimator = options.costEstimator ?? defaultCostEstimator;
 
     let packCandidates: PackCandidate<T>[];
+    const definitions =
+      options.contextFilter !== undefined
+        ? foldDefinitions(await this.store.episodes())
+        : undefined;
+
     if (options.candidates !== undefined) {
       const keys = options.candidates.map((c) => c.key);
       const hints = await this.hints(keys, context);
@@ -606,12 +616,14 @@ export class Medha {
             this.kindSpecFor(item.key.kind),
           );
         const cost = item.cost ?? estimator(hint, item.key);
+        const def = definitions?.get(entityKeyString(item.key));
         packCandidates.push({
           key: item.key,
           hint,
           cost,
           ...(item.mandatory === undefined ? {} : { mandatory: item.mandatory }),
           ...(item.payload === undefined ? {} : { payload: item.payload }),
+          ...(def?.contextTargets !== undefined ? { contextTargets: def.contextTargets } : {}),
         });
       }
     } else {
@@ -626,10 +638,12 @@ export class Medha {
         )
         .map((state) => {
           const hint = buildHint(state, context.now, this.kindSpecFor(state.key.kind));
+          const def = definitions?.get(entityKeyString(state.key));
           return {
             key: state.key,
             hint,
             cost: estimator(hint, state.key),
+            ...(def?.contextTargets !== undefined ? { contextTargets: def.contextTargets } : {}),
           };
         });
     }
@@ -645,9 +659,92 @@ export class Medha {
         ? {}
         : { allowQuarantined: options.allowQuarantined }),
       ...(options.allowRetired === undefined ? {} : { allowRetired: options.allowRetired }),
+      ...(options.contextFilter === undefined ? {} : { contextFilter: options.contextFilter }),
+      ...(options.pitfalls === undefined ? {} : { includePitfalls: options.pitfalls }),
     };
 
     return packEntities(packCandidates, policy);
+  }
+
+  /**
+   * Context-Aware Evidential Pack (medha-c8z.1):
+   * Selectively packs rules relevant to the active files, language, and task keywords.
+   */
+  async hintsForContext(
+    filter: ContextFilter,
+    options: { readonly budget?: number; readonly kind?: string; readonly namespace?: string } = {},
+    context: Context,
+  ): Promise<PackOutcome> {
+    return this.pack(
+      {
+        budget: options.budget ?? 2000,
+        contextFilter: filter,
+        ...(options.kind !== undefined ? { kind: options.kind } : {}),
+        ...(options.namespace !== undefined ? { namespace: options.namespace } : {}),
+      },
+      context,
+    );
+  }
+
+  /**
+   * Negative-Evidence Pitfalls Radar (medha-c8z.4):
+   * Detects high-confidence traps, anti-patterns, and repeatedly failing rules/guards.
+   */
+  async detectPitfalls(
+    options: {
+      readonly kind?: string;
+      readonly namespace?: string;
+      readonly minFailures?: number;
+      readonly limit?: number;
+      readonly now?: number;
+    } = {},
+    context: Context = { now: options.now ?? Date.now() },
+  ): Promise<readonly Pitfall[]> {
+    sanitizeContext(context);
+    await this.openForRead();
+    const states = await this.store.list();
+    const filtered = states.filter(
+      (s) =>
+        (options.kind === undefined || s.key.kind === options.kind) &&
+        (options.namespace === undefined || s.key.namespace === options.namespace),
+    );
+    const hints = filtered.map((s) => buildHint(s, context.now, this.kindSpecFor(s.key.kind)));
+    const pitfalls = findPitfalls(hints, { minFailures: options.minFailures ?? 5 });
+    return options.limit !== undefined ? pitfalls.slice(0, options.limit) : pitfalls;
+  }
+
+  /**
+   * Autonomous Retrospective Trajectory Distiller (medha-c8z.5):
+   * Mines empirical lessons from resolved incidents into candidate rules with commit anchors.
+   */
+  async distillTrajectory(
+    trajectory: TrajectoryEvidence,
+    options: { readonly autoFile?: boolean } = {},
+    context: Context = { now: Date.now() },
+  ): Promise<{ readonly proposals: readonly Proposal[]; readonly filedCount: number }> {
+    sanitizeContext(context);
+    const distiller = new TrajectoryDistillerMiner();
+    const proposals = await distiller.mine([trajectory], context);
+    let filedCount = 0;
+    if (options.autoFile === true) {
+      await this.ensureOpen();
+      for (const p of proposals) {
+        if (!p.key) continue;
+        await this.propose(
+          {
+            key: p.key,
+            description: p.description,
+            anchor: p.anchor,
+            provenance: p.provenance,
+            theta0: p.theta0,
+            note: p.note,
+          },
+          context,
+        );
+        filedCount++;
+      }
+    }
+    return { proposals, filedCount };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1597,6 +1694,10 @@ export interface EnginePackOptions<T = unknown> {
   readonly allowRetired?: boolean | undefined;
   /** Seed override for deterministic exploration (defaults to context.seed). */
   readonly seed?: number | undefined;
+  /** Filter candidates by active files/languages/query keywords (medha-c8z.1). */
+  readonly contextFilter?: ContextFilter | undefined;
+  /** Include high-confidence negative evidence pitfalls radar (medha-c8z.4). */
+  readonly pitfalls?: boolean | undefined;
 }
 
 export interface Candidate {

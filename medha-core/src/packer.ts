@@ -1,3 +1,4 @@
+import type { ContextTargets } from './definition.ts';
 import type { EntityKey } from './entity.ts';
 import { entityKeyString } from './episode.ts';
 import { InvalidArgumentError } from './errors.ts';
@@ -7,6 +8,72 @@ import { round6 } from './rounding.ts';
 import { wilsonWidth } from './wilson.ts';
 
 export const DEFAULT_EXPLORATION_RATIO = 0.15;
+
+export interface ContextFilter {
+  /** File paths or globs in the active agent task. */
+  readonly files?: readonly string[] | undefined;
+  /** Active programming languages (e.g. ['typescript', 'rust']). */
+  readonly languages?: readonly string[] | undefined;
+  /** Active user query, task prompt, or keywords. */
+  readonly query?: string | undefined;
+}
+
+function globToRegex(pattern: string): RegExp {
+  const escaped = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '.*')
+    .replace(/(?<!\.)\*/g, '[^/]*');
+  return new RegExp(`^${escaped}$`, 'i');
+}
+
+/** Check if candidate context targets match the query/active context (medha-c8z.1). */
+export function matchesContextTargets(
+  targets: ContextTargets | undefined,
+  filter: ContextFilter | undefined,
+): boolean {
+  if (filter === undefined || targets === undefined) return true;
+  const hasFiles = (targets.files?.length ?? 0) > 0;
+  const hasLanguages = (targets.languages?.length ?? 0) > 0;
+  const hasKeywords = (targets.keywords?.length ?? 0) > 0;
+  if (!hasFiles && !hasLanguages && !hasKeywords) return true;
+
+  if (hasFiles && filter.files && filter.files.length > 0) {
+    for (const pattern of targets.files ?? []) {
+      const rx = pattern.includes('*') ? globToRegex(pattern) : undefined;
+      for (const file of filter.files) {
+        if (
+          file === pattern ||
+          file.endsWith(pattern) ||
+          pattern.endsWith(file) ||
+          file.includes(pattern) ||
+          rx?.test(file) === true
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  if (hasLanguages && filter.languages && filter.languages.length > 0) {
+    const targetLangs = (targets.languages ?? []).map((l) => l.toLowerCase());
+    for (const lang of filter.languages) {
+      if (targetLangs.includes(lang.toLowerCase())) {
+        return true;
+      }
+    }
+  }
+
+  if (hasKeywords && filter.query) {
+    const q = filter.query.toLowerCase();
+    for (const kw of targets.keywords ?? []) {
+      if (q.includes(kw.toLowerCase())) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 /** A candidate entity presented to the evidential token budget packer. */
 export interface PackCandidate<T = unknown> {
@@ -18,6 +85,19 @@ export interface PackCandidate<T = unknown> {
   readonly mandatory?: boolean | undefined;
   /** Optional application-specific payload (e.g. prompt text, rule markdown, tool definition). */
   readonly payload?: T | undefined;
+  /** Optional context targets for selective context matching (medha-c8z.1). */
+  readonly contextTargets?: ContextTargets | undefined;
+}
+
+/** High-confidence negative evidence pitfall warning (medha-c8z.4). */
+export interface Pitfall {
+  readonly key: EntityKey;
+  readonly status: 'quarantined' | 'retired';
+  readonly trials: number;
+  readonly successes: number;
+  readonly failingGuard?: string | undefined;
+  readonly lastNote?: string | undefined;
+  readonly reason: string;
 }
 
 /** Configuration policy governing evidential context packing. */
@@ -37,6 +117,10 @@ export interface PackPolicy {
   readonly allowQuarantined?: boolean | undefined;
   /** Allow retired entities into candidate pool (default: false). */
   readonly allowRetired?: boolean | undefined;
+  /** Filter candidates by active files/languages/query keywords (medha-c8z.1). */
+  readonly contextFilter?: ContextFilter | undefined;
+  /** Include high-confidence negative-evidence pitfalls radar (medha-c8z.4). */
+  readonly includePitfalls?: boolean | undefined;
 }
 
 /** An entity selected into the packed context. */
@@ -63,6 +147,8 @@ export interface PackOutcome<T = unknown> {
   readonly mandatoryCount: number;
   readonly probationCount: number;
   readonly meritCount: number;
+  /** High-confidence pitfalls radar if requested (medha-c8z.4). */
+  readonly pitfalls?: readonly Pitfall[] | undefined;
 }
 
 function compareKey(a: EntityKey, b: EntityKey): number {
@@ -76,13 +162,48 @@ function uncertaintyOf(hint: EvidentialHint): number {
 }
 
 /**
+ * Identify high-confidence negative evidence (medha-c8z.4):
+ * Retired and quarantined entities with n >= minFailures (default 5) or failing guards.
+ */
+export function findPitfalls(
+  candidatesOrHints: readonly (PackCandidate | EvidentialHint)[],
+  options: { readonly minFailures?: number } = {},
+): readonly Pitfall[] {
+  const minFailures = options.minFailures ?? 5;
+  const pitfalls: Pitfall[] = [];
+  for (const item of candidatesOrHints) {
+    const hint = 'hint' in item ? item.hint : item;
+    if (hint.status !== 'retired' && hint.status !== 'quarantined') continue;
+    const trials = hint.evidence.totalTrials;
+    const guardFailing = hint.components.guard === 0;
+    if (trials >= minFailures || guardFailing) {
+      const reason =
+        hint.status === 'retired'
+          ? `Retired after ${trials} trials with low trust (${hint.evidence.successes} successes)`
+          : `Quarantined (${guardFailing ? 'guard failed' : 'downward weight drift'})`;
+      pitfalls.push({
+        key: hint.key,
+        status: hint.status,
+        trials,
+        successes: hint.evidence.successes,
+        failingGuard: guardFailing ? 'guard' : undefined,
+        lastNote: hint.lastNote,
+        reason,
+      });
+    }
+  }
+  return pitfalls;
+}
+
+/**
  * Pure evidential token-budget packer:
  *
  * 1. Filters out quarantined and retired entities (unless explicitly permitted).
- * 2. Mandatory Stage: Pins mandatory candidates up to available budget.
- * 3. Exploration Stage: Allocates up to `explorationRatio * remainingBudget` for probation
+ * 2. Matches active context targets (files, languages, keywords).
+ * 3. Mandatory Stage: Pins mandatory candidates up to available budget.
+ * 4. Exploration Stage: Allocates up to `explorationRatio * remainingBudget` for probation
  *    entities sampled via seeded Wilson-interval uncertainty (least-known tried soonest).
- * 4. Merit Stage: Packs remaining budget with highest density (trustScore / cost) greedy
+ * 5. Merit Stage: Packs remaining budget with highest density (trustScore / cost) greedy
  *    knapsack with lookahead, absorbing any unused exploration budget.
  */
 export function packEntities<T = unknown>(
@@ -111,6 +232,8 @@ export function packEntities<T = unknown>(
     }
   }
 
+  const pitfalls = policy.includePitfalls ? findPitfalls(candidates) : undefined;
+
   if (policy.budget === 0 || candidates.length === 0) {
     return {
       selected: [],
@@ -122,17 +245,27 @@ export function packEntities<T = unknown>(
       mandatoryCount: 0,
       probationCount: 0,
       meritCount: 0,
+      ...(pitfalls !== undefined ? { pitfalls } : {}),
     };
   }
 
   const allowQuarantined = policy.allowQuarantined ?? false;
   const allowRetired = policy.allowRetired ?? false;
 
-  // Filter candidates by lifecycle and trust (mandatory items bypass minTrust)
+  // Filter candidates by context targets, lifecycle, and trust (mandatory items bypass minTrust)
   const eligible: PackCandidate<T>[] = [];
   const rejected: PackCandidate<T>[] = [];
 
   for (const c of candidates) {
+    // Context targets matching (medha-c8z.1)
+    if (
+      c.contextTargets !== undefined &&
+      !matchesContextTargets(c.contextTargets, policy.contextFilter)
+    ) {
+      rejected.push(c);
+      continue;
+    }
+
     const status = c.hint.status;
     if (status === 'quarantined' && !allowQuarantined) {
       rejected.push(c);
@@ -263,5 +396,6 @@ export function packEntities<T = unknown>(
     mandatoryCount,
     probationCount,
     meritCount,
+    ...(pitfalls !== undefined ? { pitfalls } : {}),
   };
 }

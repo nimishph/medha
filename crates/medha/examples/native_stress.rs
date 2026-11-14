@@ -87,6 +87,8 @@ fn main() {
             thresholds: &thresholds,
             recency_config: &recency_config,
             rejecting_authors: None,
+            observed_roles: None,
+            convergence_gates: None,
         })
         .unwrap();
 

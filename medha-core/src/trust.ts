@@ -180,17 +180,38 @@ export function statusForTrust(
   // verified, so it can never be trusted — whatever a per-kind threshold says.
   const trustedThreshold = kindSpec?.thresholds?.trusted ?? TRUSTED_THRESHOLD;
   const minUsesForTrusted = kindSpec?.thresholds?.minUsesForTrusted ?? MIN_USES_FOR_TRUSTED;
+  const gates = kindSpec?.convergenceGates;
+  const observedRoles = state.observedRoles ?? [];
+
   if (
     trust.trust >= trustedThreshold &&
     state.evidence.n >= minUsesForTrusted &&
     state.guard.lastOk === true &&
     !isUnguarded(state.guard)
   ) {
-    return 'trusted';
+    if (gates) {
+      const minRolesForTrusted = gates.minDistinctRolesForTrusted ?? 1;
+      const requiredRoles = gates.requiredRolesForTrusted ?? [];
+      const hasEnoughRoles = observedRoles.length >= minRolesForTrusted;
+      const hasRequiredRoles = requiredRoles.every((r) => observedRoles.includes(r));
+      if (hasEnoughRoles && hasRequiredRoles) {
+        return 'trusted';
+      }
+    } else {
+      return 'trusted';
+    }
   }
 
   const activeThreshold = kindSpec?.thresholds?.active ?? ACTIVE_THRESHOLD;
-  if (trust.trust >= activeThreshold) return 'active';
+  if (trust.trust >= activeThreshold) {
+    if (gates?.minDistinctRolesForActive !== undefined) {
+      if (observedRoles.length >= gates.minDistinctRolesForActive) {
+        return 'active';
+      }
+    } else {
+      return 'active';
+    }
+  }
   return 'probation';
 }
 

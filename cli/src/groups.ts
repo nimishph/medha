@@ -29,6 +29,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
       'remove-episode',
       'override',
       'reinstate',
+      'distill',
     ],
   },
   {
