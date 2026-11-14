@@ -250,7 +250,25 @@ tools it may call. `reinstate` has no MCP tool, on purpose.
 
 ## Use it from an agent (MCP)
 
-Register the server in your project's `.mcp.json`:
+### Claude Code plugin (Recommended)
+
+In Claude Code, install medha directly from the sutras marketplace:
+
+```text
+/plugin marketplace add nimishph/cntxt-labs
+/plugin install medha@cntxt-labs
+```
+
+The plugin automatically provides:
+- The bundled MCP server pinned to the current version
+- The agent evidential memory skill (`/medha:agent`)
+- Automated **SessionStart** hooks injecting trusted rules into active context
+- Automated **PostToolUse** hooks recording test/lint guard results into memory
+- Slash commands: `/medha:hints`, `/medha:propose`, `/medha:why`, `/medha:status`, `/medha:drift`, `/medha:pack`
+
+### Manual MCP Setup
+
+For manual setup or other clients (Cursor, GitHub Copilot, opencode, Claude Desktop), register the server in `.mcp.json`:
 
 ```json
 { "mcpServers": { "medha": { "command": "medha", "args": ["mcp", "serve"] } } }
@@ -264,30 +282,6 @@ other servers there. Without `--write` it prints the snippet; `--scope user`, `-
 
 Then copy [`SKILL.md`](SKILL.md) to
 `.claude/skills/medha/SKILL.md` so the agent knows when and how to use it.
-
-| Tool | Purpose |
-|---|---|
-| `hints` | Batch-fetch trust hints for the entities you are about to rely on. Returns `{ hints, unknown }`; treat `unknown` as probation. |
-| `list_entities` | Paginated search by kind, status, namespace or drift. |
-| `show_entity` | Full detail for one entity: components, temporal state, recent episodes. |
-| `record_signal` | Record `APPLY`, `REJECT_RULE`, `SKIP`, and so on. Returns `recorded: false` for an unknown entity unless `ensure` is set. Pass `caseId` to also teach a decision-tree branch. |
-| `record_decision` | Create or edit a branch of an entity's decision tree. Pass `parentId` to nest it, or `detach: true` to promote it to the top level. Returns the minted `caseId`. |
-| `report_guard` | Record a guard result. |
-| `propose` | Submit a candidate entity. |
-| `drift` | List drifting entities. |
-| `simulate` | Preview a signal's effect; persists nothing. |
-| `status` | Engine health and preflight. |
-
-### Claude Code plugin
-
-In Claude Code, the plugin brings the MCP server (pinned to this version, through `npx`), the agent
-skill and four read-side slash commands (`/medha:hints`, `/medha:status`, `/medha:drift`,
-`/medha:pack`) in one install:
-
-```text
-/plugin marketplace add nimishph/cntxt-labs
-/plugin install medha@cntxt-labs
-```
 
 ### Fitting trust into a prompt
 

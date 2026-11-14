@@ -79,10 +79,115 @@ describe('Claude Code plugin freshness', () => {
   });
 
   test('every command file declares a frontmatter description', () => {
-    const commands = ['status', 'hints', 'drift', 'pack'];
+    const commands = ['status', 'hints', 'drift', 'pack', 'propose', 'why'];
     for (const name of commands) {
       const text = read(`plugin/commands/${name}.md`);
       expect(text).toMatch(/^---\ndescription: .+\n---\n/);
     }
+  });
+
+  test('SKILL.md commands and MCP tools exist in the CLI and MCP server (medha-wt5.1)', async () => {
+    const rootSkill = read('SKILL.md');
+    const { COMMAND_GROUPS } = await import('../cli/src/groups.ts');
+    const knownCommands = new Set(COMMAND_GROUPS.flatMap((g) => g.commands));
+
+    // Every CLI command named in SKILL.md as `medha <cmd>` must exist in COMMAND_GROUPS
+    const cliMatches = Array.from(rootSkill.matchAll(/`medha ([a-z0-9-]+)(?: [^`]+)?`/g));
+    const extractedCommands = new Set(
+      cliMatches.map((m) => m[1]).filter((c): c is string => typeof c === 'string'),
+    );
+    for (const cmd of extractedCommands) {
+      expect(knownCommands.has(cmd)).toBe(true);
+    }
+
+    // Every MCP tool named in SKILL.md must exist in cli/src/mcp.ts
+    const mcpSource = read('cli/src/mcp.ts');
+    const mcpTools = new Set(
+      Array.from(mcpSource.matchAll(/server\.(?:registerTool|tool)\(\s*['"]([a-z_]+)['"]/g)).map(
+        (m) => m[1],
+      ),
+    );
+    const expectedSkillTools = [
+      'hints',
+      'record_signal',
+      'report_guard',
+      'record_decision',
+      'propose',
+      'show_entity',
+      'simulate',
+      'retract_episode',
+      'primer',
+    ];
+    for (const tool of expectedSkillTools) {
+      expect(mcpTools.has(tool)).toBe(true);
+    }
+
+    // Verify site/agent-skill.md (if generated) contains the core text of SKILL.md
+    if (existsSync(`${root}site/agent-skill.md`)) {
+      const siteSkill = read('site/agent-skill.md');
+      expect(siteSkill).toContain('Mental Model: Dual-Loop Architecture');
+      expect(siteSkill).toContain('Per-kind policy (kindSpecs)');
+    }
+  });
+
+  test('hooks manifest and scripts exist with valid structure (medha-wt5.2, medha-wt5.3, medha-wt5.4)', () => {
+    expect(existsSync(`${root}plugin/hooks/hooks.json`)).toBe(true);
+    expect(existsSync(`${root}plugin/scripts/session-start.cjs`)).toBe(true);
+    expect(existsSync(`${root}plugin/scripts/post-tool-use.cjs`)).toBe(true);
+    expect(existsSync(`${root}plugin/scripts/run-cli.cjs`)).toBe(true);
+
+    const hooks = readJson('plugin/hooks/hooks.json') as {
+      hooks?: {
+        SessionStart?: Array<{ hooks?: Array<{ command?: string }> }>;
+        PostToolUse?: Array<{ matcher?: string; hooks?: Array<{ command?: string }> }>;
+      };
+    };
+    expect(hooks.hooks?.SessionStart?.[0]?.hooks?.[0]?.command).toContain('session-start.cjs');
+    expect(hooks.hooks?.PostToolUse?.[0]?.matcher).toBe('Bash');
+    expect(hooks.hooks?.PostToolUse?.[0]?.hooks?.[0]?.command).toContain('post-tool-use.cjs');
+  });
+
+  test('SessionStart hook exits silently when .medha/ is missing (medha-wt5.3)', () => {
+    const { spawnSync } = require('node:child_process');
+    const script = `${root}plugin/scripts/session-start.cjs`;
+    const res = spawnSync(process.execPath, [script], {
+      env: { ...process.env, CLAUDE_PROJECT_DIR: `${root}node_modules` },
+      encoding: 'utf8',
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe('');
+  });
+
+  test('PostToolUse hook parses guard mappings and matches commands correctly (medha-wt5.4)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseGuardMappings, normalizeCommand } =
+      require('../plugin/scripts/post-tool-use.cjs') as {
+        parseGuardMappings: (config: Record<string, unknown>) => Array<{
+          command: string;
+          guard: string;
+          entities: string[];
+        }>;
+        normalizeCommand: (cmd: string) => string;
+      };
+    expect(normalizeCommand('  bun   test   ')).toBe('bun test');
+
+    const config = {
+      guards: [{ command: 'bun test', guard: 'test', entities: ['rule:my-rule'] }],
+      commandGuards: {
+        'bun run lint': { guard: 'lint', entities: ['rule:lint-rule'] },
+      },
+    };
+    const mappings = parseGuardMappings(config);
+    expect(mappings).toHaveLength(2);
+    expect(mappings[0]).toEqual({
+      command: 'bun test',
+      guard: 'test',
+      entities: ['rule:my-rule'],
+    });
+    expect(mappings[1]).toEqual({
+      command: 'bun run lint',
+      guard: 'lint',
+      entities: ['rule:lint-rule'],
+    });
   });
 });
