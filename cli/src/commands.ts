@@ -13,6 +13,7 @@ import {
   decisionCommandArgs,
   defineCommandArgs,
   distillCommandArgs,
+  docsCommandArgs,
   driftCommandArgs,
   explainThresholdCommandArgs,
   guardCommandArgs,
@@ -405,6 +406,40 @@ export const reportCommand = defineCommand({
       environment,
     );
     environment.stdout(args.json === true ? toJson(outcome) : renderReport(outcome));
+  },
+});
+
+export const docsCommand = defineCommand({
+  meta: {
+    name: 'docs',
+    description: 'Launch the zero-dependency local documentation reader server.',
+  },
+  args: docsCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { startDocsServer } = await import('./docs.ts');
+    const handle = await startDocsServer(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.port === undefined ? {} : { port: args.port }),
+        ...(args.host === undefined ? {} : { host: args.host }),
+        ...(args.open === true ? { open: true } : {}),
+      },
+      environment,
+    );
+    environment.stdout(
+      `medha docs: documentation server running at ${handle.url}\n  Press Ctrl+C to stop.\n`,
+    );
+
+    await new Promise<void>((resolve) => {
+      process.on('SIGINT', () => {
+        void handle.close().then(() => resolve());
+      });
+      process.on('SIGTERM', () => {
+        void handle.close().then(() => resolve());
+      });
+    });
   },
 });
 
@@ -1069,6 +1104,7 @@ export const commands = defineCommand({
     primer: primerCommand,
     ui: uiCommand,
     report: reportCommand,
+    docs: docsCommand,
     issue: issueCommand,
     maintain: maintainCommand,
     updater: updaterCommand,

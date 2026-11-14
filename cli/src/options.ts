@@ -502,6 +502,29 @@ export const uiCommandArgs: ArgsDef = {
   },
 };
 
+export const docsCommandArgs: ArgsDef = {
+  dir: {
+    type: 'string',
+    description: 'Project directory whose .medha/ home to open. Default: cwd.',
+  },
+  home: {
+    type: 'string',
+    description: 'Engine home directory, overriding <dir>/.medha.',
+  },
+  port: {
+    type: 'string',
+    description: 'Port to bind the docs reader server (default: 8449).',
+  },
+  host: {
+    type: 'string',
+    description: 'Host to bind the docs reader server (default: 127.0.0.1).',
+  },
+  open: {
+    type: 'boolean',
+    description: 'Open the documentation in the default browser on launch.',
+  },
+};
+
 export const reportCommandArgs: ArgsDef = {
   ...readCommonArgs,
   out: {
