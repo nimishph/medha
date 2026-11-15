@@ -434,3 +434,59 @@ fn test_cli_refuses_signals_and_kinds_the_store_does_not_register() {
     assert!(!lint.status.success(), "kind 'lint' is not registered here");
     assert!(String::from_utf8_lossy(&lint.stderr).contains("Unknown kind 'lint'"));
 }
+
+#[test]
+fn test_cli_policy_decision_tree_and_require_human_gate() {
+    let dir = tempdir().expect("tempdir");
+    let bin = get_bin();
+    let home = dir.path().to_str().unwrap();
+
+    let out = Command::new(&bin)
+        .args(["--home", home, "init"])
+        .output()
+        .expect("init");
+    assert!(out.status.success());
+
+    let out = Command::new(&bin)
+        .args([
+            "--home", home, "define", "--id", "db-migration",
+            "--title", "DB Migration Policy", "--rationale", "Regulated migrations"
+        ])
+        .output()
+        .expect("define");
+    assert!(out.status.success());
+
+    let out = Command::new(&bin)
+        .args([
+            "--home", home, "decision", "--id", "db-migration",
+            "--condition", "env == 'production'", "--apply"
+        ])
+        .output()
+        .expect("decision");
+    assert!(out.status.success());
+
+    let out = Command::new(&bin)
+        .args([
+            "--home", home, "policy", "--id", "db-migration",
+            "--context", "{\"env\":\"production\"}", "--json"
+        ])
+        .output()
+        .expect("policy");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let val: serde_json::Value = serde_json::from_str(&stdout).expect("parse json");
+    assert_eq!(val.get("allowed").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(val.get("recommendation").and_then(|v| v.as_str()), Some("proceed"));
+
+    let out2 = Command::new(&bin)
+        .args([
+            "--home", home, "policy", "--id", "db-migration",
+            "--context", "{\"env\":\"production\"}"
+        ])
+        .output()
+        .expect("policy text");
+    assert!(out2.status.success());
+    let stdout2 = String::from_utf8_lossy(&out2.stdout);
+    assert!(stdout2.contains("policy: ALLOW [approved]"));
+    assert!(stdout2.contains("recommendation: proceed"));
+}

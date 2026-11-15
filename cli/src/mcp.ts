@@ -891,6 +891,61 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
       }),
   );
 
+  // 18. policy_latch (medha-534)
+  server.registerTool(
+    'policy_latch',
+    {
+      description:
+        'Regulated agent compliance policy gateway: checks Medha decision trees and requireHumanFor gating before high-risk mutations execute (medha-534).',
+      annotations: READ_ONLY,
+      inputSchema: {
+        id: z.string().describe('Entity id to evaluate policy against.'),
+        kind: z.string().optional().describe('Entity kind. Default: rule.'),
+        namespace: z.string().optional().describe('Entity namespace. Default: empty string.'),
+        context: z
+          .union([z.string(), z.record(z.string(), z.unknown())])
+          .optional()
+          .describe(
+            'Context string, condition query, or attributes map (e.g. { environment: "production", action: "deploy" }).',
+          ),
+        author: z
+          .string()
+          .optional()
+          .describe(
+            'Author proposing the action (e.g. agent:claude, human:alice). Default: anonymous.',
+          ),
+        action: z.string().optional().describe('Action name or proposed mutation.'),
+        minTrust: z.number().optional().describe('Minimum trust score required to execute.'),
+        compact: z.boolean().optional().describe('If true, return compact output.'),
+      },
+    },
+    ({ id, kind, namespace, context, author, action, minTrust, compact }) =>
+      respond(async () => {
+        const outcome = await engine.policyLatch(
+          {
+            key: { namespace: namespace ?? '', kind: kind ?? 'rule', id },
+            context,
+            author,
+            action,
+            minTrust,
+          },
+          { now: environment.now() },
+        );
+        return compact === true
+          ? {
+              allowed: outcome.allowed,
+              latched: outcome.latched,
+              requiresHuman: outcome.requiresHuman,
+              recommendation: outcome.recommendation,
+              reason: outcome.reason,
+              trust: outcome.trust,
+              status: outcome.status,
+              explanation: outcome.explanation,
+            }
+          : outcome;
+      }, compact === true),
+  );
+
   server.tool(
     'primer',
     'Get concise, token-frugal guidance on Medha concepts, architecture, signals, guards, decisions, drift, config, or sync.',

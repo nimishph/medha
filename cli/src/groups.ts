@@ -36,7 +36,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
     title: 'Look things up',
     commands: ['list', 'show', 'status', 'drift', 'hints', 'explain-threshold', 'simulate'],
   },
-  { title: 'Feed an agent', commands: ['pack', 'mcp'] },
+  { title: 'Feed an agent', commands: ['pack', 'mcp', 'policy'] },
   { title: 'Dashboard and reports', commands: ['ui', 'report', 'docs'] },
   {
     title: 'Maintain and share',

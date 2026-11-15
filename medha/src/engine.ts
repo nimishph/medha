@@ -30,6 +30,7 @@ import {
   episodeId,
   episodeToInput,
   evaluateGates,
+  evaluatePolicyLatch,
   type FoldEpisodeOptions,
   findDanglingRetractions,
   findPitfalls,
@@ -56,6 +57,8 @@ import {
   type PageRequest,
   PermissionDeniedError,
   type Pitfall,
+  type PolicyLatchInput,
+  type PolicyLatchOutcome,
   type PromotionContext,
   type PromotionDecision,
   type PromotionPolicy,
@@ -847,6 +850,34 @@ export class Medha {
       }
     }
     return { proposals, filedCount };
+  }
+
+  /**
+   * PolicyLatch (medha-534):
+   * Regulated agent compliance & human gatekeeper via decision trees and requireHumanFor.
+   * Checks Medha decision trees, requiring human review/reinstatement before high-risk mutations execute.
+   */
+  async policyLatch(
+    input: PolicyLatchInput,
+    context: Context = { now: Date.now() },
+  ): Promise<PolicyLatchOutcome> {
+    sanitizeContext(context);
+    await this.openForRead();
+    this.validateKey(input.key);
+    this.requireKind(input.key);
+
+    const keyString = entityKeyString(input.key);
+    const [state, log] = await Promise.all([this.store.get(input.key), this.store.episodes()]);
+    const episodes = log.filter((episode) => entityKeyString(episode.key) === keyString);
+    const counted = this.admitted(episodes);
+    const kindSpec = this.kindSpecFor(input.key.kind);
+    const decisionTree = foldDecisionTree(counted, input.key, kindSpec);
+    const latch = latchOf(log, episodes, this.kindRegistry());
+
+    const effectiveState =
+      state ?? (episodes.length > 0 ? freshState(input.key, context.now) : null);
+
+    return evaluatePolicyLatch(effectiveState, decisionTree, kindSpec, input, context.now, latch);
   }
 
   // -------------------------------------------------------------------------------------------

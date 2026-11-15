@@ -2204,7 +2204,7 @@ describe('medha mcp server', () => {
     try {
       const { client } = session;
       const tools = (await client.listTools()).tools.map((t) => t.name);
-      expect(tools).toHaveLength(18);
+      expect(tools).toHaveLength(19);
       expect(tools).toEqual(
         expect.arrayContaining([
           'hints',
@@ -2225,6 +2225,7 @@ describe('medha mcp server', () => {
           'verify_guard',
           'detect_pitfalls',
           'distill_trajectory',
+          'policy_latch',
         ]),
       );
 
@@ -2382,6 +2383,12 @@ describe('medha mcp server', () => {
       expect(primerRes.isError).toBe(false);
       expect(primerRes.body.topic).toBe('signals');
       expect(primerRes.body.content).toContain('APPLY');
+
+      // 18. policy_latch (medha-534)
+      const policyRes = await call(client, 'policy_latch', { id: 't1' });
+      expect(policyRes.isError).toBe(false);
+      expect(policyRes.body.allowed).toBeDefined();
+      expect(policyRes.body.recommendation).toBeDefined();
     } finally {
       await session.close();
     }
@@ -2422,7 +2429,7 @@ describe('medha mcp server', () => {
           );
         } else if (msg.id === 2) {
           sawTools = true;
-          expect(msg.result?.tools).toHaveLength(18);
+          expect(msg.result?.tools).toHaveLength(19);
           proc.stdin.end();
         }
       }
@@ -2867,6 +2874,85 @@ describe('extensibility and resilient kind scoping (TASK-EXT-04 & TASK-EXT-05)',
       expect(output).toContain('medha: prepared issue on GitHub:');
       expect(output).toContain('title: Bug report uninitialized');
       expect(output).toContain('url:   https://github.com/nimishph/medha/issues/new');
+    });
+  });
+
+  describe('medha policy command (medha-534)', () => {
+    test('policy checks decision trees and requireHumanFor gating', async () => {
+      const repo = fresh();
+      expect(await runCli(['init'], repo.env)).toBe(0);
+
+      expect(
+        await runCli(
+          [
+            'define',
+            '--id',
+            'db-migration',
+            '--title',
+            'DB Migration Policy',
+            '--rationale',
+            'Regulated migration rules',
+          ],
+          repo.env,
+        ),
+      ).toBe(0);
+
+      expect(
+        await runCli(
+          [
+            'decision',
+            '--id',
+            'db-migration',
+            '--condition',
+            "env == 'production'",
+            '--apply',
+            '--author',
+            'human:admin',
+          ],
+          repo.env,
+        ),
+      ).toBe(0);
+
+      const before = repo.out().length;
+      expect(
+        await runCli(
+          [
+            'policy',
+            '--id',
+            'db-migration',
+            '--context',
+            '{"env":"production"}',
+            '--author',
+            'human:alice',
+            '--json',
+          ],
+          repo.env,
+        ),
+      ).toBe(0);
+      const out = repo.out().slice(before);
+      const res = JSON.parse(out);
+      expect(res.allowed).toBe(true);
+      expect(res.recommendation).toBe('proceed');
+      expect(res.reason).toBe('approved');
+
+      const beforeText = repo.out().length;
+      expect(
+        await runCli(
+          [
+            'policy',
+            '--id',
+            'db-migration',
+            '--context',
+            '{"env":"production"}',
+            '--author',
+            'human:alice',
+          ],
+          repo.env,
+        ),
+      ).toBe(0);
+      const textOut = repo.out().slice(beforeText);
+      expect(textOut).toContain('policy: ALLOW [approved]');
+      expect(textOut).toContain('recommendation: proceed');
     });
   });
 });
