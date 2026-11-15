@@ -3,6 +3,7 @@ import { defineCommand } from 'citty';
 import { currentEnvironment } from './environment.ts';
 import { type InitOptions, runInit } from './init.ts';
 import type { RenderOptions } from './integrations/render.ts';
+import { keysCommand } from './keys-command.ts';
 import {
   runMaintainBackup,
   runMaintainCompact,
@@ -1110,5 +1111,6 @@ export const commands = defineCommand({
     updater: updaterCommand,
     mcp: mcpCommand,
     sync: syncCommand,
+    keys: keysCommand,
   },
 });

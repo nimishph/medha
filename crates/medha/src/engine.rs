@@ -679,6 +679,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at: now,
             author: None,
+            sig: None,
             payload: EpisodePayload::Signal {
                 spec,
                 anchors: None,
@@ -764,6 +765,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: input.key,
             at: input.at,
             author: input.author,
+            sig: None,
             payload: EpisodePayload::Signal {
                 spec,
                 anchors: input.anchors,
@@ -785,6 +787,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: input.key,
             at: input.at,
             author: input.author,
+            sig: None,
             payload: EpisodePayload::Guard {
                 ok: input.ok,
                 kind: input.kind,
@@ -814,6 +817,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Override {
                 override_type,
                 reason: reason.to_string(),
@@ -860,12 +864,20 @@ impl<S: StorePort> MedhaEngine<S> {
             None => None,
         };
 
+        let target_id = all_eps
+            .iter()
+            .find(|e| e.seq == seq)
+            .and_then(|e| serde_json::to_value(e).ok())
+            .and_then(|v| medha_core::signing::episode_id_for_value(&v).ok());
+
         let episode_input = EpisodeInput {
             key: target_key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Retract {
                 target_seq: seq,
+                target_id,
                 reason: reason.to_string(),
             },
         };
@@ -980,6 +992,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Proposal {
                 provenance: provenance.to_string(),
                 theta0,
@@ -1008,6 +1021,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Define {
                 definition: EntityDefinition {
                     title: title.to_string(),
@@ -1032,6 +1046,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Define { definition },
         };
 
@@ -1052,6 +1067,7 @@ impl<S: StorePort> MedhaEngine<S> {
             key: key.clone(),
             at,
             author: None,
+            sig: None,
             payload: EpisodePayload::Decision {
                 case_id: case_id.to_string(),
                 parent_id,
@@ -1078,6 +1094,7 @@ impl<S: StorePort> MedhaEngine<S> {
                     key: ent.key.clone(),
                     at: now,
                     author: None,
+                    sig: None,
                     payload: EpisodePayload::Sweep {
                         action: "purge".to_string(),
                         reason: "Pruning retired entity".to_string(),
@@ -1114,6 +1131,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 key: s.key.clone(),
                 at: s.last_signal_at.unwrap_or(0),
                 author: None,
+                sig: None,
                 payload: EpisodePayload::Baseline { state: s },
             });
         }

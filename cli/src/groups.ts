@@ -40,7 +40,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { title: 'Dashboard and reports', commands: ['ui', 'report', 'docs'] },
   {
     title: 'Maintain and share',
-    commands: ['maintain', 'sweep', 'compact', 'preflight', 'updater', 'sync', 'issue'],
+    commands: ['maintain', 'sweep', 'compact', 'preflight', 'updater', 'sync', 'issue', 'keys'],
   },
 ];
 

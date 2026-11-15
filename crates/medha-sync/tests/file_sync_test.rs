@@ -8,6 +8,7 @@ fn sample_signal(id: &str, at: i64) -> EpisodeInput {
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
                 name: "APPLY".to_string(),

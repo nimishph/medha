@@ -7,8 +7,8 @@ pub mod types;
 
 pub use errors::StoreError;
 pub use folding::{
-    durability_anchor_count, fold_episode_into_state, fold_log, fresh_state, fresh_state_at,
-    status_for,
+    durability_anchor_count, fold_episode_into_state, fold_log, fold_log_filtered,
+    fold_log_with_registries, fresh_state, fresh_state_at, status_for,
 };
 pub use memory::MemoryStore;
 pub use sqlite::{SqliteStore, SqliteStoreOptions, CURRENT_LAYOUT_VERSION};

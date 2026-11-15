@@ -115,6 +115,9 @@ pub enum Commands {
 
     #[command(about = "Run Model Context Protocol (MCP) server over stdio")]
     Mcp(McpArgs),
+
+    #[command(about = "Episode signing: keys, keyring, rotation, revocation and signing mode")]
+    Keys(KeysArgs),
 }
 
 #[derive(Args, Debug, Default)]
@@ -773,4 +776,106 @@ pub struct DocsArgs {
 
     #[arg(long, help = "Open the browser docs automatically")]
     pub open: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct KeysArgs {
+    #[command(subcommand)]
+    pub command: KeysSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KeysSubcommand {
+    #[command(about = "Create an Ed25519 signing key")]
+    Generate(KeysGenerateArgs),
+
+    #[command(about = "List the keyring, the signing mode and the default key")]
+    List(KeysListArgs),
+
+    #[command(about = "Planned rotation: a new key for the same principal")]
+    Rotate(KeysRotateArgs),
+
+    #[command(about = "Compromise revocation: every episode the key signed stops counting")]
+    Revoke(KeysRevokeArgs),
+
+    #[command(about = "Verify every episode in the log against the keyring")]
+    Verify(KeysVerifyArgs),
+
+    #[command(about = "Set the signing mode: off | warn | require")]
+    Mode(KeysModeArgs),
+
+    #[command(about = "Endorse the existing (unsigned) log with maintainer-signed baselines")]
+    Adopt(KeysAdoptArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct KeysGenerateArgs {
+    #[arg(long, help = "Author principal this key signs as (e.g. agent:ci)")]
+    pub principal: String,
+
+    #[arg(long, help = "Comma-separated roles: agent, human, maintainer")]
+    pub role: Option<String>,
+
+    #[arg(long, help = "Comma-separated namespaces this key may sign in")]
+    pub namespace: Option<String>,
+
+    #[arg(long, help = "Free-form note stored with the key record")]
+    pub comment: Option<String>,
+
+    #[arg(long, help = "Make this the default signing key")]
+    pub default: bool,
+
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct KeysListArgs {
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct KeysRotateArgs {
+    #[arg(help = "Key id to rotate out")]
+    pub key_id: String,
+
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct KeysRevokeArgs {
+    #[arg(help = "Key id to revoke")]
+    pub key_id: String,
+
+    #[arg(long, help = "Why the key is revoked")]
+    pub reason: String,
+
+    #[arg(long, help = "Epoch ms: keep episodes signed with at < this")]
+    pub trust_before: Option<i64>,
+
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct KeysVerifyArgs {
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct KeysModeArgs {
+    #[arg(help = "Signing mode: off | warn | require")]
+    pub mode: String,
+
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct KeysAdoptArgs {
+    #[arg(long, help = "Emit report as JSON")]
+    pub json: bool,
 }

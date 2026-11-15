@@ -62,8 +62,12 @@ export function parseTimestamp(raw: string | number | undefined, defaultNow: num
 export function resolveAuthor(
   explicit?: string,
   env: Record<string, string | undefined> = process.env,
+  signing = false,
 ): string | undefined {
   if (explicit !== undefined && explicit.trim() !== '') return explicit.trim();
+  // A signing home binds authorship to the key: the engine fills in the key's principal, and an
+  // ambient $USER would only be refused as "not the key's principal" (medha-nwf.4).
+  if (signing) return undefined;
   return env.MEDHA_AUTHOR || env.USER || env.USERNAME || undefined;
 }
 
@@ -101,7 +105,7 @@ export async function runRecord(
   options: RecordOptions,
   environment: Environment,
 ): Promise<RecordReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.signal === undefined || options.signal === '') {
       throw new InvalidArgumentError('--signal', 'a registered signal name', options.signal);
@@ -117,7 +121,11 @@ export async function runRecord(
     const key = keyFromFlags(options);
     requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const outcome = await opened.engine.record(
       key,
       options.signal,
@@ -182,7 +190,7 @@ export async function runGuard(
   options: GuardOptions,
   environment: Environment,
 ): Promise<GuardReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     const ok = options.ok === true;
     if (ok === (options.fail === true)) {
@@ -198,7 +206,11 @@ export async function runGuard(
     if (options.guard === undefined || options.guard.trim() === '') {
       await requireExistingGuard(opened.engine, key, at);
     }
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const hint = await opened.engine.reportGuard(
       key,
       {
@@ -245,7 +257,7 @@ export async function runPropose(
   options: ProposeOptions,
   environment: Environment,
 ): Promise<ProposeReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.source === undefined || options.source.trim() === '') {
       throw new InvalidArgumentError('--source', 'a non-empty proposal source', options.source);
@@ -253,7 +265,11 @@ export async function runPropose(
     const key = keyFromFlags(options);
     requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const evidenceRefs = (options.evidence ?? '')
       .split(',')
       .map((ref) => ref.trim())
@@ -307,7 +323,7 @@ export async function runRetract(
   options: RetractOptions,
   environment: Environment,
 ): Promise<RetractReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.seq === undefined || options.seq === '') {
       throw new InvalidArgumentError('--seq', 'an episode sequence number', options.seq);
@@ -324,7 +340,11 @@ export async function runRetract(
       );
     }
     const at = parseTimestamp(options.at, environment.now());
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     // --id is optional for compatibility; given, a seq from another entity is refused (gh-22).
     const key = options.id === undefined ? undefined : keyFromFlags(options);
     const outcome = await opened.engine.retract(
@@ -373,7 +393,7 @@ export async function runReinstate(
   options: ReinstateOptions,
   environment: Environment,
 ): Promise<ReinstateReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.reason === undefined || options.reason.trim() === '') {
       throw new InvalidArgumentError('--reason', 'why the latch is being lifted', options.reason);
@@ -394,7 +414,11 @@ export async function runReinstate(
         },
       );
     }
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const hint = await opened.engine.override(key, 'restore', { now: at }, options.reason, author);
     const after = await opened.engine.show(key, { now: at });
     return {
@@ -428,7 +452,7 @@ export async function runRemoveEpisode(
   options: RemoveEpisodeOptions,
   environment: Environment,
 ): Promise<RemoveEpisodeReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.seq === undefined || options.seq === '') {
       throw new InvalidArgumentError('--seq', 'an episode sequence number', options.seq);
@@ -472,7 +496,7 @@ export async function runDefine(
   options: DefineOptions,
   environment: Environment,
 ): Promise<DefineReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.title === undefined || options.title.trim() === '') {
       throw new InvalidArgumentError('--title', 'a non-empty string', options.title);
@@ -483,7 +507,11 @@ export async function runDefine(
     const key = keyFromFlags(options);
     requireConfiguredKind(opened.config.registries, key.kind);
     const at = parseTimestamp(options.at, environment.now());
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const tags = (options.tags ?? '')
       .split(',')
       .map((tag) => tag.trim())
@@ -542,7 +570,7 @@ export async function runDecision(
   options: DecisionOptions,
   environment: Environment,
 ): Promise<DecisionReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     if (options.condition === undefined || options.condition.trim() === '') {
       throw new InvalidArgumentError('--condition', 'a non-empty string', options.condition);
@@ -581,7 +609,11 @@ export async function runDecision(
       );
     }
     const at = parseTimestamp(options.at, environment.now());
-    const author = resolveAuthor(options.author);
+    const author = resolveAuthor(
+      options.author,
+      process.env,
+      opened.engine.principal !== undefined,
+    );
     const outcome = await opened.engine.decision(
       key,
       {

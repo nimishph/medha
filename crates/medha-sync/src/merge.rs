@@ -152,9 +152,17 @@ fn dangling_target(target_seq: u64) -> String {
     format!("\0<unresolved-target>{}", target_seq)
 }
 
+fn with_signer(base: &str, ep: &Episode) -> String {
+    match &ep.sig {
+        Some(sig) => format!("{} sig:{}", base, sig.key_id),
+        None => base.to_string(),
+    }
+}
+
 #[derive(Clone, Debug)]
 struct Identity {
     id: String,
+    base: String,
     target_id: Option<String>,
 }
 
@@ -171,21 +179,25 @@ fn compute_identities(log: &[Episode]) -> HashMap<u64, Identity> {
                 let target_key = own.get(target_seq).cloned();
                 let fallback = dangling_target(*target_seq);
                 let stand_in = target_key.as_deref().unwrap_or(&fallback);
-                let id = content_key(&ep.key, ep.at, &ep.payload, stand_in);
+                let base = content_key(&ep.key, ep.at, &ep.payload, stand_in);
+                let id = with_signer(&base, ep);
                 by_seq.insert(
                     ep.seq,
                     Identity {
                         id,
+                        base,
                         target_id: target_key,
                     },
                 );
             }
             _ => {
-                let id = content_key(&ep.key, ep.at, &ep.payload, "");
+                let base = content_key(&ep.key, ep.at, &ep.payload, "");
+                let id = with_signer(&base, ep);
                 by_seq.insert(
                     ep.seq,
                     Identity {
                         id,
+                        base,
                         target_id: None,
                     },
                 );
@@ -197,9 +209,12 @@ fn compute_identities(log: &[Episode]) -> HashMap<u64, Identity> {
 }
 
 pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
+    let local_ids = compute_identities(local);
+    let incoming_ids = compute_identities(incoming);
+
     let mut map: HashMap<String, (Episode, Option<String>)> = HashMap::new();
 
-    let mut collect = |log: &[Episode], ids: HashMap<u64, Identity>| {
+    let mut collect = |log: &[Episode], ids: &HashMap<u64, Identity>| {
         for ep in log {
             if let Some(identity) = ids.get(&ep.seq) {
                 if !map.contains_key(&identity.id) {
@@ -212,8 +227,31 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
         }
     };
 
-    collect(local, compute_identities(local));
-    collect(incoming, compute_identities(incoming));
+    collect(local, &local_ids);
+    collect(incoming, &incoming_ids);
+
+    // A signed copy beats an unsigned one of the same content
+    let mut signed_bases = HashSet::new();
+    for (log, ids) in [(&local[..], &local_ids), (&incoming[..], &incoming_ids)] {
+        for ep in log {
+            if ep.sig.is_some() {
+                if let Some(identity) = ids.get(&ep.seq) {
+                    signed_bases.insert(identity.base.clone());
+                }
+            }
+        }
+    }
+    for (log, ids) in [(&local[..], &local_ids), (&incoming[..], &incoming_ids)] {
+        for ep in log {
+            if ep.sig.is_none() {
+                if let Some(identity) = ids.get(&ep.seq) {
+                    if signed_bases.contains(&identity.base) {
+                        map.remove(&identity.id);
+                    }
+                }
+            }
+        }
+    }
 
     let mut entries: Vec<(String, Episode, Option<String>)> = map
         .into_iter()
@@ -272,13 +310,19 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
         .enumerate()
         .map(|(idx, (_, mut ep, target_id))| {
             ep.seq = idx as u64;
-            if let EpisodePayload::Retract { target_seq, reason } = ep.payload {
+            if let EpisodePayload::Retract {
+                target_seq,
+                reason,
+                target_id: existing_tid,
+            } = ep.payload
+            {
                 let new_target = match target_id {
                     Some(tid) => seq_by_id.get(&tid).copied().unwrap_or(target_seq),
                     None => target_seq,
                 };
                 ep.payload = EpisodePayload::Retract {
                     target_seq: new_target,
+                    target_id: existing_tid,
                     reason,
                 };
             }
@@ -479,4 +523,80 @@ fn merge_single_state(s1: &EntityState, s2: &EntityState) -> Result<EntityState,
         },
         decision_tree: s1.decision_tree.clone(),
     })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScreenedEpisodes {
+    pub accepted: Vec<Episode>,
+    pub rejected: Vec<(u64, String)>,
+    pub flagged: Vec<(u64, String)>,
+}
+
+pub fn screen_incoming(
+    incoming: &[Episode],
+    policy: Option<&medha_core::signing::SigningPolicy>,
+) -> ScreenedEpisodes {
+    let policy = match policy {
+        Some(p) if p.mode != medha_core::signing::SigningMode::Off => p,
+        _ => {
+            return ScreenedEpisodes {
+                accepted: incoming.to_vec(),
+                rejected: Vec::new(),
+                flagged: Vec::new(),
+            };
+        }
+    };
+
+    let mut problems = Vec::new();
+    let mut bad = HashSet::new();
+
+    for ep in incoming {
+        let ep_val = match serde_json::to_value(ep) {
+            Ok(v) => v,
+            Err(_) => {
+                bad.insert(ep.seq);
+                problems.push((ep.seq, "serialization failure".to_string()));
+                continue;
+            }
+        };
+        let outcome = medha_core::signing::verify_episode_value(&ep_val, &policy.keyring);
+        match outcome {
+            medha_core::signing::VerifyOutcome::Verified { .. } => {}
+            medha_core::signing::VerifyOutcome::Unsigned => {
+                bad.insert(ep.seq);
+                problems.push((ep.seq, "unsigned".to_string()));
+            }
+            medha_core::signing::VerifyOutcome::Invalid { reason, .. } => {
+                bad.insert(ep.seq);
+                problems.push((ep.seq, reason));
+            }
+        }
+    }
+
+    for ep in incoming {
+        if let EpisodePayload::Retract { target_seq, .. } = ep.payload {
+            if !bad.contains(&ep.seq) && bad.contains(&target_seq) {
+                bad.insert(ep.seq);
+                problems.push((ep.seq, "retracts a refused episode".to_string()));
+            }
+        }
+    }
+
+    if policy.mode == medha_core::signing::SigningMode::Warn {
+        ScreenedEpisodes {
+            accepted: incoming.to_vec(),
+            rejected: Vec::new(),
+            flagged: problems,
+        }
+    } else {
+        ScreenedEpisodes {
+            accepted: incoming
+                .iter()
+                .filter(|ep| !bad.contains(&ep.seq))
+                .cloned()
+                .collect(),
+            rejected: problems,
+            flagged: Vec::new(),
+        }
+    }
 }

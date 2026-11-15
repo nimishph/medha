@@ -32,7 +32,7 @@ import {
   InvalidArgumentError,
   InvariantViolationError,
   isDriftingDown,
-  type KindRegistry,
+  KindRegistry,
   type StoreRegistries,
 } from '@cntxt-labs/medha-core';
 
@@ -322,11 +322,24 @@ export function compactPrefix(
   options?: FoldEpisodeOptions | KindRegistry,
 ): CompactedLog {
   const ordered = [...log].sort((a, b) => a.seq - b.seq);
+  // With an admission filter (require-mode signing, medha-nwf.4), compaction never folds past an
+  // episode that does not count, nor past the target of such a retract: folding it would either
+  // launder unverified evidence into a baseline or delete an episode that a keyring change (say,
+  // an undone revocation) could make count again. Everything from there on is kept verbatim.
+  const admit = options instanceof KindRegistry ? undefined : options?.admit;
+  let limit = ordered.length;
+  if (admit !== undefined) {
+    for (const episode of ordered) {
+      if (admit(episode)) continue;
+      limit = Math.min(limit, episode.seq);
+      if (episode.type === 'retract') limit = Math.min(limit, episode.targetSeq);
+    }
+  }
   let border = -1;
   for (let i = 0; i < ordered.length; i++) {
     const episode = ordered[i];
     if (episode === undefined) break;
-    if (episode.at >= cutoffAt) break;
+    if (episode.at >= cutoffAt || episode.seq >= limit) break;
     border = i;
   }
   if (border < 0) return { episodes: ordered, folded: null, baselinesWritten: 0 };

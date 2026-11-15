@@ -11,6 +11,7 @@ pub use file::FileSyncAdapter;
 pub use git::{GitRefSyncAdapter, DEFAULT_MEDHA_REF, DEFAULT_REMOTE, LEGACY_MEDHA_REF};
 pub use merge::{
     canonical_episode_input_key, canonical_episode_key, merge_entity_states, merge_episodes,
+    screen_incoming, ScreenedEpisodes,
 };
 pub use noop::NoopSyncAdapter;
 pub use snapshot::{

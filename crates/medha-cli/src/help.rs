@@ -50,6 +50,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "updater",
             "sync",
             "issue",
+            "keys",
         ],
     ),
 ];

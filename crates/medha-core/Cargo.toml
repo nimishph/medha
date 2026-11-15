@@ -11,6 +11,9 @@ description = "Pure mathematical trust engine and evidential fold kernel for Med
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

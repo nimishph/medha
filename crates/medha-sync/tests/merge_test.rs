@@ -25,6 +25,7 @@ fn create_signal_episode(
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Signal {
             spec,
             anchors: None,
@@ -44,8 +45,10 @@ fn create_retract_episode(seq: u64, target_seq: u64, at: i64, id: &str, reason: 
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Retract {
             target_seq,
+            target_id: None,
             reason: reason.to_string(),
         },
     }
@@ -312,4 +315,144 @@ fn test_merge_entity_states() {
     assert_eq!(m.ema.mu, 0.6);
     assert_eq!(m.last_signal_at, Some(2000));
     assert_eq!(m.anchors.len(), 2);
+}
+
+#[test]
+fn test_merge_with_signatures_and_signed_beats_unsigned() {
+    use medha_store::EpisodeSignature;
+
+    let mut ep_unsigned = create_signal_episode(0, "r1", 1000, canonical_apply(), None, None);
+    ep_unsigned.author = Some("agent:a".to_string());
+
+    let mut ep_signed_a = ep_unsigned.clone();
+    ep_signed_a.sig = Some(EpisodeSignature {
+        key_id: "ed25519:key-a".to_string(),
+        value: "sig-val-a".to_string(),
+    });
+
+    let mut ep_signed_b = ep_unsigned.clone();
+    ep_signed_b.author = Some("agent:b".to_string());
+    ep_signed_b.sig = Some(EpisodeSignature {
+        key_id: "ed25519:key-b".to_string(),
+        value: "sig-val-b".to_string(),
+    });
+
+    // 1. Two different signers for identical base content stay two distinct episodes
+    let merged_ab = merge_episodes(&[ep_signed_a.clone()], &[ep_signed_b.clone()]);
+    assert_eq!(merged_ab.len(), 2);
+
+    // 2. Signed beats unsigned in either order
+    let merged_u_s = merge_episodes(&[ep_unsigned.clone()], &[ep_signed_a.clone()]);
+    assert_eq!(merged_u_s.len(), 1);
+    assert_eq!(
+        merged_u_s[0].sig.as_ref().map(|s| s.key_id.as_str()),
+        Some("ed25519:key-a")
+    );
+
+    let merged_s_u = merge_episodes(&[ep_signed_a.clone()], &[ep_unsigned.clone()]);
+    assert_eq!(merged_s_u.len(), 1);
+    assert_eq!(
+        merged_s_u[0].sig.as_ref().map(|s| s.key_id.as_str()),
+        Some("ed25519:key-a")
+    );
+}
+
+#[test]
+fn test_screen_incoming_modes() {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    use ed25519_dalek::{Signer, SigningKey};
+    use medha_core::signing::{
+        key_id_for, signing_payload_for_value, KeyRecord, KeyRole, Keyring, SigningMode,
+        SigningPolicy,
+    };
+    use medha_store::EpisodeSignature;
+    use medha_sync::screen_incoming;
+
+    let sk = SigningKey::from_bytes(&[1u8; 32]);
+    let pk_bytes = sk.verifying_key().to_bytes();
+    let pk_str = URL_SAFE_NO_PAD.encode(pk_bytes);
+    let kid = key_id_for(&pk_str).unwrap();
+
+    let keyring = Keyring {
+        version: 1,
+        keys: vec![KeyRecord {
+            key_id: kid.clone(),
+            public_key: pk_str,
+            principal: "agent:a".to_string(),
+            roles: vec![KeyRole::Agent],
+            namespaces: None,
+            valid_from: None,
+            valid_until: None,
+            revoked: None,
+            supersedes: None,
+            comment: None,
+        }],
+    };
+
+    let mut good = create_signal_episode(0, "r1", 1000, canonical_apply(), None, None);
+    good.author = Some("agent:a".to_string());
+    let good_val = serde_json::to_value(&good).unwrap();
+    let good_payload = signing_payload_for_value(&good_val).unwrap();
+    let good_sig = sk.sign(&good_payload);
+    good.sig = Some(EpisodeSignature {
+        key_id: kid.clone(),
+        value: URL_SAFE_NO_PAD.encode(good_sig.to_bytes()),
+    });
+
+    let mut unsigned = create_signal_episode(1, "r1", 2000, canonical_apply(), None, None);
+    unsigned.author = Some("agent:a".to_string());
+
+    let mut forged = create_signal_episode(2, "r1", 3000, canonical_apply(), None, None);
+    forged.author = Some("agent:a".to_string());
+    forged.sig = Some(EpisodeSignature {
+        key_id: "ed25519:unknown".to_string(),
+        value: "dummy".to_string(),
+    });
+
+    let incoming = vec![good.clone(), unsigned.clone(), forged.clone()];
+
+    // Mode: Off
+    let screened_off = screen_incoming(
+        &incoming,
+        Some(&SigningPolicy {
+            mode: SigningMode::Off,
+            keyring: keyring.clone(),
+            require_package_signature: false,
+        }),
+    );
+    assert_eq!(screened_off.accepted.len(), 3);
+    assert!(screened_off.rejected.is_empty());
+    assert!(screened_off.flagged.is_empty());
+
+    // Mode: Warn
+    let screened_warn = screen_incoming(
+        &incoming,
+        Some(&SigningPolicy {
+            mode: SigningMode::Warn,
+            keyring: keyring.clone(),
+            require_package_signature: false,
+        }),
+    );
+    assert_eq!(screened_warn.accepted.len(), 3);
+    assert_eq!(screened_warn.flagged.len(), 2);
+    assert_eq!(screened_warn.flagged[0].0, 1);
+    assert_eq!(screened_warn.flagged[1].0, 2);
+
+    // Mode: Require
+    let screened_req = screen_incoming(
+        &incoming,
+        Some(&SigningPolicy {
+            mode: SigningMode::Require,
+            keyring: keyring.clone(),
+            require_package_signature: false,
+        }),
+    );
+    assert_eq!(screened_req.accepted.len(), 1);
+    assert_eq!(screened_req.accepted[0].seq, 0);
+    assert_eq!(screened_req.rejected.len(), 2);
+    assert_eq!(screened_req.rejected[0].0, 1);
+    assert_eq!(screened_req.rejected[0].1, "unsigned");
+    assert_eq!(screened_req.rejected[1].0, 2);
+    assert_eq!(screened_req.rejected[1].1, "unknown key");
 }

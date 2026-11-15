@@ -12,6 +12,7 @@ fn make_signal(id: &str, at: i64, success: bool) -> EpisodeInput {
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
                 name: if success {

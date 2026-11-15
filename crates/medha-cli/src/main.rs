@@ -1,6 +1,7 @@
 mod args;
 mod help;
 mod issue;
+mod keys;
 mod mcp;
 mod mcp_config;
 mod pack;
@@ -928,6 +929,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 mcp::run_mcp_server(engine)?;
             }
         },
+        Commands::Keys(keys_args) => {
+            keys::run_keys(keys_args, &mut engine, &home_dir, cli.json)?;
+        }
         Commands::Define(args) => {
             let key = EntityKey::new(&args.namespace, &args.kind, &args.id);
             let tags = args.tags.as_ref().map(|t| {

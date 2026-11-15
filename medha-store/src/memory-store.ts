@@ -34,6 +34,11 @@ export interface MemoryStoreOptions {
   /** A pre-existing log to load at `open()`, simulating what a durable backend reads from disk. */
   readonly initialEpisodes?: readonly Episode[];
   readonly registries?: StoreRegistries;
+  /**
+   * Fold-time admission filter (medha-nwf.4): episodes it rejects stay in the log but do not
+   * change state — `require`-mode signing passes the verified-only filter (`admitFilter`).
+   */
+  readonly admit?: ((episode: Episode) => boolean) | undefined;
 }
 
 export class MemoryStore implements StorePort {
@@ -48,8 +53,10 @@ export class MemoryStore implements StorePort {
   private corruptAt: number | null = null;
   private readonly meta = new Map<string, string>();
   private readonly baseRegistries: StoreRegistries;
+  readonly admit: ((episode: Episode) => boolean) | undefined;
   constructor(options: MemoryStoreOptions = {}) {
     this.initialEpisodes = options.initialEpisodes ?? [];
+    this.admit = options.admit;
     // Built-ins are always present; the host's lists are additive (see resolveRegistries).
     this.baseRegistries = resolveRegistries(options.registries);
   }
@@ -136,7 +143,7 @@ export class MemoryStore implements StorePort {
     // Fold with the store's kind registry, as the append path does: kind specs (evidence weighting,
     // thresholds) shape the state, so a default fold would report a false mismatch.
     const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
-    return foldLog(this.log, { kinds });
+    return foldLog(this.log, { kinds, admit: this.admit });
   }
 
   async replaceLog(
@@ -173,8 +180,13 @@ export class MemoryStore implements StorePort {
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
     const kinds = kindRegistryFor(this.baseRegistries.kindSpecs ?? this.baseRegistries.kinds);
+    if (this.admit !== undefined && !this.admit(episode)) {
+      // Kept in the log (it is the source of truth), but it does not count.
+      this.nextSeq = episode.seq + 1;
+      return this.projection.get(entityKeyString(episode.key));
+    }
     if (episode.type === 'retract') {
-      const rebuilt = foldLog(this.log, { kinds });
+      const rebuilt = foldLog(this.log, { kinds, admit: this.admit });
       this.projection.clear();
       for (const st of rebuilt) {
         this.projection.set(entityKeyString(st.key), st);

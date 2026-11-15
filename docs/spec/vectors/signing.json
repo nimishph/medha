@@ -1,0 +1,95 @@
+{
+  "specVersion": "2.0.0",
+  "description": "Episode signing (medha-nwf.4, trust spec §13): canonical payload, episode id and Ed25519 signature for a fixed RFC 8032 key. Ed25519 is deterministic, so every byte is portable. The payload is \"medha-episode-v1\n\" + canonical (RFC 8785 JSON of the episode without seq, sig, and a retract's targetSeq).",
+  "domain": "medha-episode-v1\n",
+  "key": {
+    "seedHex": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    "publicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    "keyId": "ed25519:If4x36FUomFia_hUBG_SJw"
+  },
+  "cases": [
+    {
+      "name": "signal",
+      "episode": {
+        "type": "signal",
+        "key": {
+          "namespace": "team-a",
+          "kind": "rule",
+          "id": "no-force-push"
+        },
+        "at": 1790000000000,
+        "author": "agent:ci/run-42",
+        "spec": {
+          "name": "APPLY",
+          "value": 1,
+          "countsAsTrial": true,
+          "countsAsSuccess": true
+        },
+        "anchors": [
+          {
+            "kind": "week",
+            "value": "2026-W39"
+          }
+        ],
+        "ensure": true,
+        "updater": "ema",
+        "weight": 0.587654,
+        "note": "ünïcode ✓ \"quoted\"",
+        "caseId": "no-force-push-dec-a1b2c"
+      },
+      "canonical": "{\"anchors\":[{\"kind\":\"week\",\"value\":\"2026-W39\"}],\"at\":1790000000000,\"author\":\"agent:ci/run-42\",\"caseId\":\"no-force-push-dec-a1b2c\",\"ensure\":true,\"key\":{\"id\":\"no-force-push\",\"kind\":\"rule\",\"namespace\":\"team-a\"},\"note\":\"ünïcode ✓ \\\"quoted\\\"\",\"spec\":{\"countsAsSuccess\":true,\"countsAsTrial\":true,\"name\":\"APPLY\",\"value\":1},\"type\":\"signal\",\"updater\":\"ema\",\"weight\":0.587654}",
+      "episodeId": "geJK3n64No2nW9S6uR-9xG6EoBeK_juaVhv6d0chK-c",
+      "sig": {
+        "keyId": "ed25519:If4x36FUomFia_hUBG_SJw",
+        "value": "SbbxiEbBFbgczf8TcNreovqQeoNh2knMUI-qZSphVNpyDAU5bX2x7vnvSb5wGvtmEVN0ytZJMEqqjl5M9iciCg"
+      }
+    },
+    {
+      "name": "retract",
+      "episode": {
+        "type": "retract",
+        "key": {
+          "namespace": "team-a",
+          "kind": "rule",
+          "id": "no-force-push"
+        },
+        "at": 1790000060000,
+        "author": "agent:ci",
+        "targetSeq": 7,
+        "targetId": "geJK3n64No2nW9S6uR-9xG6EoBeK_juaVhv6d0chK-c",
+        "reason": "duplicate report"
+      },
+      "canonical": "{\"at\":1790000060000,\"author\":\"agent:ci\",\"key\":{\"id\":\"no-force-push\",\"kind\":\"rule\",\"namespace\":\"team-a\"},\"reason\":\"duplicate report\",\"targetId\":\"geJK3n64No2nW9S6uR-9xG6EoBeK_juaVhv6d0chK-c\",\"type\":\"retract\"}",
+      "episodeId": "vh0nKCLOsuBqwNI0o7zxu5O3ljrly_Kd8_Tk0ojvfKM",
+      "sig": {
+        "keyId": "ed25519:If4x36FUomFia_hUBG_SJw",
+        "value": "_ABajBgJqkyV4poleT84Hp7apPXNlEvRy__sUG5gVNePTJd-GjwcZgK-W6IVQltPKYVUwdQgTw22m9gY4hqlAg"
+      }
+    },
+    {
+      "name": "decision",
+      "episode": {
+        "type": "decision",
+        "key": {
+          "namespace": "team-a",
+          "kind": "rule",
+          "id": "no-force-push"
+        },
+        "at": 1790000120000,
+        "author": "human:ada",
+        "caseId": "no-force-push-dec-a1b2c",
+        "condition": "branch is main",
+        "decision": {
+          "type": "probability",
+          "value": 0.35
+        }
+      },
+      "canonical": "{\"at\":1790000120000,\"author\":\"human:ada\",\"caseId\":\"no-force-push-dec-a1b2c\",\"condition\":\"branch is main\",\"decision\":{\"type\":\"probability\",\"value\":0.35},\"key\":{\"id\":\"no-force-push\",\"kind\":\"rule\",\"namespace\":\"team-a\"},\"type\":\"decision\"}",
+      "episodeId": "o-Ffj12dcBEIuDDUFj1r7vfkLYeQkvNMCvUL47ZVARM",
+      "sig": {
+        "keyId": "ed25519:If4x36FUomFia_hUBG_SJw",
+        "value": "Ohxb9uvC-_emkqNuRm8QPeV4QVio2fcv8ZVNeBNevUhkeNjQ38D977jT0GA5NaEkeyT02NYuTbWnGJJ4G4bFDA"
+      }
+    }
+  ]
+}

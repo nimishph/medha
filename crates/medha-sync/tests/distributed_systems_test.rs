@@ -8,6 +8,7 @@ fn sample_signal(id: &str, at: i64, value: f64, success: bool) -> EpisodeInput {
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
                 name: if success {
@@ -180,8 +181,10 @@ fn test_distributed_cross_replica_retraction_resolution() {
         key: EntityKey::new("", "rule", "rule-bad"),
         at: 300,
         author: None,
+        sig: None,
         payload: EpisodePayload::Retract {
             target_seq: 0,
+            target_id: None,
             reason: "malicious signal detected by auditor".to_string(),
         },
     };
