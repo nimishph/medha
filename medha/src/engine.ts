@@ -1231,6 +1231,7 @@ export class Medha {
       readonly parentId?: string | undefined;
       readonly caseId?: string | undefined;
       readonly detach?: boolean | undefined;
+      readonly mode?: 'create' | 'edit' | undefined;
     },
     context: Context,
     options: { readonly author?: string; readonly random?: () => number } = {},
@@ -1252,7 +1253,7 @@ export class Medha {
         ...(input.detach === undefined ? {} : { detach: input.detach }),
       },
       // A caller-supplied caseId asks to revise that branch; only an omitted one mints a new one.
-      input.caseId === undefined ? 'create' : 'edit',
+      input.mode ?? (input.caseId === undefined ? 'create' : 'edit'),
     );
     const episodeInput: EpisodeInput = {
       type: 'decision',

@@ -109,7 +109,7 @@ pub fn grouped_template(cmd: &Command) -> String {
         .max()
         .unwrap_or(0);
 
-    let mut text = String::from("{about}\n\n{usage-heading} {usage}\n");
+    let mut text = String::from("{about}\n\nUSAGE: {usage}\n");
     for (title, entries) in &groups {
         text.push_str(&format!("\n{}:\n", title.to_uppercase()));
         for (name, about) in entries {

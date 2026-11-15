@@ -217,7 +217,7 @@ impl Default for StoreRegistries {
         Self {
             kinds: vec!["rule".to_string(), "recipe".to_string(), "tool".to_string()],
             signal_specs: medha_core::canonical_signals().into_values().collect(),
-            anchor_kinds: vec!["git".to_string(), "week".to_string()],
+            anchor_kinds: vec!["week".to_string()],
             kind_specs: Vec::new(),
         }
     }

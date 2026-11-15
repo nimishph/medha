@@ -58,7 +58,7 @@ if (process.platform === 'win32') {
   }
 }
 
-if (values.rust) {
+if (values.rust ?? true) {
   if (!isCross) {
     process.stdout.write('Compiling native Rust medha-napi binding via Cargo...\n');
     const napiChild = Bun.spawn({

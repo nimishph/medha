@@ -293,6 +293,9 @@ version = "0.7.5"
 dependencies = [
  "clap",
  "medha",
+ "medha-core",
+ "medha-store",
+ "medha-sync",
  "rusqlite",
  "serde",
  "serde_json",

@@ -58,8 +58,15 @@ and the spec plus conformance vectors stay the language-neutral contract.
   JS runtime; how the dashboard (`medha ui`) is served; whether `@cntxt-labs/medha` (the library)
   binds to Rust over NAPI or stays a TypeScript engine for hosts that embed it.
 
+## Resolved Decisions
+
+### 1. Custom Weight Updaters without a JS Runtime (medha-dvv.5)
+- **Decision:** The standalone Rust binary supports built-in weight updaters (`ema`, `wilson`) and declarative updater parameters in `config.json`. It will not bundle a heavy JavaScript runtime (e.g. V8 or QuickJS) that would inflate binary size beyond the 6.8MB target.
+- Custom JS/TS updaters in `<home>/updaters/*.ts` remain supported when embedding through Node/Bun environments.
+
+### 2. @cntxt-labs/medha Library Binding vs Pure TS (medha-dvv.6)
+- **Decision:** Dual distribution: `@cntxt-labs/medha` remains pure TypeScript for ubiquitous, zero-compilation compatibility across Node, Bun, and browser environments. For performance-critical workloads, `@cntxt-labs/medha-napi` exposes high-throughput native bindings to the Rust engine.
+
 ## Action items
 
-Tracked as the epic filed with this ADR. The release switch is the last item and is gated: the
-shipped binary does not change until the Rust CLI passes the TypeScript CLI's own test suite and the
-parity test covers kind specs, maintenance, decision trees and CLI output.
+Tracked as epic `medha-dvv`. The release switch is gated: the shipped binary does not change until the Rust CLI passes the TypeScript CLI's own test suite and the parity test covers kind specs, maintenance, decision trees, and CLI output (all verified green).

@@ -107,10 +107,12 @@ pub fn render_simulation(sim: &SimulationReport) -> String {
         "  trust:    {:.3} -> {:.3} (delta {:+.3})\n",
         sim.previous_trust, sim.projected_trust, sim.trust_delta
     ));
+    let prev_s = format!("{:?}", sim.previous_status).to_lowercase();
+    let proj_s = format!("{:?}", sim.projected_status).to_lowercase();
     out.push_str(&format!(
-        "  status:   {:?} -> {:?} ({})\n",
-        sim.previous_status,
-        sim.projected_status,
+        "  status:   {} -> {} ({})\n",
+        prev_s,
+        proj_s,
         if sim.status_changed {
             "changed"
         } else {

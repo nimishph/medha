@@ -512,7 +512,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         let tools = tools_resp["result"]["tools"]
             .as_array()
             .expect("tools array");
-        assert_eq!(tools.len(), 15);
+        assert_eq!(tools.len(), 19);
 
         let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(tool_names.contains(&"hints"));
@@ -530,6 +530,10 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         assert!(tool_names.contains(&"remove_episode"));
         assert!(tool_names.contains(&"pack_context"));
         assert!(tool_names.contains(&"primer"));
+        assert!(tool_names.contains(&"hints_for_context"));
+        assert!(tool_names.contains(&"verify_guard"));
+        assert!(tool_names.contains(&"detect_pitfalls"));
+        assert!(tool_names.contains(&"distill_trajectory"));
 
         // 18c. Call tool: hints
         writeln!(

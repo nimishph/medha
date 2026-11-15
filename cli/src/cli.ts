@@ -89,6 +89,34 @@ async function resolveUsageTarget(
  * errors; value-level mistakes (wrong --store, --path with memory) still exit 2.
  */
 export async function runCli(argv: readonly string[], environment: Environment): Promise<number> {
+  const binary = environment.env.MEDHA_CLI_BINARY ?? process.env.MEDHA_CLI_BINARY;
+  if (binary) {
+    const { spawnSync } = await import('node:child_process');
+    const childEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined) childEnv[k] = v;
+    }
+    for (const [k, v] of Object.entries(environment.env)) {
+      if (v !== undefined) childEnv[k] = v;
+    }
+    childEnv.MEDHA_NOW = String(environment.now());
+
+    const res = spawnSync(binary, argv as string[], {
+      cwd: environment.cwd,
+      env: childEnv,
+      encoding: 'utf8',
+    });
+    if (res.stdout) {
+      environment.stdout(res.stdout);
+    }
+    if (res.stderr) {
+      environment.stderr(res.stderr);
+    }
+    const code = res.status ?? (res.error ? 1 : 0);
+    environment.exitCode = code;
+    return code;
+  }
+
   const command = argv[0];
   if (command === '--version' || command === '-v' || command === 'version') {
     environment.stdout(`medha ${VERSION}\n`);

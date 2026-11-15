@@ -86,11 +86,34 @@ impl GitRefSyncAdapter {
         Ok((stdout, stderr))
     }
 
-    pub fn is_git_repo(&self) -> bool {
-        match self.run_git(&["rev-parse", "--is-inside-work-tree"], None) {
-            Ok((stdout, _)) => stdout == "true",
-            Err(_) => false,
+    pub fn detect_git_repo(start: &Path) -> bool {
+        let mut curr = if start.is_relative() {
+            if let Ok(cwd) = std::env::current_dir() {
+                cwd.join(start)
+            } else {
+                start.to_path_buf()
+            }
+        } else {
+            start.to_path_buf()
+        };
+
+        loop {
+            let git_path = curr.join(".git");
+            if git_path.exists() {
+                return true;
+            }
+            if curr.join("HEAD").is_file() && curr.join("refs").is_dir() && curr.join("objects").is_dir() {
+                return true;
+            }
+            if !curr.pop() {
+                break;
+            }
         }
+        false
+    }
+
+    pub fn is_git_repo(&self) -> bool {
+        Self::detect_git_repo(&self.root_dir)
     }
 
     pub fn get_ref_commit(&self, ref_name: &str) -> Option<String> {
