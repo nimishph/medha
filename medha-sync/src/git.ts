@@ -10,19 +10,25 @@ import {
   type Context,
   CURRENT_MEMORY_SCHEMA_VERSION,
   InvalidArgumentError,
+  type Keyring,
   type MemorySnapshotV1,
   migrateSnapshot,
+  type PackageSignature,
   type PullResult,
   type PushResult,
   type ReconcileResult,
+  type Signer,
+  type SigningPolicy,
   type StorePort,
   type SyncPort,
   type SyncState,
   type SyncStatus,
   serializeSnapshot,
+  signSnapshot,
   UnexpectedFailureError,
+  verifySnapshot,
 } from '@cntxt-labs/medha-core';
-import { mergeEpisodes } from './merge.ts';
+import { mergeEpisodes, screenIncoming } from './merge.ts';
 
 export const DEFAULT_MEDHA_REF = 'refs/medha/memory';
 
@@ -78,6 +84,33 @@ export interface GitRefSyncOptions {
   readonly rootDir: string;
   readonly ref?: string | undefined;
   readonly remote?: string | undefined;
+  /** Verify-on-pull policy (medha-nwf.4); absent behaves as `off`. */
+  readonly signing?: SigningPolicy | undefined;
+  /** Signer for package signature over snapshot (medha-nwf.8). */
+  readonly signer?: Signer | undefined;
+}
+
+/**
+ * For keys revoked without an explicit `trustBefore`, derive `trustBefore` from the commit
+ * timestamp where the revocation was recorded (medha-nwf.9). Episodes committed to refs/medha/memory
+ * prior to that commit are provably not backdated.
+ */
+export function deriveGitTrustBefore(keyring: Keyring, revocationCommitTimestamp: number): Keyring {
+  return {
+    version: keyring.version,
+    keys: keyring.keys.map((k) => {
+      if (k.revoked && (k.revoked.trustBefore === null || k.revoked.trustBefore === undefined)) {
+        return {
+          ...k,
+          revoked: {
+            ...k.revoked,
+            trustBefore: revocationCommitTimestamp,
+          },
+        };
+      }
+      return k;
+    }),
+  };
 }
 
 export class GitRefSyncAdapter implements SyncPort {
@@ -86,6 +119,8 @@ export class GitRefSyncAdapter implements SyncPort {
   readonly rootDir: string;
   readonly ref: string;
   readonly remote: string;
+  private readonly signing: SigningPolicy | undefined;
+  private readonly signer: Signer | undefined;
   /** Whether the caller named the remote. An unconfigured *default* remote means local-only. */
   readonly remoteExplicit: boolean;
   /** Extra refs read (never written) alongside `ref`: the pre-0.6 default, when on the default. */
@@ -94,6 +129,7 @@ export class GitRefSyncAdapter implements SyncPort {
   constructor(options: GitRefSyncOptions) {
     this.store = options.store;
     this.rootDir = options.rootDir;
+    this.signer = options.signer;
     if (options.ref === DEFAULT_SAGE_REF) {
       // biome-ignore lint/suspicious/noConsole: Hard deprecation warning
       console.warn(
@@ -102,6 +138,7 @@ export class GitRefSyncAdapter implements SyncPort {
     }
     this.ref = options.ref || DEFAULT_MEDHA_REF;
     this.remote = options.remote || DEFAULT_REMOTE;
+    this.signing = options.signing;
     this.remoteExplicit = Boolean(options.remote);
     this.readRefs = options.ref ? [] : [LEGACY_MEDHA_REF];
   }
@@ -209,16 +246,53 @@ export class GitRefSyncAdapter implements SyncPort {
     try {
       const { stdout } = await this.runGit(['cat-file', '-p', `${refOrSha}:snapshot.json`]);
       if (stdout) {
+        if (this.signing?.requirePackageSignature) {
+          let sigVal: PackageSignature | null = null;
+          try {
+            const { stdout: sigOut } = await this.runGit([
+              'cat-file',
+              '-p',
+              `${refOrSha}:snapshot.sig.json`,
+            ]);
+            sigVal = JSON.parse(sigOut);
+          } catch {
+            sigVal = null;
+          }
+          if (!sigVal) {
+            throw new UnexpectedFailureError('git-ref', 'pull', {
+              context: {
+                stderr: 'Package signature required but snapshot.sig.json is missing or unreadable',
+              },
+            });
+          }
+          const verified = verifySnapshot(stdout, sigVal, this.signing.keyring);
+          if (verified.status !== 'verified') {
+            throw new UnexpectedFailureError('git-ref', 'pull', {
+              context: {
+                stderr: `Invalid package signature: ${verified.status === 'invalid' ? verified.reason : 'unsigned'}`,
+              },
+            });
+          }
+        }
         return migrateSnapshot(JSON.parse(stdout));
       }
     } catch (failure) {
-      void failure;
+      if (this.signing?.requirePackageSignature) {
+        throw failure;
+      }
     }
 
     // 2. Try reading episodes.jsonl fallback
     try {
       const { stdout } = await this.runGit(['cat-file', '-p', `${refOrSha}:episodes.jsonl`]);
       if (stdout) {
+        if (this.signing?.requirePackageSignature) {
+          throw new UnexpectedFailureError('git-ref', 'pull', {
+            context: {
+              stderr: 'Package signature required but snapshot.sig.json is missing or unreadable',
+            },
+          });
+        }
         const episodes = stdout
           .split('\n')
           .filter((l) => l.trim())
@@ -231,7 +305,9 @@ export class GitRefSyncAdapter implements SyncPort {
         };
       }
     } catch (failure) {
-      void failure;
+      if (this.signing?.requirePackageSignature) {
+        throw failure;
+      }
     }
 
     return null;
@@ -248,8 +324,14 @@ export class GitRefSyncAdapter implements SyncPort {
     // 1. Create blob
     const { stdout: blobSha } = await this.runGit(['hash-object', '-w', '--stdin'], jsonStr);
 
-    // 2. Create tree with snapshot.json
-    const treeInput = `100644 blob ${blobSha}\tsnapshot.json\n`;
+    // 2. Create tree with snapshot.json and optional snapshot.sig.json
+    let treeInput = `100644 blob ${blobSha}\tsnapshot.json\n`;
+    if (this.signer) {
+      const sig = signSnapshot(jsonStr, this.signer);
+      const sigStr = `${JSON.stringify(sig, null, 2)}\n`;
+      const { stdout: sigBlobSha } = await this.runGit(['hash-object', '-w', '--stdin'], sigStr);
+      treeInput += `100644 blob ${sigBlobSha}\tsnapshot.sig.json\n`;
+    }
     const { stdout: treeSha } = await this.runGit(['mktree'], treeInput);
 
     // 3. Build commit
@@ -518,9 +600,38 @@ export class GitRefSyncAdapter implements SyncPort {
     // Merge episodes from every snapshot read (the current ref, plus the legacy one on upgrade).
     const localEpisodes = await this.store.episodes();
     let mergedEpisodes = localEpisodes;
+    const rejected: { seq: number; reason: string }[] = [];
+    const flagged: { seq: number; reason: string }[] = [];
+
+    let effectiveSigning = this.signing;
+    if (this.signing?.keyring.keys.some((k) => k.revoked && k.revoked.trustBefore == null)) {
+      try {
+        const { stdout: commitTimeStr } = await this.runGit([
+          'log',
+          '-1',
+          '--format=%ct',
+          this.ref,
+        ]);
+        if (commitTimeStr) {
+          const commitTimeMs = Number(commitTimeStr.trim()) * 1000;
+          if (Number.isFinite(commitTimeMs)) {
+            effectiveSigning = {
+              ...this.signing,
+              keyring: deriveGitTrustBefore(this.signing.keyring, commitTimeMs),
+            };
+          }
+        }
+      } catch (failure) {
+        void failure;
+      }
+    }
+
     for (const snapshot of read.snapshots) {
-      if (snapshot.episodes && snapshot.episodes.length > 0) {
-        mergedEpisodes = mergeEpisodes(mergedEpisodes, snapshot.episodes);
+      const screened = screenIncoming(snapshot.episodes ?? [], effectiveSigning);
+      rejected.push(...screened.rejected);
+      flagged.push(...screened.flagged);
+      if (screened.accepted.length > 0) {
+        mergedEpisodes = mergeEpisodes(mergedEpisodes, screened.accepted);
       }
     }
     let updated = false;
@@ -538,6 +649,8 @@ export class GitRefSyncAdapter implements SyncPort {
       updated,
       pulledCount,
       localTotal: updatedStates.length,
+      ...(rejected.length > 0 ? { rejected } : {}),
+      ...(flagged.length > 0 ? { flagged } : {}),
     };
   }
 

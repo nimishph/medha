@@ -95,6 +95,7 @@ impl StorePort for MemoryStore {
             key: input.key,
             at: input.at,
             author: input.author,
+            sig: input.sig,
             payload: input.payload,
         };
         let state = self.accept(episode.clone());

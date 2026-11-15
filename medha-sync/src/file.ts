@@ -11,25 +11,36 @@ import {
   CURRENT_MEMORY_SCHEMA_VERSION,
   type MemorySnapshotV1,
   migrateSnapshot,
+  type PackageSignature,
   type PullResult,
   type PushResult,
   type ReconcileResult,
+  type Signer,
+  type SigningPolicy,
   type StorePort,
   type SyncPort,
   type SyncStatus,
   serializeSnapshot,
+  signSnapshot,
+  verifySnapshot,
 } from '@cntxt-labs/medha-core';
-import { mergeEpisodes } from './merge.ts';
+import { mergeEpisodes, screenIncoming } from './merge.ts';
 
 export interface FileSyncOptions {
   readonly store: StorePort;
   readonly filePath: string;
+  /** Verify-on-pull policy (medha-nwf.4); absent behaves as `off`. */
+  readonly signing?: SigningPolicy | undefined;
+  /** Signer used to sign outgoing sync packages (`snapshot.sig.json`) (medha-nwf.8). */
+  readonly signer?: Signer | undefined;
 }
 
 export class FileSyncAdapter implements SyncPort {
   readonly name = 'file';
   readonly store: StorePort;
   readonly filePath: string;
+  private readonly signing: SigningPolicy | undefined;
+  private readonly signer: Signer | undefined;
 
   /**
    * Raw content of `filePath` as last observed by this instance (via pull()), or `null` if it
@@ -42,6 +53,14 @@ export class FileSyncAdapter implements SyncPort {
   constructor(options: FileSyncOptions) {
     this.store = options.store;
     this.filePath = resolve(options.filePath);
+    this.signing = options.signing;
+    this.signer = options.signer;
+  }
+
+  private get sigPath(): string {
+    return this.filePath.endsWith('.json')
+      ? `${this.filePath.slice(0, -5)}.sig.json`
+      : `${this.filePath}.sig.json`;
   }
 
   private readRawFile(): string | null {
@@ -116,14 +135,50 @@ export class FileSyncAdapter implements SyncPort {
     }
 
     try {
+      if (this.signing?.requirePackageSignature) {
+        const sigFile = existsSync(this.sigPath) ? readFileSync(this.sigPath, 'utf8') : null;
+        let packageSig: PackageSignature | null = null;
+        if (sigFile !== null) {
+          try {
+            packageSig = JSON.parse(sigFile);
+          } catch {
+            packageSig = null;
+          }
+        }
+        if (!packageSig) {
+          return {
+            ok: false,
+            updated: false,
+            pulledCount: 0,
+            localTotal: localStates.length,
+            error: 'Package signature required but snapshot.sig.json is missing or unreadable',
+          };
+        }
+        const verified = verifySnapshot(rawFile, packageSig, this.signing.keyring);
+        if (verified.status !== 'verified') {
+          return {
+            ok: false,
+            updated: false,
+            pulledCount: 0,
+            localTotal: localStates.length,
+            error: `Invalid package signature: ${verified.status === 'invalid' ? verified.reason : 'unsigned'}`,
+          };
+        }
+      }
+
       const raw = JSON.parse(rawFile);
       const snapshot = migrateSnapshot(raw);
       this.lastObservedContent = rawFile;
       const localEpisodes = await this.store.episodes();
 
       // If remote has raw episodes, merge them
-      if (snapshot.episodes && snapshot.episodes.length > 0) {
-        const mergedEpisodes = mergeEpisodes(localEpisodes, snapshot.episodes);
+      const screened = screenIncoming(snapshot.episodes ?? [], this.signing);
+      const report = {
+        ...(screened.rejected.length > 0 ? { rejected: screened.rejected } : {}),
+        ...(screened.flagged.length > 0 ? { flagged: screened.flagged } : {}),
+      };
+      if (screened.accepted.length > 0) {
+        const mergedEpisodes = mergeEpisodes(localEpisodes, screened.accepted);
         if (mergedEpisodes.length !== localEpisodes.length) {
           await this.store.replaceLog(mergedEpisodes);
           await this.store.rebuild();
@@ -131,8 +186,9 @@ export class FileSyncAdapter implements SyncPort {
           return {
             ok: true,
             updated: true,
-            pulledCount: snapshot.episodes.length,
+            pulledCount: screened.accepted.length,
             localTotal: updatedStates.length,
+            ...report,
           };
         }
       }
@@ -146,6 +202,7 @@ export class FileSyncAdapter implements SyncPort {
         updated: false,
         pulledCount: 0,
         localTotal: localStates.length,
+        ...report,
       };
     } catch (err) {
       return {
@@ -189,6 +246,10 @@ export class FileSyncAdapter implements SyncPort {
 
       const serialized = serializeSnapshot(snapshot);
       this.atomicWriteFile(this.filePath, serialized);
+      if (this.signer) {
+        const sig = signSnapshot(serialized, this.signer);
+        this.atomicWriteFile(this.sigPath, `${JSON.stringify(sig, null, 2)}\n`);
+      }
       this.lastObservedContent = serialized;
       return {
         ok: true,

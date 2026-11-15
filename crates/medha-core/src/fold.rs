@@ -167,6 +167,33 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
     map
 }
 
+pub const MAX_AUTHORS_PER_ENTITY: usize = 128;
+
+pub fn signal_limit_key(author: Option<&str>) -> &str {
+    match author {
+        None => "",
+        Some(a) => match a.find('/') {
+            None => a,
+            Some(idx) => &a[..idx],
+        },
+    }
+}
+
+pub fn bound_authors_ledger(authors: &mut HashMap<String, AuthorLedger>, cap: usize) {
+    if authors.len() <= cap {
+        return;
+    }
+    let mut entries: Vec<(String, i64)> = authors
+        .iter()
+        .map(|(k, v)| (k.clone(), v.last_at.unwrap_or(i64::MIN)))
+        .collect();
+    entries.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+    let drop_count = entries.len() - cap;
+    for (k, _) in entries.into_iter().take(drop_count) {
+        authors.remove(&k);
+    }
+}
+
 pub fn fold_signal_step(
     mut state: EntityFoldState,
     signal_name: &str,
@@ -183,7 +210,7 @@ pub fn fold_signal_step(
     // Signal limits (author rate limiting)
     if let Some(lim) = &kind_spec.signal_limits {
         if spec.counts_as_success {
-            let who = author.unwrap_or("").to_string();
+            let who = signal_limit_key(author).to_string();
             let mut led = state.authors.get(&who).cloned().unwrap_or(AuthorLedger {
                 last_at: None,
                 counted: 0,
@@ -205,12 +232,14 @@ pub fn fold_signal_step(
             if too_soon || over_cap {
                 led.suppressed += 1;
                 state.authors.insert(who, led);
+                bound_authors_ledger(&mut state.authors, MAX_AUTHORS_PER_ENTITY);
                 return Ok(state);
             }
 
             led.last_at = Some(at);
             led.counted += 1;
             state.authors.insert(who, led);
+            bound_authors_ledger(&mut state.authors, MAX_AUTHORS_PER_ENTITY);
         }
     }
 

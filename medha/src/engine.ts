@@ -11,6 +11,7 @@
 
 import {
   type Anchor,
+  type AppendResult,
   assignSeq,
   buildHint,
   type Context,
@@ -26,8 +27,10 @@ import {
   type EpisodeInput,
   type EvidentialHint,
   entityKeyString,
+  episodeId,
   episodeToInput,
   evaluateGates,
+  type FoldEpisodeOptions,
   findDanglingRetractions,
   findPitfalls,
   foldDecisionTree,
@@ -65,14 +68,18 @@ import {
   type ScoredDecisionCase,
   SignalRegistry,
   type SignalSpec,
+  type Signer,
+  type SigningPolicy,
   type StorePort,
   type SyncPort,
   sanitizeContext,
   scoreDecisionTree,
+  signEpisode,
   TrajectoryDistillerMiner,
   type TrajectoryEvidence,
   validateDecisionTreeEdit,
   validateSignalSpec,
+  verifyEpisode,
   wilsonWidth,
 } from '@cntxt-labs/medha-core';
 import { CorruptStoreError } from '@cntxt-labs/medha-store';
@@ -117,6 +124,17 @@ export interface MedhaOptions {
   readonly promotionPolicy?: PromotionPolicy | undefined;
   readonly sync?: SyncPort | undefined;
   readonly permissions?: WritePermissionsPolicy | undefined;
+  /**
+   * Episode signing (medha-nwf.4). With a `signer`, every episode this engine appends is signed;
+   * with `policy.mode === 'require'`, an episode that would not verify against `policy.keyring` is
+   * refused. Fold-time exclusion of unverified episodes is the store's job (`admit`).
+   */
+  readonly signing?: EngineSigning | undefined;
+}
+
+export interface EngineSigning {
+  readonly policy: SigningPolicy;
+  readonly signer?: Signer | undefined;
 }
 
 export type SageOptions = MedhaOptions;
@@ -218,6 +236,7 @@ export class Medha {
   readonly promotionPolicy: PromotionPolicy;
   readonly sync: SyncPort | undefined;
   readonly permissions: WritePermissionsPolicy | undefined;
+  readonly signing: EngineSigning | undefined;
   /** The last `store.open()` result, retained so maintenance can report a corrupt location. */
   private openResult: OpenResult | undefined;
 
@@ -227,6 +246,86 @@ export class Medha {
     this.promotionPolicy = options.promotionPolicy ?? convergingSourcesPolicy({ minSources: 2 });
     this.sync = options.sync;
     this.permissions = options.permissions;
+    this.signing = options.signing;
+  }
+
+  /** The keyring principal of the configured signer, when it is registered. */
+  get principal(): string | undefined {
+    const signer = this.signing?.signer;
+    if (signer === undefined) return undefined;
+    return this.signing?.policy.keyring.keys.find((k) => k.keyId === signer.keyId)?.principal;
+  }
+
+  /** Only the episodes the store's fold admits (all of them unless signing is `require`). */
+  private admitted(log: readonly Episode[]): Episode[] {
+    const admit = this.store.admit;
+    return admit === undefined ? [...log] : log.filter((episode) => admit(episode));
+  }
+
+  /**
+   * Sign an outgoing episode when a signer is configured, then enforce `require` mode. An author
+   * that is not under the signer's principal is refused rather than signed into an episode that
+   * could never verify; an absent author becomes the principal.
+   */
+  private sign(input: EpisodeInput, action: string): EpisodeInput {
+    const signing = this.signing;
+    if (signing === undefined) return input;
+    let out = input;
+    const signer = signing.signer;
+    if (signer !== undefined) {
+      const principal = this.principal;
+      if (principal !== undefined) {
+        if (out.author === undefined) out = { ...out, author: principal };
+        else if (out.author !== principal && !out.author.startsWith(`${principal}/`)) {
+          throw new PermissionDeniedError(
+            action,
+            `author '${out.author}' is not the signing key's principal '${principal}' (or '${principal}/<label>')`,
+          );
+        }
+      }
+      out = signEpisode(out, signer);
+    }
+    if (signing.policy.mode === 'require') {
+      const outcome = verifyEpisode(out, signing.policy.keyring);
+      if (outcome.status !== 'verified') {
+        throw new PermissionDeniedError(
+          action,
+          outcome.status === 'unsigned'
+            ? "signing mode is 'require' and no signing key is configured"
+            : `the episode would not verify: ${outcome.reason}`,
+          { hint: 'Configure a signing key registered in the keyring (medha keys).' },
+        );
+      }
+    }
+    return out;
+  }
+
+  private async append(input: EpisodeInput, action = input.type): Promise<AppendResult> {
+    return this.store.append(this.sign(input, action));
+  }
+
+  /**
+   * Sign the baselines compaction produced. Returns `null` when, in `require` mode, they would not
+   * verify (no maintainer-role key): compacting would replace verified evidence with baselines that
+   * do not count, so the caller must not write it.
+   */
+  private signBaselines(episodes: readonly Episode[]): Episode[] | null {
+    if (this.signing === undefined) return [...episodes];
+    try {
+      return episodes.map((episode) =>
+        episode.type === 'baseline' && episode.sig === undefined
+          ? assignSeq(this.sign(episodeToInput(episode), 'compact'), episode.seq)
+          : episode,
+      );
+    } catch (failure) {
+      if (failure instanceof PermissionDeniedError) return null;
+      throw failure;
+    }
+  }
+
+  /** Fold options matching the store's own projection: its kinds and its admission filter. */
+  private foldOptions(): FoldEpisodeOptions {
+    return { kinds: this.kindRegistry(), admit: this.store.admit };
   }
 
   // -------------------------------------------------------------------------------------------
@@ -302,9 +401,11 @@ export class Medha {
     }
   }
 
-  private checkWritePermission(action: string, author?: string): void {
+  private checkWritePermission(action: string, explicitAuthor?: string): void {
     const perms = this.permissions;
     if (!perms) return;
+    // A signing engine fills an absent author with its principal (see `sign`); check that one.
+    const author = explicitAuthor ?? this.principal;
     if (perms.readOnly) {
       throw new PermissionDeniedError(action, 'Store is configured as read-only');
     }
@@ -408,9 +509,10 @@ export class Medha {
     const promoted = proposalEpisodes.some((episode) => episode.promoted === true);
     // Non-evidential (medha-arj.1/.2/.3): folded from the same per-key episode slice, never from
     // `state`, so a definition or decision tree renders even for an id with no signal history yet.
-    const definition = foldDefinitions(episodes).get(keyString);
+    const counted = this.admitted(episodes);
+    const definition = foldDefinitions(counted).get(keyString);
     const decisionTree = scoreDecisionTree(
-      foldDecisionTree(episodes, key, this.kindSpecFor(key.kind)),
+      foldDecisionTree(counted, key, this.kindSpecFor(key.kind)),
       context.now,
       this.kindSpecFor(key.kind),
     );
@@ -796,7 +898,7 @@ export class Medha {
     });
     const changes: SweepChange[] = [];
     for (const step of steps) {
-      const appended = await this.store.append({
+      const appended = await this.append({
         type: 'sweep',
         key: step.key,
         at: context.now,
@@ -833,7 +935,7 @@ export class Medha {
     }
     const cutoffAt = context.now - olderThanDays * DAY_MS;
     const log = await this.store.episodes();
-    const compacted = compactPrefix(log, cutoffAt, { kinds: this.kindRegistry() });
+    const compacted = compactPrefix(log, cutoffAt, this.foldOptions());
     const entities = (await this.store.list()).length;
     if (compacted.folded === null) {
       return {
@@ -850,13 +952,20 @@ export class Medha {
     const before = await this.store.list();
     // Prove fold-equivalence in memory *before* touching the log: a mismatch must abort, not
     // leave a rewritten log behind.
-    const projected = foldLog(compacted.episodes, { kinds: this.kindRegistry() });
+    const projected = foldLog(compacted.episodes, this.foldOptions());
     if (!statesEquivalent(before, projected)) {
       throw new InvariantViolationError('compact', {
         context: { folded: compacted.folded, olderThanDays, phase: 'pre-write' },
       });
     }
-    await this.store.replaceLog(compacted.episodes);
+    const signed = this.signBaselines(compacted.episodes);
+    if (signed === null) {
+      throw new PermissionDeniedError(
+        'compact',
+        "signing mode is 'require': compaction baselines must be signed by a maintainer-role key",
+      );
+    }
+    await this.store.replaceLog(signed);
     const after = await this.store.list();
     if (!statesEquivalent(before, after)) {
       throw new InvariantViolationError('compact', {
@@ -871,6 +980,63 @@ export class Medha {
       baselinesWritten: compacted.baselinesWritten,
       remainingEpisodes: compacted.episodes.length,
       entities: after.length,
+    };
+  }
+
+  /**
+   * Adopt a legacy log under signing (medha-nwf.4, design D8): fold every unsigned or verified
+   * episode into per-entity baselines signed by this engine's key, which must hold the maintainer
+   * role — the signature is the maintainer's endorsement of the history it summarises. Folding stops
+   * at the first *invalid* episode (e.g. a revoked key's), which stays verbatim with everything
+   * after it: adoption endorses legacy history, never evidence a keyring has disowned.
+   */
+  async adopt(context: Context): Promise<{
+    readonly baselinesWritten: number;
+    readonly folded: { readonly from: number; readonly to: number } | null;
+    readonly remainingEpisodes: number;
+  }> {
+    sanitizeContext(context);
+    const opened = await this.ensureOpen();
+    if (opened.status === 'corrupt') this.assertMaintainable(opened.location);
+    if (this.store.scope !== undefined) {
+      throw new PermissionDeniedError('adopt', 'a namespace-scoped store cannot rewrite the log');
+    }
+    const signing = this.signing;
+    if (signing?.signer === undefined) {
+      throw new PermissionDeniedError('adopt', 'no signing key is configured');
+    }
+    const keyring = signing.policy.keyring;
+    const log = await this.store.episodes();
+    const compacted = compactPrefix(log, Number.POSITIVE_INFINITY, {
+      kinds: this.kindRegistry(),
+      admit: (episode) => verifyEpisode(episode, keyring).status !== 'invalid',
+    });
+    if (compacted.folded === null) {
+      return { baselinesWritten: 0, folded: null, remainingEpisodes: log.length };
+    }
+    // Signed with this engine's key; verified against the keyring regardless of mode, since the
+    // whole point is baselines that `require` mode will count.
+    const signed = compacted.episodes.map((episode) => {
+      if (episode.type !== 'baseline' || episode.sig !== undefined) return episode;
+      const input = this.sign(episodeToInput(episode), 'adopt');
+      const outcome = verifyEpisode(input, keyring);
+      if (outcome.status !== 'verified') {
+        throw new PermissionDeniedError(
+          'adopt',
+          outcome.status === 'unsigned'
+            ? 'no signing key is configured'
+            : `the baselines would not verify: ${outcome.reason}`,
+          { hint: 'Adoption needs a key with the maintainer role in the keyring.' },
+        );
+      }
+      return assignSeq(input, episode.seq);
+    });
+    await this.store.replaceLog(signed);
+    await this.store.rebuild();
+    return {
+      baselinesWritten: compacted.baselinesWritten,
+      folded: compacted.folded,
+      remainingEpisodes: signed.length,
     };
   }
 
@@ -1008,18 +1174,22 @@ export class Medha {
     if (this.store.scope !== undefined) {
       return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
     }
-    const compacted = compactPrefix(log, cutoffAt, { kinds: this.kindRegistry() });
+    const compacted = compactPrefix(log, cutoffAt, this.foldOptions());
     if (compacted.folded === null) {
       return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
     }
     const before = await this.store.list();
-    const projected = foldLog(compacted.episodes, { kinds: this.kindRegistry() });
+    const projected = foldLog(compacted.episodes, this.foldOptions());
     if (!statesEquivalent(before, projected)) {
       throw new InvariantViolationError('open', {
         context: { folded: compacted.folded, olderThanDays, phase: 'pre-write' },
       });
     }
-    await this.store.replaceLog(compacted.episodes);
+    const signed = this.signBaselines(compacted.episodes);
+    // Without a maintainer key the session sweep leaves the log as it is rather than failing.
+    if (signed === null)
+      return { folded: null, baselinesWritten: 0, remainingEpisodes: log.length };
+    await this.store.replaceLog(signed);
     const after = await this.store.list();
     if (!statesEquivalent(before, after)) {
       throw new InvariantViolationError('open', {
@@ -1125,7 +1295,7 @@ export class Medha {
       ...weightEpisode,
     };
 
-    const appended = await this.store.append(input);
+    const appended = await this.append(input);
     const hint = buildHint(
       appended.state ?? freshState(key, context.now),
       context.now,
@@ -1179,7 +1349,7 @@ export class Medha {
       ...(report.author === undefined ? {} : { author: report.author }),
       ...(report.note === undefined ? {} : { note: report.note }),
     };
-    const appended = await this.store.append(input);
+    const appended = await this.append(input);
     return appended.state === undefined
       ? buildHint(freshState(key, at), context.now, this.kindSpecFor(key.kind))
       : buildHint(appended.state, context.now, this.kindSpecFor(key.kind));
@@ -1208,7 +1378,7 @@ export class Medha {
       definition,
       ...(options.author === undefined ? {} : { author: options.author }),
     };
-    const appended = await this.store.append(input);
+    const appended = await this.append(input);
     return { episode: appended.episode, definition };
   }
 
@@ -1243,7 +1413,7 @@ export class Medha {
     this.checkWritePermission('decision', options.author);
     const caseId = input.caseId ?? newDecisionCaseId(key, options.random);
     const kindSpec = this.kindSpecFor(key.kind);
-    const log = await this.store.episodes();
+    const log = this.admitted(await this.store.episodes());
     validateDecisionTreeEdit(
       foldDecisionTree(log, key, kindSpec),
       {
@@ -1266,7 +1436,7 @@ export class Medha {
       ...(input.detach === undefined ? {} : { detach: input.detach }),
       ...(options.author === undefined ? {} : { author: options.author }),
     };
-    const appended = await this.store.append(episodeInput);
+    const appended = await this.append(episodeInput);
     return { episode: appended.episode, caseId };
   }
 
@@ -1341,7 +1511,7 @@ export class Medha {
       ...(decision.reason === undefined ? {} : { promotionReason: decision.reason }),
     };
 
-    const appended = await this.store.append(episodeInput);
+    const appended = await this.append(episodeInput);
     const state =
       appended.state ??
       freshState(key, context.now, {
@@ -1430,7 +1600,7 @@ export class Medha {
       default:
         throw new InvalidArgumentError('action', "'retire' | 'quarantine' | 'restore'", action);
     }
-    const appended = await this.store.append({
+    const appended = await this.append({
       type: 'override',
       key,
       at: context.now,
@@ -1500,10 +1670,11 @@ export class Medha {
       key: target.key,
       at: context.now,
       targetSeq,
+      targetId: episodeId(target),
       reason,
       ...(options.author === undefined ? {} : { author: options.author }),
     };
-    const appended = await this.store.append(input);
+    const appended = await this.append(input);
     const state = appended.state ?? freshState(target.key, context.now);
     const hint = buildHint(state, context.now, kindSpec);
     const wasHeld = before?.status === 'quarantined' || before?.status === 'retired';

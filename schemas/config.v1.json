@@ -33,6 +33,30 @@
       },
       "description": "Optional list of namespaces this project/agent is restricted to for isolation."
     },
+    "signing": {
+      "type": "object",
+      "description": "Episode signing (docs/design/signing-key-model.md). Public keys live in keys/keyring.json beside this file; private keys never live in the home.",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["off", "warn", "require"],
+          "default": "off",
+          "description": "'off' folds every episode; 'warn' also reports unverified ones; 'require' counts only episodes that verify against the keyring and refuses unsigned writes and pulls."
+        },
+        "defaultKey": {
+          "type": "string",
+          "pattern": "^ed25519:[A-Za-z0-9_-]{22}$",
+          "description": "Key id this home signs local writes with (its private key is looked up in the user's key directory)."
+        },
+        "requirePackageSignature": {
+          "type": "boolean",
+          "default": false,
+          "description": "Refuse unsigned or invalidly signed sync packages (snapshot.sig.json) on pull."
+        }
+      }
+    },
     "registries": {
       "type": "object",
       "description": "Single source of truth for kinds, signal definitions, thresholds, recency decay, and anchor kinds.",

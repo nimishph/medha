@@ -30,6 +30,10 @@ export interface PullResult {
   readonly pulledCount: number;
   readonly localTotal: number;
   readonly error?: string | undefined;
+  /** Remote episodes refused by `require`-mode verification (medha-nwf.4), by remote seq. */
+  readonly rejected?: readonly { readonly seq: number; readonly reason: string }[] | undefined;
+  /** Remote episodes that would have been refused, accepted under `warn` mode. */
+  readonly flagged?: readonly { readonly seq: number; readonly reason: string }[] | undefined;
 }
 
 export interface PushResult {

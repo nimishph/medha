@@ -38,7 +38,7 @@ export async function runMaintainPreflight(
   options: MaintainPreflightOptions,
   environment: Environment,
 ): Promise<MaintainPreflightReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     const now = environment.now();
     const preflight = await opened.adminEngine.preflight({ now });
@@ -82,7 +82,7 @@ export async function runMaintainCompact(
   options: MaintainCompactOptions,
   environment: Environment,
 ): Promise<MaintainCompactReport> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     const now = environment.now();
     const report = await opened.adminEngine.compact(
@@ -115,7 +115,7 @@ export async function runMaintainBackup(
   if (!options.path || typeof options.path !== 'string') {
     throw new InvalidArgumentError('path', 'a non-empty string path', options.path);
   }
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     const now = environment.now();
     const { snapshot } = await opened.adminEngine.backup({ now });
@@ -147,7 +147,7 @@ export async function runMaintainRestore(
     throw new InvalidArgumentError('path', 'a non-empty string path', options.path);
   }
   const snapshot = readSnapshotFile(options.path);
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   try {
     const { restored, episodes, migration } = await opened.adminEngine.restore(snapshot);
     const now = environment.now();

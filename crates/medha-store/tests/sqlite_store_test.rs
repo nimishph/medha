@@ -40,6 +40,7 @@ fn test_sqlite_store_basic_lifecycle() {
         key: key.clone(),
         at: 1700000000000,
         author: Some("agent-1".to_string()),
+        sig: None,
         payload: EpisodePayload::Signal {
             spec: sample_signal_spec(),
             anchors: None,
@@ -66,6 +67,7 @@ fn test_sqlite_store_basic_lifecycle() {
         key: key.clone(),
         at: 1700000005000,
         author: Some("human-reviewer".to_string()),
+        sig: None,
         payload: EpisodePayload::Guard {
             ok: true,
             kind: Some("review".to_string()),
@@ -132,6 +134,7 @@ fn test_sqlite_store_retraction() {
             key: key.clone(),
             at: 1000,
             author: None,
+            sig: None,
             payload: EpisodePayload::Signal {
                 spec: sample_signal_spec(),
                 anchors: None,
@@ -151,6 +154,7 @@ fn test_sqlite_store_retraction() {
             key: key.clone(),
             at: 2000,
             author: None,
+            sig: None,
             payload: EpisodePayload::Signal {
                 spec: sample_signal_spec(),
                 anchors: None,
@@ -173,8 +177,10 @@ fn test_sqlite_store_retraction() {
             key: key.clone(),
             at: 3000,
             author: Some("admin".to_string()),
+            sig: None,
             payload: EpisodePayload::Retract {
                 target_seq: 1,
+                target_id: None,
                 reason: "Misattribution".to_string(),
             },
         })

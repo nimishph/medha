@@ -8,6 +8,8 @@ import {
   GitRefSyncAdapter,
   type PullResult,
   type PushResult,
+  type Signer,
+  type SigningPolicy,
   type StorePort,
   type StoreRegistries,
   type SyncPort,
@@ -31,9 +33,11 @@ export function createSyncAdapter(
   store: StorePort,
   options: SyncCliOptions,
   rootDir: string,
+  signing?: SigningPolicy,
+  signer?: Signer,
 ): SyncPort {
   if (options.file) {
-    return new FileSyncAdapter({ store, filePath: options.file });
+    return new FileSyncAdapter({ store, filePath: options.file, signing, signer });
   }
 
   return new GitRefSyncAdapter({
@@ -41,6 +45,8 @@ export function createSyncAdapter(
     rootDir,
     ref: options.ref,
     remote: options.remote,
+    signing,
+    signer,
   });
 }
 
@@ -49,11 +55,11 @@ export async function resolveSyncAdapter(
   environment: Environment,
 ): Promise<{ readonly adapter: SyncPort; readonly close: () => Promise<void> }> {
   const rootDir = options.dir ?? environment.cwd;
-  const opened = openHome(rootDir, options.home);
+  const opened = openHome(rootDir, options.home, environment.env);
   await opened.store.open();
 
   return {
-    adapter: createSyncAdapter(opened.store, options, rootDir),
+    adapter: createSyncAdapter(opened.store, options, rootDir, opened.signing, opened.signer),
     close: () => opened.store.close(),
   };
 }
@@ -75,9 +81,9 @@ export async function runSyncPull(
   environment: Environment,
 ): Promise<PullResult> {
   const rootDir = options.dir ?? environment.cwd;
-  let opened = openHome(rootDir, options.home);
+  let opened = openHome(rootDir, options.home, environment.env);
   await opened.store.open();
-  let adapter = createSyncAdapter(opened.store, options, rootDir);
+  let adapter = createSyncAdapter(opened.store, options, rootDir, opened.signing);
 
   try {
     if (adapter.peek) {
@@ -166,9 +172,9 @@ export async function runSyncPull(
 
           // Close previous store and reopen with new config
           await opened.store.close();
-          opened = openHome(rootDir, options.home);
+          opened = openHome(rootDir, options.home, environment.env);
           await opened.store.open();
-          adapter = createSyncAdapter(opened.store, options, rootDir);
+          adapter = createSyncAdapter(opened.store, options, rootDir, opened.signing);
         }
       }
     }

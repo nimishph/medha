@@ -34,6 +34,15 @@ import {
   type SignalSpec,
   SKIP,
 } from '../signals.ts';
+import {
+  canonicalJson,
+  createSigner,
+  EPISODE_DOMAIN,
+  episodeId,
+  signableEpisode,
+  signEpisode,
+  verifyEpisode,
+} from '../signing.ts';
 import { TRUST_SPEC_VERSION } from '../thresholds.ts';
 import { statusFrom, trustOf } from '../trust.ts';
 import { wilsonLowerBound } from '../wilson.ts';
@@ -362,6 +371,44 @@ describe('medha-arj.8: definitions/decision-tree conformance (spec §11a)', () =
       } else {
         expect(() => validateEpisodeInput(input, { kinds, signals })).not.toThrow();
       }
+    });
+  }
+});
+
+describe('conformance vectors: episode signing (medha-nwf.4, §13)', () => {
+  const vectors = load('signing.json');
+  const der = Buffer.concat([
+    Buffer.from('302e020100300506032b657004220420', 'hex'),
+    Buffer.from(vectors.key.seedHex, 'hex'),
+  ]);
+  const signer = createSigner(
+    `-----BEGIN PRIVATE KEY-----\n${der.toString('base64')}\n-----END PRIVATE KEY-----\n`,
+  );
+
+  test('targets the current spec version and the fixed key', () => {
+    expect(vectors.specVersion).toBe(TRUST_SPEC_VERSION);
+    expect(vectors.domain).toBe(EPISODE_DOMAIN);
+    expect(signer.publicKey).toBe(vectors.key.publicKey);
+    expect(signer.keyId).toBe(vectors.key.keyId);
+  });
+
+  for (const c of vectors.cases) {
+    test(`${c.name}: canonical payload, episode id and signature`, () => {
+      expect(canonicalJson(signableEpisode(c.episode))).toBe(c.canonical);
+      expect(episodeId(c.episode)).toBe(c.episodeId);
+      expect(signEpisode(c.episode, signer).sig).toEqual(c.sig);
+      const keyring = {
+        version: 1 as const,
+        keys: [
+          {
+            keyId: signer.keyId,
+            publicKey: signer.publicKey,
+            principal: c.episode.author.split('/')[0],
+            roles: ['agent' as const, 'human' as const],
+          },
+        ],
+      };
+      expect(verifyEpisode({ ...c.episode, sig: c.sig }, keyring).status).toBe('verified');
     });
   }
 });

@@ -7,6 +7,7 @@ pub mod guard;
 pub mod packer;
 pub mod recency;
 pub mod round;
+pub mod signing;
 pub mod thresholds;
 pub mod types;
 pub mod wilson;
@@ -17,8 +18,8 @@ pub use decision::{
 pub use drift::{compute_drift, ema_step, DriftReport};
 pub use durability::{durability_factor, raw_durability_factor};
 pub use fold::{
-    canonical_signals, fold_guard_step, fold_signal_step, AuthorLedger, EntityFoldState, KindSpec,
-    SignalLimits,
+    bound_authors_ledger, canonical_signals, fold_guard_step, fold_signal_step, signal_limit_key,
+    AuthorLedger, EntityFoldState, KindSpec, SignalLimits, MAX_AUTHORS_PER_ENTITY,
 };
 pub use formula::{compute_trust_and_status, TrustComputationInput, TrustComputationResult};
 pub use guard::{guard_factor, is_guarded};

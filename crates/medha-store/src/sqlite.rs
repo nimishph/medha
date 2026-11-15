@@ -232,6 +232,7 @@ impl StorePort for SqliteStore {
             key: input.key,
             at: input.at,
             author: input.author,
+            sig: input.sig,
             payload: input.payload,
         };
 

@@ -56,6 +56,11 @@ export type StorePort = {
    * maintenance (compaction, restore) is unavailable through it.
    */
   readonly scope?: readonly string[];
+  /**
+   * The fold-time admission filter the store applies (medha-nwf.4), exposed so anything folding
+   * the log outside the store (compaction, simulation) folds exactly what the store does.
+   */
+  readonly admit?: ((episode: Episode) => boolean) | undefined;
 } & Readonly<{
   open(): Promise<OpenResult>;
   isOpen(): boolean;

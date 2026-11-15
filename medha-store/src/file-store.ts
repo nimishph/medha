@@ -73,6 +73,11 @@ export interface FilePolicyStoreOptions {
   /** Directory that holds `state.json` / `state.json.bak`. Created on open(). */
   readonly dir: string;
   readonly registries?: StoreRegistries;
+  /**
+   * Fold-time admission filter (medha-nwf.4): episodes it rejects stay in the log but do not
+   * change state — `require`-mode signing passes the verified-only filter (`admitFilter`).
+   */
+  readonly admit?: ((episode: Episode) => boolean) | undefined;
   /** Document file names (for tests that need to break them); default `state.json` / `.bak`. */
   readonly document?: string;
   readonly backup?: string;
@@ -95,9 +100,11 @@ export class FilePolicyStore implements StorePort {
   private loaded = false;
   private corruptAt: number | null = null;
   private readonly meta = new Map<string, string>();
+  readonly admit: ((episode: Episode) => boolean) | undefined;
 
   constructor(options: FilePolicyStoreOptions) {
     this.dir = options.dir;
+    this.admit = options.admit;
     this.documentName = options.document ?? 'state.json';
     this.backupName = options.backup ?? 'state.json.bak';
     this.effective = resolveRegistries(options.registries);
@@ -244,7 +251,7 @@ export class FilePolicyStore implements StorePort {
     // Fold with the store's kind registry, as the append path does: kind specs (evidence weighting,
     // thresholds) shape the state, so a default fold would report a false mismatch.
     const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
-    return foldLog(this.log, { kinds });
+    return foldLog(this.log, { kinds, admit: this.admit });
   }
 
   // -------------------------------------------------------------------------
@@ -284,8 +291,13 @@ export class FilePolicyStore implements StorePort {
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
     const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
+    if (this.admit !== undefined && !this.admit(episode)) {
+      // Kept in the log (it is the source of truth), but it does not count.
+      this.nextSeq = episode.seq + 1;
+      return this.projection.get(entityKeyString(episode.key));
+    }
     if (episode.type === 'retract') {
-      const rebuilt = foldLog(this.log, { kinds });
+      const rebuilt = foldLog(this.log, { kinds, admit: this.admit });
       this.projection.clear();
       for (const st of rebuilt) {
         this.projection.set(entityKeyString(st.key), st);

@@ -11,6 +11,7 @@ fn make_signal(id: &str, at: i64, success: bool) -> EpisodeInput {
         key: EntityKey::new("", "rule", id),
         at,
         author: None,
+        sig: None,
         payload: EpisodePayload::Signal {
             spec: SignalSpec {
                 name: if success {
@@ -134,6 +135,7 @@ fn test_stress_deep_10k_episodes_single_entity() {
             key: EntityKey::new("", "rule", "deep-entity"),
             at: 1000 + total_signals as i64,
             author: None,
+            sig: None,
             payload: EpisodePayload::Guard {
                 ok: true,
                 kind: Some("ast".to_string()),

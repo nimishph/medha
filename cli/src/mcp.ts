@@ -213,7 +213,11 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     ({ namespace, kind, id, signal, updater, ensure, caseId, author, at, note, compact }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
-        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const resolvedAuthor = resolveAuthor(
+          author,
+          environment.env,
+          engine.principal !== undefined,
+        );
         const outcome = await engine.record(
           { namespace: namespace ?? '', kind: kind ?? 'rule', id },
           signal,
@@ -269,7 +273,11 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     ({ namespace, kind: entityKind, id, ok, guardKind, details, author, at, note }) =>
       respond(() => {
         const effectiveNow = parseTimestamp(at, environment.now());
-        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const resolvedAuthor = resolveAuthor(
+          author,
+          environment.env,
+          engine.principal !== undefined,
+        );
         return engine.reportGuard(
           { namespace: namespace ?? '', kind: entityKind ?? 'rule', id },
           {
@@ -342,7 +350,11 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     ({ namespace, kind, id, condition, decision, caseId, parentId, detach, author, at }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
-        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const resolvedAuthor = resolveAuthor(
+          author,
+          environment.env,
+          engine.principal !== undefined,
+        );
         const key = { namespace: namespace ?? '', kind: kind ?? 'rule', id };
         const outcome = await engine.decision(
           key,
@@ -407,7 +419,11 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     ({ namespace, kind, id, source, evidenceRefs, anchor, text, author, at, note, compact }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
-        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const resolvedAuthor = resolveAuthor(
+          author,
+          environment.env,
+          engine.principal !== undefined,
+        );
         const outcome = await engine.propose(
           {
             key: { namespace: namespace ?? '', kind: kind ?? 'rule', id },
@@ -546,7 +562,11 @@ export function createMcpServer(engine: Medha, environment: Environment): McpSer
     ({ seq, namespace, kind, id, reason, author, at, compact }) =>
       respond(async () => {
         const effectiveNow = parseTimestamp(at, environment.now());
-        const resolvedAuthor = resolveAuthor(author, environment.env);
+        const resolvedAuthor = resolveAuthor(
+          author,
+          environment.env,
+          engine.principal !== undefined,
+        );
         const key =
           id === undefined ? undefined : { namespace: namespace ?? '', kind: kind ?? 'rule', id };
         const outcome = await engine.retract(
@@ -906,7 +926,7 @@ export async function serveMcp(
   environment: Environment,
   transport: Transport = new StdioServerTransport(),
 ): Promise<void> {
-  const opened = openHome(options.dir ?? environment.cwd, options.home);
+  const opened = openHome(options.dir ?? environment.cwd, options.home, environment.env);
   const server = createMcpServer(opened.engine, environment);
   const closed = new Promise<void>((resolve) => {
     server.server.onclose = () => resolve();

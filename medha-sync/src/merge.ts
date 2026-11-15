@@ -19,7 +19,9 @@ import {
   entityKeyString,
   type LifecycleStatus,
   round6,
+  type SigningPolicy,
   statusFor,
+  verifyEpisode,
 } from '@cntxt-labs/medha-core';
 
 /**
@@ -118,6 +120,14 @@ function contentKey(episode: Episode | EpisodeInput, retractTarget: string): str
   return parts.join('\u0000');
 }
 
+/**
+ * Signed episodes are identified per signer (medha-nwf.4): two principals signing identical content
+ * are two episodes, not one whose survivor depends on arrival order.
+ */
+function withSigner(base: string, episode: Episode): string {
+  return episode.sig === undefined ? base : `${base} sig:${episode.sig.keyId}`;
+}
+
 /** A retraction whose target is not present in the log it came from, keyed by the raw seq. */
 function danglingTarget(targetSeq: number): string {
   return `\u0000<unresolved-target>${targetSeq}`;
@@ -127,6 +137,8 @@ function danglingTarget(targetSeq: number): string {
 interface Identity {
   /** Dedup and sort identity of the episode itself. */
   readonly id: string;
+  /** The identity without the signer: what a signed copy and an unsigned copy have in common. */
+  readonly base: string;
   /** For a `retract`: the identity of the episode it masks, or null when unresolvable. */
   readonly targetId: string | null;
 }
@@ -143,15 +155,16 @@ function identities(log: readonly Episode[]): ReadonlyMap<number, Identity> {
 
   const bySeq = new Map<number, Identity>();
   for (const ep of log) {
-    if (ep.type !== 'retract') bySeq.set(ep.seq, { id: contentKey(ep, ''), targetId: null });
+    if (ep.type !== 'retract') {
+      const base = contentKey(ep, '');
+      bySeq.set(ep.seq, { id: withSigner(base, ep), base, targetId: null });
+    }
   }
   for (const ep of log) {
     if (ep.type !== 'retract') continue;
     const targetKey = own.get(ep.targetSeq);
-    bySeq.set(ep.seq, {
-      id: contentKey(ep, targetKey ?? danglingTarget(ep.targetSeq)),
-      targetId: targetKey ?? null,
-    });
+    const base = contentKey(ep, targetKey ?? danglingTarget(ep.targetSeq));
+    bySeq.set(ep.seq, { id: withSigner(base, ep), base, targetId: targetKey ?? null });
   }
   return bySeq;
 }
@@ -174,8 +187,31 @@ export function mergeEpisodes(local: readonly Episode[], incoming: readonly Epis
       if (!map.has(id)) map.set(id, { episode: ep, targetId });
     }
   };
-  collect(local, identities(local));
-  collect(incoming, identities(incoming));
+  const localIds = identities(local);
+  const incomingIds = identities(incoming);
+  collect(local, localIds);
+  collect(incoming, incomingIds);
+
+  // A signed copy beats an unsigned one of the same content, so stripping a signature on the wire
+  // cannot downgrade (or duplicate) an episode.
+  const signedBases = new Set<string>();
+  for (const [ids, log] of [
+    [localIds, local],
+    [incomingIds, incoming],
+  ] as const) {
+    for (const ep of log) {
+      if (ep.sig !== undefined) signedBases.add((ids.get(ep.seq) as Identity).base);
+    }
+  }
+  for (const [ids, log] of [
+    [localIds, local],
+    [incomingIds, incoming],
+  ] as const) {
+    for (const ep of log) {
+      const identity = ids.get(ep.seq) as Identity;
+      if (ep.sig === undefined && signedBases.has(identity.base)) map.delete(identity.id);
+    }
+  }
 
   const entries = [...map.entries()];
 
@@ -349,4 +385,47 @@ function mergeSingleState(s1: EntityState, s2: EntityState): EntityState {
     ...(authors ? { authors } : {}),
     ...(lastNote !== undefined ? { lastNote } : {}),
   };
+}
+
+export interface ScreenedEpisodes {
+  /** The episodes that may enter the log, in their original order and numbering. */
+  readonly accepted: readonly Episode[];
+  /** Episodes refused (only in `require` mode) or flagged (`warn`), with the reason. */
+  readonly rejected: readonly { readonly seq: number; readonly reason: string }[];
+  readonly flagged: readonly { readonly seq: number; readonly reason: string }[];
+}
+
+/**
+ * Verify-on-pull (medha-nwf.4, design D8): screen a remote log before it is merged. In `require`
+ * mode unsigned and invalid episodes are refused — as is a retract whose target was refused, since
+ * it would otherwise dangle and mask whatever lands at its seq. In `warn` mode everything is
+ * accepted and the would-be rejections are reported as `flagged`. `off` (or no policy) accepts
+ * everything silently.
+ */
+export function screenIncoming(
+  incoming: readonly Episode[],
+  policy: SigningPolicy | undefined,
+): ScreenedEpisodes {
+  if (policy === undefined || policy.mode === 'off') {
+    return { accepted: incoming, rejected: [], flagged: [] };
+  }
+  const problems: { seq: number; reason: string }[] = [];
+  const bad = new Set<number>();
+  for (const ep of incoming) {
+    const outcome = verifyEpisode(ep, policy.keyring);
+    if (outcome.status === 'verified') continue;
+    bad.add(ep.seq);
+    problems.push({
+      seq: ep.seq,
+      reason: outcome.status === 'unsigned' ? 'unsigned' : outcome.reason,
+    });
+  }
+  for (const ep of incoming) {
+    if (ep.type === 'retract' && !bad.has(ep.seq) && bad.has(ep.targetSeq)) {
+      bad.add(ep.seq);
+      problems.push({ seq: ep.seq, reason: 'retracts a refused episode' });
+    }
+  }
+  if (policy.mode === 'warn') return { accepted: incoming, rejected: [], flagged: problems };
+  return { accepted: incoming.filter((ep) => !bad.has(ep.seq)), rejected: problems, flagged: [] };
 }

@@ -83,8 +83,10 @@ pub enum EpisodePayload {
         state: EntityState,
     },
     Retract {
-        #[serde(alias = "target_seq")]
+        #[serde(rename = "targetSeq", alias = "target_seq")]
         target_seq: u64,
+        #[serde(default, rename = "targetId", alias = "target_id", skip_serializing_if = "Option::is_none")]
+        target_id: Option<String>,
         reason: String,
     },
     Define {
@@ -126,12 +128,21 @@ pub struct EntityDefinition {
     pub context_targets: Option<ContextTargets>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeSignature {
+    pub key_id: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EpisodeInput {
     pub key: EntityKey,
     pub at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<EpisodeSignature>,
     #[serde(flatten)]
     pub payload: EpisodePayload,
 }
@@ -143,6 +154,8 @@ pub struct Episode {
     pub at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sig: Option<EpisodeSignature>,
     #[serde(flatten)]
     pub payload: EpisodePayload,
 }

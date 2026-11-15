@@ -2,9 +2,10 @@ import { existsSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { basename, join, resolve } from 'node:path';
 import { Medha, type MedhaWeightUpdater, UpdaterRegistry } from '@cntxt-labs/medha';
-import type { StorePort } from '@cntxt-labs/medha-core';
+import type { Signer, SigningPolicy, StorePort } from '@cntxt-labs/medha-core';
 import { scopeStore } from '@cntxt-labs/medha-store';
 import { HomeNotInitializedError } from './errors.ts';
+import { admitFor, loadSigner, signingPolicyFor } from './keys.ts';
 import { homeFor, type MedhaConfigV1, readConfig, storeForConfig } from './layout.ts';
 
 const require = createRequire(import.meta.url);
@@ -35,6 +36,10 @@ export interface OpenedHome {
   readonly store: StorePort;
   readonly config: MedhaConfigV1;
   readonly home: string;
+  /** The home's signing policy (mode + keyring); sync verifies pulls against it. */
+  readonly signing: SigningPolicy;
+  /** The home's signer, if configured (used to sign episodes and packages). */
+  readonly signer?: Signer | undefined;
 }
 
 export function loadProjectUpdaters(home: string): Record<string, MedhaWeightUpdater> {
@@ -84,19 +89,30 @@ export function loadProjectUpdaters(home: string): Record<string, MedhaWeightUpd
   return result;
 }
 
-export function openHome(dir: string, homeOverride?: string): OpenedHome {
+/**
+ * `env` supplies the signing key (`MEDHA_SIGNING_KEY`, `MEDHA_KEY_DIR`); it defaults to the
+ * process environment.
+ */
+export function openHome(
+  dir: string,
+  homeOverride?: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): OpenedHome {
   const home = homeFor(dir, homeOverride);
   const config = readConfig(home);
   if (config === null) {
     throw new HomeNotInitializedError(home);
   }
-  const store = storeForConfig(config);
+  const policy = signingPolicyFor(home, config);
+  const store = storeForConfig(config, admitFor(policy));
+  const signer = loadSigner(config, env);
+  const signing = { policy, ...(signer === undefined ? {} : { signer }) };
   const projectUpdaters = loadProjectUpdaters(home);
   const updaters = new UpdaterRegistry({ project: projectUpdaters });
-  const adminEngine = new Medha({ store, updaters });
+  const adminEngine = new Medha({ store, updaters, signing });
   const engine =
     config.namespaceScope !== undefined && config.namespaceScope.length > 0
-      ? new Medha({ store: scopeStore(store, config.namespaceScope), updaters })
+      ? new Medha({ store: scopeStore(store, config.namespaceScope), updaters, signing })
       : adminEngine;
-  return { engine, adminEngine, store, config, home };
+  return { engine, adminEngine, store, config, home, signing: policy, signer };
 }

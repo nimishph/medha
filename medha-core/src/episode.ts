@@ -47,6 +47,52 @@ export interface BaseEpisode {
   readonly at: number;
   /** Provenance of the write: agent, user, or tool identifier that authored this episode. */
   readonly author?: string | undefined;
+  /**
+   * Ed25519 signature over the episode's canonical payload (medha-nwf.4, `signing.ts`). Absent on
+   * unsigned episodes; only a signature that verifies against the home's keyring binds `author`
+   * to an identity.
+   */
+  readonly sig?: EpisodeSignature | undefined;
+}
+
+export interface EpisodeSignature {
+  /** `ed25519:<base64url(sha256(raw public key))[0..16 bytes]>` — derived, never chosen. */
+  readonly keyId: string;
+  /** base64url (no padding) of the 64-byte Ed25519 signature. */
+  readonly value: string;
+}
+
+/** Validate an episode's `sig` envelope shape (not its cryptographic validity). */
+export function validateSignatureShape(sig: unknown): void {
+  if (sig === undefined) return;
+  const s = sig as Record<string, unknown> | null;
+  const valid =
+    typeof s === 'object' &&
+    s !== null &&
+    typeof s.keyId === 'string' &&
+    s.keyId.startsWith('ed25519:') &&
+    typeof s.value === 'string' &&
+    /^[A-Za-z0-9_-]{86}$/.test(s.value);
+  if (!valid) {
+    throw new InvalidArgumentError(
+      'episode.sig',
+      '{keyId: "ed25519:…", value: <64-byte base64url>}',
+      sig,
+    );
+  }
+}
+
+/**
+ * The signal-limits ledger key (spec §9.1, medha-nwf.4): a signed episode is keyed by its
+ * principal — the author up to the first `/` — so varying a sub-label cannot open a fresh ledger.
+ * Verification (which `require` mode applies before the fold) guarantees that prefix *is* the
+ * key's principal. Unsigned episodes keep the raw author, as before.
+ */
+export function signalLimitKey(episode: Episode | EpisodeInput): string {
+  const author = episode.author ?? '';
+  if (episode.sig === undefined) return author;
+  const slash = author.indexOf('/');
+  return slash < 0 ? author : author.slice(0, slash);
 }
 
 export interface SignalEpisode extends BaseEpisode {
@@ -136,8 +182,13 @@ export interface BaselineEpisode extends BaseEpisode {
 
 export interface RetractEpisode extends BaseEpisode {
   readonly type: 'retract';
-  /** The sequence number of the episode being retracted. */
+  /** The sequence number of the episode being retracted. Local: renumbered by merge/compaction. */
   readonly targetSeq: number;
+  /**
+   * The `episodeId` of the episode being retracted (medha-nwf.4): stable across replicas, and the
+   * field a signature covers instead of the local `targetSeq`. Required on a signed retract.
+   */
+  readonly targetId?: string | undefined;
   readonly reason: string;
 }
 
@@ -231,6 +282,7 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
     throw new InvalidArgumentError('episode.key.id', 'a non-empty string', input.key.id);
   }
   validation.kinds.requireKnown(input.key.kind);
+  validateSignatureShape(input.sig);
 
   switch (input.type) {
     case 'signal': {
@@ -381,6 +433,12 @@ export function validateEpisodeInput(input: EpisodeInput, validation: EpisodeVal
       }
       if (typeof input.reason !== 'string' || input.reason.trim() === '') {
         throw new InvalidArgumentError('episode.reason', 'a non-empty string', input.reason);
+      }
+      if (
+        input.targetId !== undefined &&
+        (typeof input.targetId !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(input.targetId))
+      ) {
+        throw new InvalidArgumentError('episode.targetId', 'an episode id', input.targetId);
       }
       // A retraction that names no episode is not inert: it is an armed pointer into a log that
       // keeps growing, and the moment the log passes targetSeq it masks an unrelated episode.
@@ -537,6 +595,38 @@ export function episodeToInput(episode: Episode): EpisodeInput {
 export interface FoldEpisodeOptions {
   readonly kinds?: KindRegistry | undefined;
   readonly kindSpec?: KindSpec | undefined;
+  /**
+   * Admission filter (medha-nwf.4): `foldLog` skips episodes it rejects — a non-admitted retract
+   * masks nothing. `require`-mode signing passes the verified-only filter here, so a revoked key's
+   * episodes stop counting without being deleted. Absent admits everything.
+   */
+  readonly admit?: ((episode: Episode) => boolean) | undefined;
+}
+
+export const MAX_AUTHORS_PER_ENTITY = 128;
+
+function boundAuthorsLedger(
+  authors: Record<string, { lastAt: number; counted: number; suppressed: number }>,
+  maxAuthors = MAX_AUTHORS_PER_ENTITY,
+): Record<string, { lastAt: number; counted: number; suppressed: number }> {
+  const keys = Object.keys(authors);
+  if (keys.length <= maxAuthors || keys.length === 0) return authors;
+  let victim = keys[0] ?? '';
+  let oldestAt = authors[victim]?.lastAt ?? Number.POSITIVE_INFINITY;
+  for (let i = 1; i < keys.length; i++) {
+    const k = keys[i];
+    if (k === undefined) continue;
+    const at = authors[k]?.lastAt ?? Number.POSITIVE_INFINITY;
+    if (at < oldestAt || (at === oldestAt && k.localeCompare(victim) < 0)) {
+      victim = k;
+      oldestAt = at;
+    }
+  }
+  const next = { ...authors };
+  if (victim in next) {
+    delete next[victim];
+  }
+  return next;
 }
 
 /**
@@ -559,7 +649,7 @@ function applySignalLimits(
   if (limits === undefined || !episode.spec.countsAsSuccess) {
     return { suppressed: false, state: prev };
   }
-  const author = episode.author ?? '';
+  const author = signalLimitKey(episode);
   const ledger = prev.authors?.[author] ?? {
     lastAt: Number.NEGATIVE_INFINITY,
     counted: 0,
@@ -571,10 +661,12 @@ function applySignalLimits(
     limits.maxSuccessesPerAuthor !== undefined && ledger.counted >= limits.maxSuccessesPerAuthor;
   if (tooSoon || overCap) {
     const next = { ...ledger, suppressed: ledger.suppressed + 1 };
-    return { suppressed: true, state: { ...prev, authors: { ...prev.authors, [author]: next } } };
+    const rawAuthors = { ...prev.authors, [author]: next };
+    return { suppressed: true, state: { ...prev, authors: boundAuthorsLedger(rawAuthors) } };
   }
   const next = { lastAt: episode.at, counted: ledger.counted + 1, suppressed: ledger.suppressed };
-  return { suppressed: false, state: { ...prev, authors: { ...prev.authors, [author]: next } } };
+  const rawAuthors = { ...prev.authors, [author]: next };
+  return { suppressed: false, state: { ...prev, authors: boundAuthorsLedger(rawAuthors) } };
 }
 
 /**
@@ -838,7 +930,10 @@ export function foldLog(
   options?: FoldEpisodeOptions | KindRegistry,
   alsoRetracted?: Iterable<number>,
 ): EntityState[] {
-  const ordered = [...episodes].sort((a, b) => a.seq - b.seq);
+  const admit = options instanceof KindRegistry ? undefined : options?.admit;
+  const ordered = [...episodes]
+    .sort((a, b) => a.seq - b.seq)
+    .filter((ep) => admit === undefined || admit(ep));
   const retracted = new Set<number>();
   for (const ep of ordered) {
     if (ep.type === 'retract') {

@@ -64,6 +64,7 @@ export function scopeStore(inner: StorePort, namespaces: readonly string[]): Sto
     name: `${inner.name}[scoped:${allowed.join(',')}]`,
     registries: inner.registries,
     scope: allowed,
+    ...(inner.admit === undefined ? {} : { admit: inner.admit }),
     open: (): Promise<OpenResult> => inner.open(),
     isOpen: () => inner.isOpen(),
     close: () => inner.close(),

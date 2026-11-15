@@ -2,10 +2,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   CANONICAL_SIGNALS,
+  type Episode,
   InvalidArgumentError,
   KindRegistry,
   type KindSpec,
+  SIGNING_MODES,
   type SignalSpec,
+  type SigningMode,
   type StorePort,
   type StoreRegistries,
   validateSignalSpec,
@@ -63,6 +66,18 @@ export interface MedhaConfigV1 {
    * config is a boundary for agent-facing operations, not a partition invisible to the operator.
    */
   readonly namespaceScope?: readonly string[];
+  /**
+   * Episode signing (medha-nwf.4). `mode` defaults to `off` (owner decision: new homes stay
+   * zero-config); `defaultKey` names the key id this home signs with. Public keys live in
+   * `keys/keyring.json` beside this file; private keys never live in the home.
+   */
+  readonly signing?: SigningConfig | undefined;
+}
+
+export interface SigningConfig {
+  readonly mode: SigningMode;
+  readonly defaultKey?: string | undefined;
+  readonly requirePackageSignature?: boolean | undefined;
 }
 
 /** `home` (from `--home`) overrides the default `<dir>/.medha`; relative paths resolve against `dir`. */
@@ -110,13 +125,18 @@ export function resolveStorePath(backend: Backend, home: string, explicit?: stri
  * read with the same backend, files, and registries it was written with.
  */
 /** The raw, unscoped store a config.json commits to — see `namespaceScope` on `MedhaConfigV1`. */
-export function storeForConfig(config: MedhaConfigV1): StorePort {
+export function storeForConfig(
+  config: MedhaConfigV1,
+  admit?: ((episode: Episode) => boolean) | undefined,
+): StorePort {
+  const admitOption = admit === undefined ? {} : { admit };
   switch (config.backend) {
     case 'sqlite':
       return new SQLiteStore({
         path: config.path as string,
         registries: config.registries,
         resilientReplay: true,
+        ...admitOption,
       });
     case 'file':
       return new FilePolicyStore({
@@ -125,9 +145,10 @@ export function storeForConfig(config: MedhaConfigV1): StorePort {
         backup: `${basename(config.path as string)}.bak`,
         registries: config.registries,
         resilientReplay: true,
+        ...admitOption,
       });
     case 'memory':
-      return new MemoryStore({ registries: config.registries });
+      return new MemoryStore({ registries: config.registries, ...admitOption });
   }
 }
 
@@ -442,12 +463,27 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     throw new ConfigFileError(path, 'expected a JSON object');
   }
   const candidate = parsed as Partial<MedhaConfigV1>;
-  if (
-    candidate.namespaceScope !== undefined &&
-    candidate.namespaceScope !== null &&
-    !isNameList(candidate.namespaceScope)
-  ) {
+  if (candidate.namespaceScope !== undefined && !isNameList(candidate.namespaceScope)) {
     throw new ConfigFileError(path, 'namespaceScope must be an array of non-empty strings');
+  }
+  const signing = candidate.signing as Record<string, unknown> | undefined;
+  if (signing !== undefined) {
+    if (typeof signing !== 'object' || signing === null || Array.isArray(signing)) {
+      throw new ConfigFileError(path, 'signing must be an object');
+    }
+    const unknownKeys = Object.keys(signing).filter((k) => k !== 'mode' && k !== 'defaultKey');
+    if (unknownKeys.length > 0) {
+      throw new ConfigFileError(path, `signing has unknown key(s): ${unknownKeys.join(', ')}`);
+    }
+    if (!(SIGNING_MODES as readonly unknown[]).includes(signing.mode)) {
+      throw new ConfigFileError(path, `signing.mode must be one of ${SIGNING_MODES.join(', ')}`);
+    }
+    if (
+      signing.defaultKey !== undefined &&
+      (typeof signing.defaultKey !== 'string' || !signing.defaultKey.startsWith('ed25519:'))
+    ) {
+      throw new ConfigFileError(path, 'signing.defaultKey must be a key id (ed25519:…)');
+    }
   }
   if (candidate.layoutVersion !== CONFIG_LAYOUT_VERSION) {
     throw new ConfigFileError(path, `unsupported layoutVersion ${String(candidate.layoutVersion)}`);
@@ -495,6 +531,7 @@ export function readConfig(home: string): MedhaConfigV1 | null {
     ...(candidate.namespaceScope === undefined || candidate.namespaceScope === null
       ? {}
       : { namespaceScope: candidate.namespaceScope }),
+    ...(signing === undefined ? {} : { signing: signing as unknown as SigningConfig }),
   };
 }
 
@@ -513,6 +550,7 @@ export function writeConfig(home: string, config: MedhaConfigV1): string {
     backend: config.backend,
     path: config.path === null ? null : toStoredPath(home, config.path),
     ...(config.namespaceScope === undefined ? {} : { namespaceScope: config.namespaceScope }),
+    ...(config.signing === undefined ? {} : { signing: config.signing }),
     registries: config.registries,
   };
   writeFileSync(path, `${JSON.stringify(onDisk, null, 2)}\n`, 'utf8');

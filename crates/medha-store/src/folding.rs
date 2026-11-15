@@ -169,6 +169,7 @@ pub fn fold_episode_with_registries(
             };
 
             let author = episode.author.as_deref().unwrap_or("");
+            let limit_author = medha_core::fold::signal_limit_key(episode.author.as_deref());
             if let Some(lim) = kind_spec.and_then(|ks| ks.signal_limits.as_ref()) {
                 if spec.counts_as_success {
                     let mut authors_map: HashMap<String, AuthorLedger> = state
@@ -177,7 +178,7 @@ pub fn fold_episode_with_registries(
                         .and_then(|v| serde_json::from_value(v.clone()).ok())
                         .unwrap_or_default();
 
-                    let mut led = authors_map.get(author).cloned().unwrap_or_default();
+                    let mut led = authors_map.get(limit_author).cloned().unwrap_or_default();
                     let too_soon = lim
                         .min_interval_ms
                         .map(|m| led.last_at.map(|l| at - l < m).unwrap_or(false))
@@ -189,14 +190,22 @@ pub fn fold_episode_with_registries(
 
                     if too_soon || over_cap {
                         led.suppressed += 1;
-                        authors_map.insert(author.to_string(), led);
+                        authors_map.insert(limit_author.to_string(), led);
+                        medha_core::fold::bound_authors_ledger(
+                            &mut authors_map,
+                            medha_core::fold::MAX_AUTHORS_PER_ENTITY,
+                        );
                         state.authors = serde_json::to_value(authors_map).ok();
                         return Some(state);
                     }
 
                     led.last_at = Some(at);
                     led.counted += 1;
-                    authors_map.insert(author.to_string(), led);
+                    authors_map.insert(limit_author.to_string(), led);
+                    medha_core::fold::bound_authors_ledger(
+                        &mut authors_map,
+                        medha_core::fold::MAX_AUTHORS_PER_ENTITY,
+                    );
                     state.authors = serde_json::to_value(authors_map).ok();
                 }
             }
@@ -440,11 +449,22 @@ pub fn fold_log_with_registries(
     episodes: &[Episode],
     registries: Option<&StoreRegistries>,
 ) -> HashMap<String, EntityState> {
+    fold_log_filtered(episodes, registries, None)
+}
+
+/// Rebuild every entity state from a log, in seq order, with retracted episodes masked,
+/// taking registered kind specifications and an optional admission filter into account.
+pub fn fold_log_filtered(
+    episodes: &[Episode],
+    registries: Option<&StoreRegistries>,
+    admit: Option<&dyn Fn(&Episode) -> bool>,
+) -> HashMap<String, EntityState> {
     let mut ordered: Vec<&Episode> = episodes.iter().collect();
     ordered.sort_by_key(|e| e.seq);
 
     let retracted: HashSet<u64> = ordered
         .iter()
+        .filter(|e| admit.map(|f| f(e)).unwrap_or(true))
         .filter_map(|e| match &e.payload {
             EpisodePayload::Retract { target_seq, .. } => Some(*target_seq),
             _ => None,
@@ -453,6 +473,11 @@ pub fn fold_log_with_registries(
 
     let mut projection: HashMap<String, EntityState> = HashMap::new();
     for ep in ordered {
+        if let Some(f) = admit {
+            if !f(ep) {
+                continue;
+            }
+        }
         if retracted.contains(&ep.seq) {
             continue;
         }

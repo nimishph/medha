@@ -42,6 +42,11 @@ export interface SQLiteStoreOptions {
   /** SQLite database file path. Created (with schema) on open(). */
   readonly path: string;
   readonly registries?: StoreRegistries;
+  /**
+   * Fold-time admission filter (medha-nwf.4): episodes it rejects stay in the log but do not
+   * change state — `require`-mode signing passes the verified-only filter (`admitFilter`).
+   */
+  readonly admit?: ((episode: Episode) => boolean) | undefined;
   /** When true, unknown historical kinds during log replay are preserved rather than halting the store. */
   readonly resilientReplay?: boolean;
 }
@@ -59,9 +64,11 @@ export class SQLiteStore implements StorePort {
   private opened = false;
   private loaded = false;
   private corruptAt: number | null = null;
+  readonly admit: ((episode: Episode) => boolean) | undefined;
 
   constructor(options: SQLiteStoreOptions) {
     this.path = options.path;
+    this.admit = options.admit;
     this.effective = resolveRegistries(options.registries);
     this.resilientReplay = options.resilientReplay ?? false;
   }
@@ -198,7 +205,7 @@ export class SQLiteStore implements StorePort {
     // Fold with the store's kind registry, as the append path does: kind specs (evidence weighting,
     // thresholds) shape the state, so a default fold would report a false mismatch.
     const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
-    return foldLog(this.log, { kinds });
+    return foldLog(this.log, { kinds, admit: this.admit });
   }
 
   async replaceLog(
@@ -245,8 +252,13 @@ export class SQLiteStore implements StorePort {
   private accept(episode: Episode): EntityState | undefined {
     this.log.push(episode);
     const kinds = kindRegistryFor(this.effective.kindSpecs ?? this.effective.kinds);
+    if (this.admit !== undefined && !this.admit(episode)) {
+      // Kept in the log (it is the source of truth), but it does not count.
+      this.nextSeq = episode.seq + 1;
+      return this.projection.get(entityKeyString(episode.key));
+    }
     if (episode.type === 'retract') {
-      const rebuilt = foldLog(this.log, { kinds });
+      const rebuilt = foldLog(this.log, { kinds, admit: this.admit });
       this.projection.clear();
       for (const st of rebuilt) {
         this.projection.set(entityKeyString(st.key), st);
