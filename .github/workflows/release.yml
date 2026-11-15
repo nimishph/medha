@@ -138,7 +138,11 @@ jobs:
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "${name}@${version} is already published, skipping"
             else
-              npm stage publish "${dir}" --access public --provenance --tag latest
+              dist_tag="latest"
+              if [[ "${version}" == *"-"* ]]; then
+                dist_tag="alpha"
+              fi
+              npm stage publish "${dir}" --access public --provenance --tag "${dist_tag}"
             fi
           }
           for folder in staged/*/; do stage "${folder%/}"; done
