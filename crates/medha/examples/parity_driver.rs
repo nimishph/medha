@@ -221,7 +221,11 @@ fn run_op(engine: &mut Engine, op: Op) -> Result<(), String> {
                 .map(|_| ())
         }
         Op::Compact { at } => engine.compact(at).map(|_| ()),
-        Op::Sweep { prune, older_than, at } => engine
+        Op::Sweep {
+            prune,
+            older_than,
+            at,
+        } => engine
             .sweep(
                 medha::SweepOptions {
                     prune_retired: prune,

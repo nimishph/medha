@@ -449,8 +449,15 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
 
     let out = Command::new(&bin)
         .args([
-            "--home", home, "define", "--id", "db-migration",
-            "--title", "DB Migration Policy", "--rationale", "Regulated migrations"
+            "--home",
+            home,
+            "define",
+            "--id",
+            "db-migration",
+            "--title",
+            "DB Migration Policy",
+            "--rationale",
+            "Regulated migrations",
         ])
         .output()
         .expect("define");
@@ -458,8 +465,14 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
 
     let out = Command::new(&bin)
         .args([
-            "--home", home, "decision", "--id", "db-migration",
-            "--condition", "env == 'production'", "--apply"
+            "--home",
+            home,
+            "decision",
+            "--id",
+            "db-migration",
+            "--condition",
+            "env == 'production'",
+            "--apply",
         ])
         .output()
         .expect("decision");
@@ -467,8 +480,14 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
 
     let out = Command::new(&bin)
         .args([
-            "--home", home, "policy", "--id", "db-migration",
-            "--context", "{\"env\":\"production\"}", "--json"
+            "--home",
+            home,
+            "policy",
+            "--id",
+            "db-migration",
+            "--context",
+            "{\"env\":\"production\"}",
+            "--json",
         ])
         .output()
         .expect("policy");
@@ -476,12 +495,20 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     let val: serde_json::Value = serde_json::from_str(&stdout).expect("parse json");
     assert_eq!(val.get("allowed").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(val.get("recommendation").and_then(|v| v.as_str()), Some("proceed"));
+    assert_eq!(
+        val.get("recommendation").and_then(|v| v.as_str()),
+        Some("proceed")
+    );
 
     let out2 = Command::new(&bin)
         .args([
-            "--home", home, "policy", "--id", "db-migration",
-            "--context", "{\"env\":\"production\"}"
+            "--home",
+            home,
+            "policy",
+            "--id",
+            "db-migration",
+            "--context",
+            "{\"env\":\"production\"}",
         ])
         .output()
         .expect("policy text");

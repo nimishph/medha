@@ -36,7 +36,10 @@ fn key_dir() -> PathBuf {
         return PathBuf::from(xdg).join("medha").join("keys");
     }
     if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-        return PathBuf::from(home).join(".config").join("medha").join("keys");
+        return PathBuf::from(home)
+            .join(".config")
+            .join("medha")
+            .join("keys");
     }
     PathBuf::from(".medha_keys")
 }
@@ -76,9 +79,15 @@ fn read_config(home_dir: &Path) -> Result<serde_json::Value, Box<dyn std::error:
     Ok(serde_json::from_str(&content)?)
 }
 
-fn write_config(home_dir: &Path, config: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+fn write_config(
+    home_dir: &Path,
+    config: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
     let path = config_path(home_dir);
-    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(config)?))?;
+    fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string_pretty(config)?),
+    )?;
     Ok(())
 }
 
@@ -183,10 +192,10 @@ fn run_generate(
             .unwrap()
             .entry("signing")
             .or_insert_with(|| serde_json::json!({ "mode": "off" }));
-        signing
-            .as_object_mut()
-            .unwrap()
-            .insert("defaultKey".to_string(), serde_json::Value::String(key_id.clone()));
+        signing.as_object_mut().unwrap().insert(
+            "defaultKey".to_string(),
+            serde_json::Value::String(key_id.clone()),
+        );
         write_config(home_dir, &config)?;
     }
 
@@ -315,10 +324,10 @@ fn run_rotate(
     let mut config = read_config(home_dir)?;
     if let Some(signing) = config.get_mut("signing") {
         if signing.get("defaultKey").and_then(|v| v.as_str()) == Some(&args.key_id) {
-            signing
-                .as_object_mut()
-                .unwrap()
-                .insert("defaultKey".to_string(), serde_json::Value::String(new_key_id.clone()));
+            signing.as_object_mut().unwrap().insert(
+                "defaultKey".to_string(),
+                serde_json::Value::String(new_key_id.clone()),
+            );
             write_config(home_dir, &config)?;
         }
     }

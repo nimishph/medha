@@ -368,7 +368,10 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
-            let is_compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_compact = args
+                .get("compact")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let result_val = run_tool(engine, tool_name, &args, now);
             match result_val {
                 Ok(content_json) => {
@@ -434,7 +437,10 @@ fn run_tool<S: StorePort>(
     match tool_name {
         "hints" => {
             let keys_val = args.get("keys").and_then(|v| v.as_array());
-            let compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
+            let compact = args
+                .get("compact")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if let Some(keys_arr) = keys_val {
                 let mut entity_keys = Vec::new();
                 for item in keys_arr {
@@ -452,7 +458,8 @@ fn run_tool<S: StorePort>(
                 match engine.hints(&entity_keys, now) {
                     Ok(hints) => {
                         if compact {
-                            let compact_hints: Vec<Value> = hints.iter().map(compact_hint).collect();
+                            let compact_hints: Vec<Value> =
+                                hints.iter().map(compact_hint).collect();
                             Ok(json!({ "hints": compact_hints, "unknown": unknown }))
                         } else {
                             Ok(json!({ "hints": hints, "unknown": unknown }))
@@ -470,8 +477,14 @@ fn run_tool<S: StorePort>(
                 let filter_kind = args.get("kind").and_then(|v| v.as_str());
                 let filter_status = args.get("status").and_then(|v| v.as_str());
                 let filter_ns = args.get("namespace").and_then(|v| v.as_str());
-                let filter_drifting = args.get("drifting").and_then(|v| v.as_bool()).unwrap_or(false);
-                let compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
+                let filter_drifting = args
+                    .get("drifting")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let compact = args
+                    .get("compact")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let mut hints = Vec::new();
                 for s in states {
                     if let Some(ref ids) = ids {
@@ -566,7 +579,11 @@ fn run_tool<S: StorePort>(
             let exists = engine.get(&key).map_err(|e| e.to_string())?.is_some();
             if !exists && !ensure {
                 let hint = engine.hint(&key, now).map_err(|e| e.to_string())?;
-                let hint_val = if compact { compact_hint(&hint) } else { json!(hint) };
+                let hint_val = if compact {
+                    compact_hint(&hint)
+                } else {
+                    json!(hint)
+                };
                 return Ok(json!({
                     "recorded": false,
                     "note": "entity is unknown and `ensure` was not set: nothing was recorded; the hint is a probation prior. Pass ensure: true to create it.",
@@ -583,12 +600,19 @@ fn run_tool<S: StorePort>(
                 anchors: None,
                 run_ref: None,
                 note,
-                case_id: args.get("caseId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                case_id: args
+                    .get("caseId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             };
 
             let res = engine.record(input).map_err(|e| e.to_string())?;
             let hint = engine.hint(&key, now).map_err(|e| e.to_string())?;
-            let hint_val = if compact { compact_hint(&hint) } else { json!(hint) };
+            let hint_val = if compact {
+                compact_hint(&hint)
+            } else {
+                json!(hint)
+            };
             Ok(json!({
                 "recorded": true,
                 "hint": hint_val,
@@ -629,7 +653,10 @@ fn run_tool<S: StorePort>(
                 ok,
                 kind: guard_kind,
                 at: now,
-                author: args.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                author: args
+                    .get("author")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
                 note,
             };
 
@@ -857,11 +884,20 @@ fn run_tool<S: StorePort>(
             };
             let kind = args.get("kind").and_then(|v| v.as_str()).unwrap_or("rule");
             let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("");
-            let author = args.get("author").and_then(|v| v.as_str()).map(str::to_string);
-            let action = args.get("action").and_then(|v| v.as_str()).map(str::to_string);
+            let author = args
+                .get("author")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let action = args
+                .get("action")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let min_trust = args.get("minTrust").and_then(|v| v.as_f64());
             let context = args.get("context").cloned();
-            let is_compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_compact = args
+                .get("compact")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
 
             let input = medha::core::policy_latch::PolicyLatchInput {
                 key: EntityKey::new(namespace, kind, id),

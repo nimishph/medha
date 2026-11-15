@@ -232,7 +232,7 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
 
     // A signed copy beats an unsigned one of the same content
     let mut signed_bases = HashSet::new();
-    for (log, ids) in [(&local[..], &local_ids), (&incoming[..], &incoming_ids)] {
+    for (log, ids) in [(local, &local_ids), (incoming, &incoming_ids)] {
         for ep in log {
             if ep.sig.is_some() {
                 if let Some(identity) = ids.get(&ep.seq) {
@@ -241,7 +241,7 @@ pub fn merge_episodes(local: &[Episode], incoming: &[Episode]) -> Vec<Episode> {
             }
         }
     }
-    for (log, ids) in [(&local[..], &local_ids), (&incoming[..], &incoming_ids)] {
+    for (log, ids) in [(local, &local_ids), (incoming, &incoming_ids)] {
         for ep in log {
             if ep.sig.is_none() {
                 if let Some(identity) = ids.get(&ep.seq) {

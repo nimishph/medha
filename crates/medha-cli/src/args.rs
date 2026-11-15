@@ -57,7 +57,10 @@ pub enum Commands {
     #[command(about = "Retract a previously recorded episode by its sequence number")]
     Retract(RetractArgs),
 
-    #[command(name = "remove-episode", about = "Directly remove a bad episode from the log and rebuild projection")]
+    #[command(
+        name = "remove-episode",
+        about = "Directly remove a bad episode from the log and rebuild projection"
+    )]
     RemoveEpisode(RemoveEpisodeArgs),
 
     #[command(about = "Record a host-authored definition (title/tags/rationale) for an entity")]
@@ -119,7 +122,9 @@ pub enum Commands {
     #[command(about = "Episode signing: keys, keyring, rotation, revocation and signing mode")]
     Keys(KeysArgs),
 
-    #[command(about = "Evaluate regulated policy compliance, decision trees, and requireHumanFor gating")]
+    #[command(
+        about = "Evaluate regulated policy compliance, decision trees, and requireHumanFor gating"
+    )]
     Policy(PolicyArgs),
 }
 
@@ -181,7 +186,10 @@ pub enum McpSubcommand {
 
 #[derive(Args, Debug, Default, Clone)]
 pub struct McpConfigArgs {
-    #[arg(value_name = "CLIENT", help = "Client identifier (e.g. claude-code, cursor)")]
+    #[arg(
+        value_name = "CLIENT",
+        help = "Client identifier (e.g. claude-code, cursor)"
+    )]
     pub client: Option<String>,
 
     #[arg(long, help = "List all supported MCP clients")]
@@ -491,7 +499,11 @@ pub struct SyncArgs {
     #[arg(long, global = true, help = "Target Git ref")]
     pub git_ref: Option<String>,
 
-    #[arg(long, global = true, help = "Automatically import missing remote kinds and signals")]
+    #[arg(
+        long,
+        global = true,
+        help = "Automatically import missing remote kinds and signals"
+    )]
     pub auto_import_registries: bool,
 }
 
@@ -582,7 +594,11 @@ pub struct DefineArgs {
     #[arg(long, help = "Entity identifier")]
     pub id: String,
 
-    #[arg(long, default_value = "rule", help = "Entity kind (rule, recipe, tool)")]
+    #[arg(
+        long,
+        default_value = "rule",
+        help = "Entity kind (rule, recipe, tool)"
+    )]
     pub kind: String,
 
     #[arg(long, default_value = "", help = "Entity namespace")]
@@ -600,7 +616,10 @@ pub struct DefineArgs {
     #[arg(long, help = "Author identifier")]
     pub author: Option<String>,
 
-    #[arg(long, help = "Historical timestamp (ISO 8601 or epoch ms) for backfilling")]
+    #[arg(
+        long,
+        help = "Historical timestamp (ISO 8601 or epoch ms) for backfilling"
+    )]
     pub at: Option<String>,
 }
 
@@ -651,10 +670,14 @@ pub struct MaintainArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum MaintainAction {
-    #[command(about = "Check store integrity, episode count, and registry match. Exits 1 on corrupt.")]
+    #[command(
+        about = "Check store integrity, episode count, and registry match. Exits 1 on corrupt."
+    )]
     Preflight(PreflightArgs),
 
-    #[command(about = "Fold aged episode history into baseline snapshots and report the folded range.")]
+    #[command(
+        about = "Fold aged episode history into baseline snapshots and report the folded range."
+    )]
     Compact(CompactArgs),
 
     #[command(about = "Export an atomic, portable MedhaSnapshot to a file.")]
@@ -666,13 +689,19 @@ pub enum MaintainAction {
     #[command(about = "Prune or report retired and quarantined entities.")]
     Sweep(SweepArgs),
 
-    #[command(name = "remove-episode", about = "Hard-delete an episode by sequence number.")]
+    #[command(
+        name = "remove-episode",
+        about = "Hard-delete an episode by sequence number."
+    )]
     RemoveEpisode(RemoveEpisodeArgs),
 }
 
 #[derive(Args, Debug, Default, Clone)]
 pub struct BackupArgs {
-    #[arg(value_name = "PATH", help = "Destination file path for exported snapshot")]
+    #[arg(
+        value_name = "PATH",
+        help = "Destination file path for exported snapshot"
+    )]
     pub file_path: Option<String>,
 
     #[arg(long = "path", help = "Destination file path for exported snapshot")]
@@ -747,7 +776,10 @@ pub struct UpdaterForkArgs {
     #[arg(value_name = "NAME", help = "Name of the weight updater to fork")]
     pub name: String,
 
-    #[arg(long, help = "Destination file path for the scaffolded updater template")]
+    #[arg(
+        long,
+        help = "Destination file path for the scaffolded updater template"
+    )]
     pub out: Option<String>,
 }
 

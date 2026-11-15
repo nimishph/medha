@@ -4,8 +4,8 @@ use crate::guard::{guard_factor, is_guarded};
 use crate::recency::recency_factor;
 use crate::round::round6;
 use crate::types::{
-    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus, RecencyConfig, Thresholds,
-    TrustScoreBreakdown,
+    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus,
+    RecencyConfig, Thresholds, TrustScoreBreakdown,
 };
 use crate::wilson::{wilson_lower_bound, wilson_upper_bound};
 

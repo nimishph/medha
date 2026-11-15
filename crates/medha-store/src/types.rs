@@ -25,6 +25,7 @@ pub enum OpenResult {
     rename_all = "lowercase",
     rename_all_fields = "camelCase"
 )]
+#[allow(clippy::large_enum_variant)]
 pub enum EpisodePayload {
     Signal {
         spec: SignalSpec,
@@ -85,7 +86,12 @@ pub enum EpisodePayload {
     Retract {
         #[serde(rename = "targetSeq", alias = "target_seq")]
         target_seq: u64,
-        #[serde(default, rename = "targetId", alias = "target_id", skip_serializing_if = "Option::is_none")]
+        #[serde(
+            default,
+            rename = "targetId",
+            alias = "target_id",
+            skip_serializing_if = "Option::is_none"
+        )]
         target_id: Option<String>,
         reason: String,
     },
@@ -124,7 +130,11 @@ pub struct EntityDefinition {
     pub rationale: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    #[serde(default, alias = "context_targets", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "context_targets",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub context_targets: Option<ContextTargets>,
 }
 
@@ -198,7 +208,11 @@ pub struct EntityState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rejecting_authors: Option<Vec<String>>,
     /// Distinct agent roles observed among successes (medha-c8z.3).
-    #[serde(default, alias = "observed_roles", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "observed_roles",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub observed_roles: Option<Vec<String>>,
     #[serde(
         default,
