@@ -2,16 +2,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 fn get_bin() -> std::path::PathBuf {
-    let mut path = std::env::current_exe().expect("current exe");
-    path.pop(); // Remove test exe name
-    if path.ends_with("deps") {
-        path.pop();
-    }
-    path.push("medha.exe");
-    if !path.exists() {
-        path.set_extension("");
-    }
-    path
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_medha"))
 }
 
 #[test]
