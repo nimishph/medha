@@ -13,6 +13,9 @@ path = "src/main.rs"
 
 [dependencies]
 medha = { path = "../medha", version = "0.7.5" }
+medha-core = { path = "../medha-core", version = "0.7.5" }
+medha-store = { path = "../medha-store", version = "0.7.5" }
+medha-sync = { path = "../medha-sync", version = "0.7.5" }
 clap = { version = "4.5", features = ["derive", "env"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -57,8 +57,32 @@ pub enum Commands {
     #[command(about = "Retract a previously recorded episode by its sequence number")]
     Retract(RetractArgs),
 
+    #[command(name = "remove-episode", about = "Directly remove a bad episode from the log and rebuild projection")]
+    RemoveEpisode(RemoveEpisodeArgs),
+
+    #[command(about = "Record a host-authored definition (title/tags/rationale) for an entity")]
+    Define(DefineArgs),
+
+    #[command(about = "Grow or edit a branch of an entity's decision tree")]
+    Decision(DecisionArgs),
+
+    #[command(about = "Engine maintenance: preflight, compact, backup, and restore")]
+    Maintain(MaintainArgs),
+
     #[command(about = "Synchronize evidential memory across files or Git refs")]
     Sync(SyncArgs),
+
+    #[command(about = "Launch the interactive evidential memory web dashboard")]
+    Ui(UiArgs),
+
+    #[command(about = "Generate an offline standalone HTML report of evidential memory")]
+    Report(ReportArgs),
+
+    #[command(about = "Launch the zero-dependency local documentation reader server")]
+    Docs(DocsArgs),
+
+    #[command(about = "Weight updater inspection, listing, and custom updater scaffolding")]
+    Updater(UpdaterArgs),
 
     #[command(about = "Compact historical episode logs into baseline state")]
     Compact(CompactArgs),
@@ -136,21 +160,78 @@ pub struct DriftArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct McpArgs {
-    #[arg(value_name = "ACTION", help = "Optional action (e.g. serve)")]
-    pub action: Option<String>,
+    #[command(subcommand)]
+    pub subcommand: Option<McpSubcommand>,
 }
 
-#[derive(Args, Debug)]
+#[derive(Subcommand, Debug, Clone)]
+pub enum McpSubcommand {
+    #[command(about = "Start the stdio Model Context Protocol (MCP) server")]
+    Serve,
+
+    #[command(about = "Generate or write an MCP client registration from the built-in registry")]
+    Config(McpConfigArgs),
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct McpConfigArgs {
+    #[arg(value_name = "CLIENT", help = "Client identifier (e.g. claude-code, cursor)")]
+    pub client: Option<String>,
+
+    #[arg(long, help = "List all supported MCP clients")]
+    pub list: bool,
+
+    #[arg(long, help = "Output configurations for all supported clients")]
+    pub all: bool,
+
+    #[arg(long, help = "Write configuration directly to client config file")]
+    pub write: bool,
+
+    #[arg(long, help = "Target scope (project | user | workspace)")]
+    pub scope: Option<String>,
+
+    #[arg(long, help = "Launcher type (path | npx)")]
+    pub launcher: Option<String>,
+
+    #[arg(long, help = "Server name in client config (default: medha)")]
+    pub server_name: Option<String>,
+}
+
+#[derive(Args, Debug, Default)]
 pub struct InitArgs {
     #[arg(
         long,
         default_value = "sqlite",
-        help = "Storage backend (sqlite | memory)"
+        help = "Storage backend (sqlite | memory | file)"
     )]
     pub backend: String,
 
+    #[arg(long, help = "Storage backend alias")]
+    pub store: Option<String>,
+
     #[arg(long, help = "Explicit path to the database file")]
     pub path: Option<String>,
+
+    #[arg(long, help = "Path to registries configuration file")]
+    pub config: Option<String>,
+
+    #[arg(long, help = "Path to backup snapshot file")]
+    pub backup: Option<String>,
+
+    #[arg(long, help = "Wipe and recreate store")]
+    pub recreate: bool,
+
+    #[arg(long, help = "Custom agents instruction file")]
+    pub agents_file: Option<String>,
+
+    #[arg(long, help = "Skip agents instruction file")]
+    pub no_agents_file: bool,
+
+    #[arg(long, help = "Namespace scope for the store")]
+    pub namespace: Option<String>,
+
+    #[arg(long, help = "Disable default namespace scope")]
+    pub no_namespace: bool,
 }
 
 #[derive(Args, Debug)]
@@ -306,7 +387,7 @@ pub struct SimulateArgs {
     pub signal: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct SweepArgs {
     #[arg(long, help = "Prune retired entities completely")]
     pub prune: bool,
@@ -390,22 +471,25 @@ pub struct RetractArgs {
     pub namespace: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct SyncArgs {
     #[command(subcommand)]
     pub action: SyncAction,
 
-    #[arg(long, help = "Path to shared sync JSON file")]
+    #[arg(long, global = true, help = "Path to shared sync JSON file")]
     pub file: Option<String>,
 
-    #[arg(long, help = "Target Git remote")]
+    #[arg(long, global = true, help = "Target Git remote")]
     pub remote: Option<String>,
 
-    #[arg(long, help = "Target Git ref")]
+    #[arg(long, global = true, help = "Target Git ref")]
     pub git_ref: Option<String>,
+
+    #[arg(long, global = true, help = "Automatically import missing remote kinds and signals")]
+    pub auto_import_registries: bool,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
 pub enum SyncAction {
     #[command(about = "Check sync status")]
     Status,
@@ -420,13 +504,13 @@ pub enum SyncAction {
     Reconcile,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct CompactArgs {
     #[arg(long, help = "Age cutoff in days (default 90)")]
     pub older_than: Option<f64>,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct PreflightArgs {}
 
 #[derive(Args, Debug, Default)]
@@ -485,4 +569,208 @@ pub struct PackArgs {
         help = "Output format: markdown, compact, or json"
     )]
     pub format: String,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct DefineArgs {
+    #[arg(long, help = "Entity identifier")]
+    pub id: String,
+
+    #[arg(long, default_value = "rule", help = "Entity kind (rule, recipe, tool)")]
+    pub kind: String,
+
+    #[arg(long, default_value = "", help = "Entity namespace")]
+    pub namespace: String,
+
+    #[arg(long, help = "Human-readable title")]
+    pub title: String,
+
+    #[arg(long, help = "Detailed rationale")]
+    pub rationale: String,
+
+    #[arg(long, help = "Comma-separated tags")]
+    pub tags: Option<String>,
+
+    #[arg(long, help = "Author identifier")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "Historical timestamp (ISO 8601 or epoch ms) for backfilling")]
+    pub at: Option<String>,
+}
+
+#[derive(Args, Debug, Default)]
+pub struct DecisionArgs {
+    #[arg(long, help = "Entity identifier")]
+    pub id: String,
+
+    #[arg(long, default_value = "rule", help = "Entity kind")]
+    pub kind: String,
+
+    #[arg(long, default_value = "", help = "Entity namespace")]
+    pub namespace: String,
+
+    #[arg(long, help = "Free-text condition this branch covers")]
+    pub condition: String,
+
+    #[arg(long, help = "Apply decision")]
+    pub apply: bool,
+
+    #[arg(long, help = "Ignore decision")]
+    pub ignore: bool,
+
+    #[arg(long, help = "Probability value in [0, 1]")]
+    pub probability: Option<f64>,
+
+    #[arg(long, help = "Existing parent branch id to nest under")]
+    pub parent: Option<String>,
+
+    #[arg(long = "case-id", help = "Existing branch id to edit in place")]
+    pub case_id: Option<String>,
+
+    #[arg(long, help = "Move this branch to the top level")]
+    pub detach: bool,
+
+    #[arg(long, help = "Author identifier")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "Historical timestamp for backfilling")]
+    pub at: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct MaintainArgs {
+    #[command(subcommand)]
+    pub action: MaintainAction,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum MaintainAction {
+    #[command(about = "Check store integrity, episode count, and registry match. Exits 1 on corrupt.")]
+    Preflight(PreflightArgs),
+
+    #[command(about = "Fold aged episode history into baseline snapshots and report the folded range.")]
+    Compact(CompactArgs),
+
+    #[command(about = "Export an atomic, portable MedhaSnapshot to a file.")]
+    Backup(BackupArgs),
+
+    #[command(about = "Replace store state headlessly with a previously exported MedhaSnapshot.")]
+    Restore(RestoreArgs),
+
+    #[command(about = "Prune or report retired and quarantined entities.")]
+    Sweep(SweepArgs),
+
+    #[command(name = "remove-episode", about = "Hard-delete an episode by sequence number.")]
+    RemoveEpisode(RemoveEpisodeArgs),
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct BackupArgs {
+    #[arg(value_name = "PATH", help = "Destination file path for exported snapshot")]
+    pub file_path: Option<String>,
+
+    #[arg(long = "path", help = "Destination file path for exported snapshot")]
+    pub opt_path: Option<String>,
+}
+
+impl BackupArgs {
+    pub fn resolved_path(&self) -> Result<&str, String> {
+        self.file_path
+            .as_deref()
+            .or(self.opt_path.as_deref())
+            .ok_or_else(|| "Missing required snapshot path".to_string())
+    }
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct RestoreArgs {
+    #[arg(value_name = "PATH", help = "Source file path of snapshot to restore")]
+    pub file_path: Option<String>,
+
+    #[arg(long = "path", help = "Source file path of snapshot to restore")]
+    pub opt_path: Option<String>,
+}
+
+impl RestoreArgs {
+    pub fn resolved_path(&self) -> Result<&str, String> {
+        self.file_path
+            .as_deref()
+            .or(self.opt_path.as_deref())
+            .ok_or_else(|| "Missing required snapshot path".to_string())
+    }
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct RemoveEpisodeArgs {
+    #[arg(long, help = "Episode sequence number to remove")]
+    pub seq: u64,
+
+    #[arg(long, help = "Author identifier, kept in the removal audit trail")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "Why the episode is removed, kept in the audit trail")]
+    pub reason: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct UpdaterArgs {
+    #[command(subcommand)]
+    pub action: UpdaterAction,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum UpdaterAction {
+    #[command(about = "List registered weight updaters")]
+    List,
+
+    #[command(about = "Inspect a registered weight updater by name")]
+    Show(UpdaterShowArgs),
+
+    #[command(about = "Scaffold a custom TypeScript weight updater template from a base updater")]
+    Fork(UpdaterForkArgs),
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct UpdaterShowArgs {
+    #[arg(value_name = "NAME", help = "Name of the weight updater to inspect")]
+    pub name: String,
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct UpdaterForkArgs {
+    #[arg(value_name = "NAME", help = "Name of the weight updater to fork")]
+    pub name: String,
+
+    #[arg(long, help = "Destination file path for the scaffolded updater template")]
+    pub out: Option<String>,
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct ReportArgs {
+    #[arg(long, help = "Output HTML file path (default: medha-report.html)")]
+    pub out: Option<String>,
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct UiArgs {
+    #[arg(long, default_value_t = 3842, help = "Port to listen on")]
+    pub port: u16,
+
+    #[arg(long, default_value = "127.0.0.1", help = "Host address to bind")]
+    pub host: String,
+
+    #[arg(long, help = "Open the browser dashboard automatically")]
+    pub open: bool,
+}
+
+#[derive(Args, Debug, Default, Clone)]
+pub struct DocsArgs {
+    #[arg(long, default_value_t = 3843, help = "Port to listen on")]
+    pub port: u16,
+
+    #[arg(long, default_value = "127.0.0.1", help = "Host address to bind")]
+    pub host: String,
+
+    #[arg(long, help = "Open the browser docs automatically")]
+    pub open: bool,
 }

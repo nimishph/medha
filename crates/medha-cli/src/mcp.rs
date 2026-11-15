@@ -282,6 +282,65 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                                 "topic": { "type": "string" }
                             }
                         }
+                    },
+                    {
+                        "name": "hints_for_context",
+                        "description": "Context-aware hint matching: selectively fetches and packs rules relevant to active files, language, or task query (medha-c8z.1).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "files": { "type": "array", "items": { "type": "string" } },
+                                "languages": { "type": "array", "items": { "type": "string" } },
+                                "query": { "type": "string" },
+                                "budget": { "type": "integer" },
+                                "kind": { "type": "string" },
+                                "compact": { "type": "boolean" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "verify_guard",
+                        "description": "Evaluate or execute an automated verification guard check on an entity, recording pass/fail outcome into memory (medha-c8z.2).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "guard": { "type": "string" },
+                                "ok": { "type": "boolean" },
+                                "command": { "type": "string" },
+                                "kind": { "type": "string" },
+                                "namespace": { "type": "string" }
+                            },
+                            "required": ["id"]
+                        }
+                    },
+                    {
+                        "name": "detect_pitfalls",
+                        "description": "Negative-evidence radar: detect known traps, anti-patterns, and repeatedly failing rules or guards (medha-c8z.4).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "minFailures": { "type": "integer" },
+                                "kind": { "type": "string" },
+                                "namespace": { "type": "string" },
+                                "limit": { "type": "integer" }
+                            }
+                        }
+                    },
+                    {
+                        "name": "distill_trajectory",
+                        "description": "Autonomous session retrospective distillation: extracts empirical lessons from incident trajectories into candidate rules with commit anchors (medha-c8z.5).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "title": { "type": "string" },
+                                "commitSha": { "type": "string" },
+                                "lessons": { "type": "array", "items": { "type": "object" } },
+                                "autoFile": { "type": "boolean" }
+                            },
+                            "required": ["id", "title"]
+                        }
                     }
                 ]
             }
@@ -291,20 +350,28 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
+            let is_compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
             let result_val = run_tool(engine, tool_name, &args, now);
             match result_val {
-                Ok(content_json) => Some(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": serde_json::to_string_pretty(&content_json).unwrap_or_default()
-                            }
-                        ]
-                    }
-                })),
+                Ok(content_json) => {
+                    let text = if is_compact {
+                        serde_json::to_string(&content_json).unwrap_or_default()
+                    } else {
+                        serde_json::to_string_pretty(&content_json).unwrap_or_default()
+                    };
+                    Some(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": text
+                                }
+                            ]
+                        }
+                    }))
+                }
                 Err(err_msg) => Some(json!({
                     "jsonrpc": "2.0",
                     "id": id,
@@ -331,6 +398,15 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
     }
 }
 
+fn compact_hint(h: &medha::core::types::TrustHint) -> Value {
+    json!({
+        "key": h.key,
+        "trust": (h.trust * 1000.0).round() / 1000.0,
+        "status": format!("{:?}", h.status).to_lowercase(),
+        "drifting": h.is_drifting,
+    })
+}
+
 fn run_tool<S: StorePort>(
     engine: &mut MedhaEngine<S>,
     tool_name: &str,
@@ -340,6 +416,7 @@ fn run_tool<S: StorePort>(
     match tool_name {
         "hints" => {
             let keys_val = args.get("keys").and_then(|v| v.as_array());
+            let compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
             if let Some(keys_arr) = keys_val {
                 let mut entity_keys = Vec::new();
                 for item in keys_arr {
@@ -348,8 +425,21 @@ fn run_tool<S: StorePort>(
                     let ns = item.get("namespace").and_then(|v| v.as_str()).unwrap_or("");
                     entity_keys.push(EntityKey::new(ns, kind, id));
                 }
+                let mut unknown = Vec::new();
+                for k in &entity_keys {
+                    if engine.get(k).map_err(|e| e.to_string())?.is_none() {
+                        unknown.push(k.clone());
+                    }
+                }
                 match engine.hints(&entity_keys, now) {
-                    Ok(hints) => Ok(json!(hints)),
+                    Ok(hints) => {
+                        if compact {
+                            let compact_hints: Vec<Value> = hints.iter().map(compact_hint).collect();
+                            Ok(json!({ "hints": compact_hints, "unknown": unknown }))
+                        } else {
+                            Ok(json!({ "hints": hints, "unknown": unknown }))
+                        }
+                    }
                     Err(e) => Err(e.to_string()),
                 }
             } else {
@@ -359,16 +449,47 @@ fn run_tool<S: StorePort>(
         "list_entities" => match engine.list() {
             Ok(states) => {
                 let ids = string_list(args.get("ids"));
+                let filter_kind = args.get("kind").and_then(|v| v.as_str());
+                let filter_status = args.get("status").and_then(|v| v.as_str());
+                let filter_ns = args.get("namespace").and_then(|v| v.as_str());
+                let filter_drifting = args.get("drifting").and_then(|v| v.as_bool()).unwrap_or(false);
+                let compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
                 let mut hints = Vec::new();
                 for s in states {
-                    if ids.as_ref().is_some_and(|ids| !ids.contains(&s.key.id)) {
-                        continue;
+                    if let Some(ref ids) = ids {
+                        if !ids.contains(&s.key.id) {
+                            continue;
+                        }
+                    }
+                    if let Some(k) = filter_kind {
+                        if s.key.kind != k {
+                            continue;
+                        }
+                    }
+                    if let Some(ns) = filter_ns {
+                        if s.key.namespace != ns {
+                            continue;
+                        }
                     }
                     if let Ok(h) = engine.hint(&s.key, now) {
+                        if filter_drifting && !h.is_drifting {
+                            continue;
+                        }
+                        if let Some(st) = filter_status {
+                            if format!("{:?}", h.status).to_lowercase() != st {
+                                continue;
+                            }
+                        }
                         hints.push(h);
                     }
                 }
-                Ok(json!({ "items": hints }))
+                let total = hints.len();
+                if compact {
+                    let items: Vec<Value> = hints.iter().map(compact_hint).collect();
+                    Ok(json!({ "items": items, "total": total, "hasMore": false }))
+                } else {
+                    Ok(json!({ "items": hints, "total": total, "hasMore": false }))
+                }
             }
             Err(e) => Err(e.to_string()),
         },
@@ -414,14 +535,29 @@ fn run_tool<S: StorePort>(
                 .get("note")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-
             let ensure = args
                 .get("ensure")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let compact = args
+                .get("compact")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let key = EntityKey::new(ns, kind, id);
+            let exists = engine.get(&key).map_err(|e| e.to_string())?.is_some();
+            if !exists && !ensure {
+                let hint = engine.hint(&key, now).map_err(|e| e.to_string())?;
+                let hint_val = if compact { compact_hint(&hint) } else { json!(hint) };
+                return Ok(json!({
+                    "recorded": false,
+                    "note": "entity is unknown and `ensure` was not set: nothing was recorded; the hint is a probation prior. Pass ensure: true to create it.",
+                    "hint": hint_val
+                }));
+            }
 
             let input = RecordInput {
-                key: EntityKey::new(ns, kind, id),
+                key: key.clone(),
                 signal: signal.to_string(),
                 at: now,
                 ensure,
@@ -429,13 +565,17 @@ fn run_tool<S: StorePort>(
                 anchors: None,
                 run_ref: None,
                 note,
-                case_id: None,
+                case_id: args.get("caseId").and_then(|v| v.as_str()).map(|s| s.to_string()),
             };
 
-            match engine.record(input) {
-                Ok(res) => Ok(json!(res)),
-                Err(e) => Err(e.to_string()),
-            }
+            let res = engine.record(input).map_err(|e| e.to_string())?;
+            let hint = engine.hint(&key, now).map_err(|e| e.to_string())?;
+            let hint_val = if compact { compact_hint(&hint) } else { json!(hint) };
+            Ok(json!({
+                "recorded": true,
+                "hint": hint_val,
+                "episode": res.episode
+            }))
         }
         "report_guard" => {
             let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -444,6 +584,7 @@ fn run_tool<S: StorePort>(
             let ok = args.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
             let guard_kind = args
                 .get("guard")
+                .or_else(|| args.get("guardKind"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             let note = args
@@ -452,7 +593,6 @@ fn run_tool<S: StorePort>(
                 .map(|s| s.to_string());
 
             let key = EntityKey::new(ns, kind, id);
-            // A report with no guard kind, on an entity that has none, would not count (gh-17).
             if guard_kind.as_deref().is_none_or(|k| k.trim().is_empty()) {
                 let has_guard = engine
                     .get(&key)
@@ -467,18 +607,17 @@ fn run_tool<S: StorePort>(
             }
 
             let input = GuardInput {
-                key,
+                key: key.clone(),
                 ok,
                 kind: guard_kind,
                 at: now,
-                author: None,
+                author: args.get("author").and_then(|v| v.as_str()).map(|s| s.to_string()),
                 note,
             };
 
-            match engine.guard(input) {
-                Ok(res) => Ok(json!(res)),
-                Err(e) => Err(e.to_string()),
-            }
+            let _ = engine.guard(input).map_err(|e| e.to_string())?;
+            let hint = engine.hint(&key, now).map_err(|e| e.to_string())?;
+            Ok(json!(hint))
         }
         "simulate" => {
             let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");

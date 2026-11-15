@@ -111,6 +111,7 @@ type Op =
       readonly author?: string;
       readonly anchor?: { readonly kind: string; readonly value: string };
       readonly note?: string;
+      readonly caseId?: string;
     }
   | {
       readonly op: 'guard';
@@ -141,6 +142,25 @@ type Op =
       readonly title: string;
       readonly rationale: string;
       readonly tags?: readonly string[];
+      readonly at: number;
+    }
+  | {
+      readonly op: 'decision';
+      readonly key: EntityKey;
+      readonly caseId: string;
+      readonly parentId?: string;
+      readonly condition: string;
+      readonly decision: 'apply' | 'ignore';
+      readonly at: number;
+    }
+  | {
+      readonly op: 'compact';
+      readonly at: number;
+    }
+  | {
+      readonly op: 'sweep';
+      readonly prune?: boolean;
+      readonly olderThan?: number;
       readonly at: number;
     };
 
@@ -274,6 +294,7 @@ async function runTs(script: Script): Promise<EngineRun> {
             ...(op.author === undefined ? {} : { author: op.author }),
             ...(op.anchor === undefined ? {} : { anchor: op.anchor }),
             ...(op.note === undefined ? {} : { note: op.note }),
+            ...(op.caseId === undefined ? {} : { caseId: op.caseId }),
           });
           break;
         case 'guard':
@@ -313,6 +334,27 @@ async function runTs(script: Script): Promise<EngineRun> {
             },
             ctx,
           );
+          break;
+        case 'decision':
+          await medha.decision(
+            op.key,
+            {
+              caseId: op.caseId,
+              mode: 'create',
+              condition: op.condition,
+              decision: { type: op.decision },
+              ...(op.parentId === undefined ? {} : { parentId: op.parentId }),
+            },
+            ctx,
+          );
+          break;
+        case 'compact':
+          await medha.compact(ctx);
+          break;
+        case 'sweep':
+          await medha.open(ctx, {
+            ...(op.olderThan === undefined ? {} : { olderThan: op.olderThan }),
+          });
           break;
       }
       results.push('ok');
@@ -836,6 +878,122 @@ describe.skipIf(!('path' in driver))('TS/Rust state merge parity', () => {
       })
       .find((d) => d !== null);
     expect(divergence ?? null).toBeNull();
+  });
+});
+
+describe.skipIf(!('path' in driver))(
+  'TS/Rust decision trees and branch parity (medha-50q.10)',
+  () => {
+    test('both engines fold decision branches and attribute caseId evidence identically', async () => {
+      const key = { namespace: '', kind: 'rule', id: 'branch-rule' };
+      const ops: Op[] = [
+        { op: 'record', key, signal: 'APPLY', at: T0 + 10, ensure: true },
+        {
+          op: 'decision',
+          key,
+          caseId: 'branch-1',
+          condition: 'path.startsWith("src/auth")',
+          decision: 'apply',
+          at: T0 + 20,
+        },
+        {
+          op: 'record',
+          key,
+          signal: 'APPLY',
+          at: T0 + 30,
+          ensure: true,
+          caseId: 'branch-1',
+        },
+        {
+          op: 'decision',
+          key,
+          caseId: 'branch-2',
+          parentId: 'branch-1',
+          condition: 'user.isAdmin === true',
+          decision: 'ignore',
+          at: T0 + 40,
+        },
+        {
+          op: 'record',
+          key,
+          signal: 'REJECT_RULE',
+          at: T0 + 50,
+          ensure: true,
+          caseId: 'branch-2',
+        },
+      ];
+
+      const script: Script = { ops, now: T0 + 100 };
+      const tsRun = await runTs(script);
+      const rust = runRust({ scripts: [script] });
+      expect('failure' in rust ? rust.failure : 'ok').toBe('ok');
+      if ('failure' in rust) return;
+
+      const rustRun = rust.scripts[0] as ScriptRun;
+      const diff = compareRuns(tsRun, rustRun);
+      expect(diff).toBeNull();
+    });
+  },
+);
+
+describe.skipIf(!('path' in driver))(
+  'TS/Rust maintenance sweep and compaction parity (medha-50q.11)',
+  () => {
+    test('both engines agree on compaction folding and sweep lifecycle updates', async () => {
+      const key = { namespace: '', kind: 'rule', id: 'sweep-rule' };
+      const ops: Op[] = [
+        { op: 'record', key, signal: 'APPLY', at: T0 + 100, ensure: true },
+        { op: 'record', key, signal: 'APPLY', at: T0 + 200, ensure: true },
+        { op: 'compact', at: T0 + 300 },
+        { op: 'sweep', prune: false, olderThan: 30, at: T0 + 400 },
+      ];
+
+      const script: Script = { ops, now: T0 + 500 };
+      const tsRun = await runTs(script);
+      const rust = runRust({ scripts: [script] });
+      expect('failure' in rust ? rust.failure : 'ok').toBe('ok');
+      if ('failure' in rust) return;
+
+      const rustRun = rust.scripts[0] as ScriptRun;
+      const diff = compareRuns(tsRun, rustRun);
+      expect(diff).toBeNull();
+    });
+  },
+);
+
+describe.skipIf(!('path' in driver))('TS/Rust CLI --json parity (medha-50q.9)', () => {
+  test('both TS and Rust CLI emit matching structured JSON for params', () => {
+    const exe = process.platform === 'win32' ? 'medha.exe' : 'medha';
+    const rustPath = join(ROOT, 'target', 'debug', exe);
+    if (!existsSync(rustPath)) return;
+
+    const rustProc = Bun.spawnSync({
+      cmd: [rustPath, 'params', '--json'],
+      stdout: 'pipe',
+    });
+    expect(rustProc.exitCode).toBe(0);
+    const rustJson = JSON.parse(rustProc.stdout.toString()) as {
+      params: { name: string; value: number }[];
+    };
+
+    const tsProc = Bun.spawnSync({
+      cmd: [process.execPath, join(ROOT, 'cli', 'src', 'bin.ts'), 'params', '--json'],
+      stdout: 'pipe',
+    });
+    expect(tsProc.exitCode).toBe(0);
+    const tsJson = JSON.parse(tsProc.stdout.toString()) as {
+      params: { name: string; value: number }[];
+    };
+
+    expect(rustJson.params.length).toBeGreaterThan(0);
+    const rustMap = new Map(rustJson.params.map((p) => [p.name, p.value]));
+    const tsMap = new Map(tsJson.params.map((p) => [p.name, p.value]));
+
+    for (const [name, val] of rustMap) {
+      if (tsMap.has(name)) {
+        expect(val).toBeCloseTo(tsMap.get(name) as number);
+      }
+    }
   });
 });
 

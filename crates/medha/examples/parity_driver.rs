@@ -68,6 +68,8 @@ enum Op {
         anchor: Option<Anchor>,
         #[serde(default)]
         note: Option<String>,
+        #[serde(default, alias = "caseId")]
+        case_id: Option<String>,
     },
     Guard {
         key: EntityKey,
@@ -104,6 +106,26 @@ enum Op {
         tags: Option<Vec<String>>,
         at: i64,
     },
+    Decision {
+        key: EntityKey,
+        #[serde(alias = "caseId")]
+        case_id: String,
+        #[serde(default, alias = "parentId")]
+        parent_id: Option<String>,
+        condition: String,
+        decision: String,
+        at: i64,
+    },
+    Compact {
+        at: i64,
+    },
+    Sweep {
+        #[serde(default)]
+        prune: bool,
+        #[serde(default)]
+        older_than: Option<f64>,
+        at: i64,
+    },
 }
 
 type Engine = MedhaEngine<medha::store::MemoryStore>;
@@ -118,6 +140,7 @@ fn run_op(engine: &mut Engine, op: Op) -> Result<(), String> {
             author,
             anchor,
             note,
+            case_id,
         } => engine
             .record(RecordInput {
                 key,
@@ -128,7 +151,7 @@ fn run_op(engine: &mut Engine, op: Op) -> Result<(), String> {
                 anchors: anchor.map(|a| vec![a]),
                 run_ref: None,
                 note,
-                case_id: None,
+                case_id,
             })
             .map(|_| ()),
         Op::Guard {
@@ -180,6 +203,32 @@ fn run_op(engine: &mut Engine, op: Op) -> Result<(), String> {
             at,
         } => engine
             .define(&key, &title, &rationale, tags, at)
+            .map(|_| ()),
+        Op::Decision {
+            key,
+            case_id,
+            parent_id,
+            condition,
+            decision,
+            at,
+        } => {
+            let dec = match decision.as_str() {
+                "ignore" => medha::core::decision::Decision::Ignore,
+                _ => medha::core::decision::Decision::Apply,
+            };
+            engine
+                .decision(&key, &case_id, parent_id, &condition, dec, at)
+                .map(|_| ())
+        }
+        Op::Compact { at } => engine.compact(at).map(|_| ()),
+        Op::Sweep { prune, older_than, at } => engine
+            .sweep(
+                medha::SweepOptions {
+                    prune_retired: prune,
+                    max_age_days: older_than,
+                },
+                at,
+            )
             .map(|_| ()),
     };
     outcome.map_err(|e| e.to_string())
