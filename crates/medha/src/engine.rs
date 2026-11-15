@@ -433,7 +433,9 @@ impl<S: StorePort> MedhaEngine<S> {
         let default_thresholds = Thresholds::default();
         let default_recency = RecencyConfig::default();
         let kind_spec = self.store.registries().kind_spec(&key.kind);
-        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+        let thresholds = kind_spec
+            .map(|ks| &ks.thresholds)
+            .unwrap_or(&default_thresholds);
         let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
 
         let computation = compute_trust_and_status(TrustComputationInput {
@@ -514,10 +516,8 @@ impl<S: StorePort> MedhaEngine<S> {
             .find(|k| k.name == input.key.kind);
 
         let (state_summary, decision_tree) = if let Some(ref s) = state_opt {
-            let summary = medha_core::policy_latch::PolicyLatchEntityState::new(
-                s.status,
-                s.evidence.clone(),
-            );
+            let summary =
+                medha_core::policy_latch::PolicyLatchEntityState::new(s.status, s.evidence.clone());
             (Some(summary), s.decision_tree.clone())
         } else {
             let key_str = input.key.to_string_repr();
@@ -643,7 +643,9 @@ impl<S: StorePort> MedhaEngine<S> {
 
         let default_thresholds = Thresholds::default();
         let kind_spec = self.store.registries().kind_spec(&key.kind);
-        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+        let thresholds = kind_spec
+            .map(|ks| &ks.thresholds)
+            .unwrap_or(&default_thresholds);
 
         let is_guarded = !state.guard.kind.is_empty() && state.guard.kind != "none";
         let guard_passed = state.guard.last_ok == Some(true);
@@ -768,7 +770,9 @@ impl<S: StorePort> MedhaEngine<S> {
         let default_thresholds = Thresholds::default();
         let default_recency = RecencyConfig::default();
         let kind_spec = self.store.registries().kind_spec(&key.kind);
-        let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+        let thresholds = kind_spec
+            .map(|ks| &ks.thresholds)
+            .unwrap_or(&default_thresholds);
         let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
 
         let computation = compute_trust_and_status(TrustComputationInput {
@@ -1203,10 +1207,8 @@ impl<S: StorePort> MedhaEngine<S> {
         }
 
         // Bake-and-verify: verify fold-equivalence in memory before replacing the log
-        let verified_states = medha_store::folding::fold_log_with_registries(
-            &new_eps,
-            Some(self.store.registries()),
-        );
+        let verified_states =
+            medha_store::folding::fold_log_with_registries(&new_eps, Some(self.store.registries()));
         for s in &states {
             let key_str = s.key.to_string_repr();
             if let Some(folded) = verified_states.get(&key_str) {

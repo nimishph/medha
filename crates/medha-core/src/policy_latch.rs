@@ -152,7 +152,10 @@ fn match_single_clause(clause: &str, map: &serde_json::Map<String, serde_json::V
     // Set membership: key in [a, b]
     if let Some((k, list_part)) = clause.split_once(" in ") {
         let key = k.trim();
-        let list_str = list_part.trim().trim_start_matches('[').trim_end_matches(']');
+        let list_str = list_part
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']');
         if let Some(actual) = map.get(key) {
             let actual_str = match actual {
                 serde_json::Value::String(s) => s.clone(),
@@ -248,7 +251,9 @@ pub fn evaluate_policy_latch(
     }
 
     let default_thresholds = Thresholds::default();
-    let thresholds = kind_spec.map(|k| &k.thresholds).unwrap_or(&default_thresholds);
+    let thresholds = kind_spec
+        .map(|k| &k.thresholds)
+        .unwrap_or(&default_thresholds);
     let default_recency = RecencyConfig::default();
     let recency = kind_spec.map(|k| &k.recency).unwrap_or(&default_recency);
 

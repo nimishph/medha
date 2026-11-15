@@ -271,7 +271,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let content = match fs::read_to_string(cfg_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("medha error: failed to read config file {}: {}", cfg_path, e);
+                    eprintln!(
+                        "medha error: failed to read config file {}: {}",
+                        cfg_path, e
+                    );
                     exit(1);
                 }
             };
@@ -603,7 +606,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ref f) = args.file {
                 let p = PathBuf::from(f);
                 if args.action == SyncAction::Pull && !p.exists() {
-                    eprintln!("medha error: Cannot pull: sync file '{}' does not exist", p.display());
+                    eprintln!(
+                        "medha error: Cannot pull: sync file '{}' does not exist",
+                        p.display()
+                    );
                     exit(1);
                 }
                 // Check peek for registry drift on pull
@@ -620,7 +626,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     let mut missing_signals = Vec::new();
                                     for s in &snapshot_regs.signal_specs {
-                                        if !config.registries.signal_specs.iter().any(|sig| sig.name == s.name) {
+                                        if !config
+                                            .registries
+                                            .signal_specs
+                                            .iter()
+                                            .any(|sig| sig.name == s.name)
+                                        {
                                             missing_signals.push(s.name.clone());
                                         }
                                     }
@@ -638,11 +649,17 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                                 updated_config.registries.kinds.push(k);
                                             }
                                             for s in snapshot_regs.signal_specs.clone() {
-                                                if !updated_config.registries.signal_specs.iter().any(|sig| sig.name == s.name) {
+                                                if !updated_config
+                                                    .registries
+                                                    .signal_specs
+                                                    .iter()
+                                                    .any(|sig| sig.name == s.name)
+                                                {
                                                     updated_config.registries.signal_specs.push(s);
                                                 }
                                             }
-                                            let _ = updated_config.save_to_file(home_dir.join(CONFIG_FILE));
+                                            let _ = updated_config
+                                                .save_to_file(home_dir.join(CONFIG_FILE));
                                             engine.use_registries(&updated_config.registries);
                                         }
                                     }
@@ -653,10 +670,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
                 engine.set_sync(Box::new(medha_sync::FileSyncAdapter::new(&p)));
             } else if args.remote.is_some() || args.git_ref.is_some() {
-                let git_ref = args.git_ref.as_deref().unwrap_or(medha_sync::DEFAULT_MEDHA_REF);
+                let git_ref = args
+                    .git_ref
+                    .as_deref()
+                    .unwrap_or(medha_sync::DEFAULT_MEDHA_REF);
                 let remote = args.remote.as_deref().unwrap_or(medha_sync::DEFAULT_REMOTE);
                 let repo_dir = home_dir.parent().unwrap_or(&home_dir);
-                engine.set_sync(Box::new(medha_sync::GitRefSyncAdapter::with_ref_and_remote(repo_dir, git_ref, remote)));
+                engine.set_sync(Box::new(
+                    medha_sync::GitRefSyncAdapter::with_ref_and_remote(repo_dir, git_ref, remote),
+                ));
             }
 
             match args.action {
@@ -1000,7 +1022,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             };
             let case_id = args
                 .case_id
-                .unwrap_or_else(|| format!("c-{}", &uuid_or_random_hex()));
+                .unwrap_or_else(|| format!("c-{}", uuid_or_random_hex()));
             let parent_id = if args.detach { None } else { args.parent };
             let at = now;
             let _ = engine.decision(
@@ -1040,10 +1062,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             engine.remove_episode(args.seq)?;
             let remaining = engine.store().episodes(None, None)?.len();
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                    "seq": args.seq,
-                    "remainingCount": remaining
-                }))?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "seq": args.seq,
+                        "remainingCount": remaining
+                    }))?
+                );
             } else {
                 println!(
                     "medha: removed episode #{} from log ({} episodes remaining)",
@@ -1227,10 +1252,13 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 engine.remove_episode(remove_args.seq)?;
                 let remaining = engine.store().episodes(None, None)?.len();
                 if cli.json {
-                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-                        "seq": remove_args.seq,
-                        "remainingCount": remaining
-                    }))?);
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "seq": remove_args.seq,
+                            "remainingCount": remaining
+                        }))?
+                    );
                 } else {
                     println!(
                         "medha: removed episode #{} from log ({} episodes remaining)",
@@ -1267,11 +1295,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     "medha: generated evidential report snapshot at {}",
                     dest.display()
                 );
-                println!(
-                    "  entities: {}  episodes: {}",
-                    states.len(),
-                    episodes.len()
-                );
+                println!("  entities: {}  episodes: {}", states.len(), episodes.len());
             }
         }
         Commands::Ui(ui_args) => {

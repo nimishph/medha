@@ -5,12 +5,23 @@ use std::path::PathBuf;
 
 const BUNDLED_CLIENTS_JSON: &str = include_str!("../../../cli/src/integrations/clients.json");
 
-pub fn run_mcp_config(args: &McpConfigArgs, json_mode: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_mcp_config(
+    args: &McpConfigArgs,
+    json_mode: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let registry: Value = serde_json::from_str(BUNDLED_CLIENTS_JSON)?;
 
     if args.list {
-        let clients_arr = registry.get("clients").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        let launchers_obj = registry.get("launchers").and_then(|v| v.as_object()).cloned().unwrap_or_default();
+        let clients_arr = registry
+            .get("clients")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let launchers_obj = registry
+            .get("launchers")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
 
         let client_rows: Vec<Value> = clients_arr
             .iter()
@@ -27,13 +38,16 @@ pub fn run_mcp_config(args: &McpConfigArgs, json_mode: bool) -> Result<(), Box<d
                     .map(|s| {
                         let sid = s.get("id").and_then(|v| v.as_str()).unwrap_or("");
                         let label = s.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                        let path = s.get("path").and_then(|v| {
-                            if v.is_string() {
-                                v.as_str()
-                            } else {
-                                v.get("default").and_then(|d| d.as_str())
-                            }
-                        }).unwrap_or("");
+                        let path = s
+                            .get("path")
+                            .and_then(|v| {
+                                if v.is_string() {
+                                    v.as_str()
+                                } else {
+                                    v.get("default").and_then(|d| d.as_str())
+                                }
+                            })
+                            .unwrap_or("");
                         json!({ "id": sid, "label": label, "path": path })
                     })
                     .collect();
@@ -85,16 +99,27 @@ pub fn run_mcp_config(args: &McpConfigArgs, json_mode: bool) -> Result<(), Box<d
     }
 
     if args.all && args.write {
-        eprintln!("medha error: --all cannot be combined with --write (write one client at a time)");
+        eprintln!(
+            "medha error: --all cannot be combined with --write (write one client at a time)"
+        );
         std::process::exit(2);
     }
 
     if args.all {
-        let clients_arr = registry.get("clients").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let clients_arr = registry
+            .get("clients")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mut reports = Vec::new();
         for client in &clients_arr {
             let cid = client.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let rep = render_snippet(&registry, cid, args.launcher.as_deref(), args.server_name.as_deref())?;
+            let rep = render_snippet(
+                &registry,
+                cid,
+                args.launcher.as_deref(),
+                args.server_name.as_deref(),
+            )?;
             reports.push(rep);
         }
         if json_mode {
@@ -118,7 +143,12 @@ pub fn run_mcp_config(args: &McpConfigArgs, json_mode: bool) -> Result<(), Box<d
         }
     };
 
-    let snippet = render_snippet(&registry, client_id, args.launcher.as_deref(), args.server_name.as_deref())?;
+    let snippet = render_snippet(
+        &registry,
+        client_id,
+        args.launcher.as_deref(),
+        args.server_name.as_deref(),
+    )?;
 
     if args.write {
         let path_str = snippet["path"].as_str().unwrap_or("");
@@ -130,18 +160,25 @@ pub fn run_mcp_config(args: &McpConfigArgs, json_mode: bool) -> Result<(), Box<d
         let pretty = serde_json::to_string_pretty(&doc)?;
         fs::write(&dest, pretty)?;
         if json_mode {
-            println!("{}", serde_json::to_string_pretty(&json!({
-                "clientId": client_id,
-                "clientName": snippet["clientName"],
-                "scopeId": snippet["scopeId"],
-                "launcherId": snippet["launcherId"],
-                "serverName": snippet["serverName"],
-                "path": dest.display().to_string(),
-                "created": true,
-                "changed": true,
-            }))?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "clientId": client_id,
+                    "clientName": snippet["clientName"],
+                    "scopeId": snippet["scopeId"],
+                    "launcherId": snippet["launcherId"],
+                    "serverName": snippet["serverName"],
+                    "path": dest.display().to_string(),
+                    "created": true,
+                    "changed": true,
+                }))?
+            );
         } else {
-            println!("medha: wrote MCP configuration for {} to {}", snippet["clientName"].as_str().unwrap_or(""), dest.display());
+            println!(
+                "medha: wrote MCP configuration for {} to {}",
+                snippet["clientName"].as_str().unwrap_or(""),
+                dest.display()
+            );
         }
         return Ok(());
     }
@@ -181,11 +218,19 @@ fn render_snippet(
     launcher_id: Option<&str>,
     server_name: Option<&str>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let clients = registry.get("clients").and_then(|v| v.as_array()).ok_or("No clients in registry")?;
+    let clients = registry
+        .get("clients")
+        .and_then(|v| v.as_array())
+        .ok_or("No clients in registry")?;
     let client = clients
         .iter()
         .find(|c| c.get("id").and_then(|v| v.as_str()) == Some(client_id))
-        .ok_or_else(|| format!("Unknown client '{}'. Run `medha mcp config --list` to see available clients.", client_id))?;
+        .ok_or_else(|| {
+            format!(
+                "Unknown client '{}'. Run `medha mcp config --list` to see available clients.",
+                client_id
+            )
+        })?;
 
     let client_name = client.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let docs = client.get("docs").and_then(|v| v.as_str()).unwrap_or("");
@@ -193,22 +238,42 @@ fn render_snippet(
 
     let l_id = launcher_id.unwrap_or("path");
     let (cmd, args_vec) = if l_id == "npx" {
-        ("npx", vec!["-y".to_string(), "@cntxt-labs/medha-cli@latest".to_string(), "mcp".to_string(), "serve".to_string()])
+        (
+            "npx",
+            vec![
+                "-y".to_string(),
+                "@cntxt-labs/medha-cli@latest".to_string(),
+                "mcp".to_string(),
+                "serve".to_string(),
+            ],
+        )
     } else {
         ("medha", vec!["mcp".to_string(), "serve".to_string()])
     };
 
-    let scopes = client.get("scopes").and_then(|v| v.as_array()).ok_or("No scopes")?;
+    let scopes = client
+        .get("scopes")
+        .and_then(|v| v.as_array())
+        .ok_or("No scopes")?;
     let scope = scopes.first().ok_or("No scope")?;
-    let scope_id = scope.get("id").and_then(|v| v.as_str()).unwrap_or("project");
-    let scope_label = scope.get("label").and_then(|v| v.as_str()).unwrap_or("Project");
-    let scope_path = scope.get("path").and_then(|v| {
-        if v.is_string() {
-            v.as_str()
-        } else {
-            v.get("default").and_then(|d| d.as_str())
-        }
-    }).unwrap_or("");
+    let scope_id = scope
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("project");
+    let scope_label = scope
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Project");
+    let scope_path = scope
+        .get("path")
+        .and_then(|v| {
+            if v.is_string() {
+                v.as_str()
+            } else {
+                v.get("default").and_then(|d| d.as_str())
+            }
+        })
+        .unwrap_or("");
 
     let doc = json!({
         "mcpServers": {

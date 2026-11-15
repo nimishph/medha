@@ -16,7 +16,9 @@ pub fn run_policy<S: StorePort>(
 
     let parsed_context = if let Some(ref c) = args.context {
         if c.trim().starts_with('{') {
-            serde_json::from_str(c).ok().or_else(|| Some(serde_json::Value::String(c.clone())))
+            serde_json::from_str(c)
+                .ok()
+                .or_else(|| Some(serde_json::Value::String(c.clone())))
         } else {
             Some(serde_json::Value::String(c.clone()))
         }
@@ -73,7 +75,9 @@ pub fn render_policy(outcome: &PolicyLatchOutcome) -> String {
         let dec_str = match &kase.kase.decision {
             medha_core::decision::Decision::Apply => "apply",
             medha_core::decision::Decision::Ignore => "ignore",
-            medha_core::decision::Decision::Probability { value } => &format!("probability({})", value),
+            medha_core::decision::Decision::Probability { value } => {
+                &format!("probability({})", value)
+            }
         };
         out.push_str(&format!(
             "  matched branch: {} ({}) -> {}\n",
@@ -86,4 +90,3 @@ pub fn render_policy(outcome: &PolicyLatchOutcome) -> String {
 
     out
 }
-

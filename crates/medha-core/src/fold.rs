@@ -3,8 +3,8 @@ use crate::formula::{compute_trust_and_status, TrustComputationInput};
 use crate::round::round6;
 use crate::thresholds::{DEFAULT_EMA_ALPHA, WEEK_MS};
 use crate::types::{
-    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus, RecencyConfig, SignalSpec,
-    Thresholds,
+    CoreError, EmaState, Evidence, GuardState, KindConvergenceGates, LifecycleStatus,
+    RecencyConfig, SignalSpec, Thresholds,
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 

@@ -102,7 +102,10 @@ impl GitRefSyncAdapter {
             if git_path.exists() {
                 return true;
             }
-            if curr.join("HEAD").is_file() && curr.join("refs").is_dir() && curr.join("objects").is_dir() {
+            if curr.join("HEAD").is_file()
+                && curr.join("refs").is_dir()
+                && curr.join("objects").is_dir()
+            {
                 return true;
             }
             if !curr.pop() {

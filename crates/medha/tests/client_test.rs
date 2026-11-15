@@ -35,7 +35,10 @@ fn test_rust_client_in_memory_lifecycle() {
     assert_eq!(key.namespace, "style");
     assert_eq!(key.id, "strict-types");
 
-    let state = client.get(&key).expect("get failed").expect("missing state");
+    let state = client
+        .get(&key)
+        .expect("get failed")
+        .expect("missing state");
     assert_eq!(state.evidence.n, 1.0);
     assert_eq!(state.evidence.k, 1.0);
 
@@ -208,7 +211,10 @@ fn test_rust_client_sqlite_persistence() {
     {
         let client = MedhaClient::open(db_path.to_str().unwrap()).expect("reopen failed");
         let key = EntityKey::new("db", "rule", "disk-rule");
-        let state = client.get(&key).expect("get failed").expect("missing state");
+        let state = client
+            .get(&key)
+            .expect("get failed")
+            .expect("missing state");
         assert_eq!(state.key.id, "disk-rule");
     }
 }

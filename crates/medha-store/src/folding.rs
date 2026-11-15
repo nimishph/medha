@@ -78,7 +78,9 @@ pub fn status_for_with_spec(
 ) -> LifecycleStatus {
     let default_thresholds = Thresholds::default();
     let default_recency = RecencyConfig::default();
-    let thresholds = kind_spec.map(|ks| &ks.thresholds).unwrap_or(&default_thresholds);
+    let thresholds = kind_spec
+        .map(|ks| &ks.thresholds)
+        .unwrap_or(&default_thresholds);
     let recency_config = kind_spec.map(|ks| &ks.recency).unwrap_or(&default_recency);
     compute_trust_and_status(TrustComputationInput {
         evidence: &state.evidence,
@@ -284,10 +286,8 @@ pub fn fold_episode_with_registries(
                 } else {
                     0.0
                 };
-                state.evidence.k =
-                    round6(state.evidence.k + sw).unwrap_or(state.evidence.k + sw);
-                state.evidence.n =
-                    round6(state.evidence.n + tw).unwrap_or(state.evidence.n + tw);
+                state.evidence.k = round6(state.evidence.k + sw).unwrap_or(state.evidence.k + sw);
+                state.evidence.n = round6(state.evidence.n + tw).unwrap_or(state.evidence.n + tw);
             } else {
                 if spec.counts_as_success {
                     state.evidence.k += 1.0;

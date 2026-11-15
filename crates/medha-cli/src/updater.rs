@@ -1,11 +1,11 @@
 use crate::args::{UpdaterAction, UpdaterArgs};
 use serde_json::json;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run_updater(
     args: &UpdaterArgs,
-    home_dir: &PathBuf,
+    home_dir: &Path,
     json_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match &args.action {
@@ -37,7 +37,10 @@ pub fn run_updater(
         UpdaterAction::Show(show_args) => {
             let name = &show_args.name;
             if name != "ema" && name != "wilson" {
-                eprintln!("medha error: no updater named '{}'\nknown updaters: ema, wilson", name);
+                eprintln!(
+                    "medha error: no updater named '{}'\nknown updaters: ema, wilson",
+                    name
+                );
                 std::process::exit(1);
             }
             let report = if name == "ema" {
@@ -61,13 +64,19 @@ pub fn run_updater(
             } else {
                 println!("updater:     {}", name);
                 println!("source:      builtin");
-                println!("description: {}", report["description"].as_str().unwrap_or(""));
+                println!(
+                    "description: {}",
+                    report["description"].as_str().unwrap_or("")
+                );
             }
         }
         UpdaterAction::Fork(fork_args) => {
             let name = &fork_args.name;
             if name != "ema" && name != "wilson" {
-                eprintln!("medha error: no updater named '{}'\nknown updaters: ema, wilson", name);
+                eprintln!(
+                    "medha error: no updater named '{}'\nknown updaters: ema, wilson",
+                    name
+                );
                 std::process::exit(1);
             }
             let dest = if let Some(ref out) = fork_args.out {
@@ -105,4 +114,3 @@ pub fn run_updater(
     }
     Ok(())
 }
-

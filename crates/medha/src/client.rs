@@ -44,9 +44,7 @@ fn current_timestamp_ms() -> i64 {
 fn normalize_signal_name(signal: &str) -> String {
     let clean = signal.trim().to_uppercase().replace(['-', ' '], "_");
     match clean.as_str() {
-        "RULE_APPLIED" | "HINT_ACCEPTED" | "APPLIED" | "ACCEPT" | "ACCEPTED" => {
-            "APPLY".to_string()
-        }
+        "RULE_APPLIED" | "HINT_ACCEPTED" | "APPLIED" | "ACCEPT" | "ACCEPTED" => "APPLY".to_string(),
         "RULE_REJECTED" | "HINT_REJECTED" | "REJECTED" | "REJECT" => "REJECT_RULE".to_string(),
         "REJECT_CONTEXT" => "REJECT_CONTEXT".to_string(),
         "SKIP" | "SKIPPED" => "SKIP".to_string(),
@@ -95,12 +93,11 @@ impl MedhaClient<SqliteStore> {
 
     /// Discover `.medha/config.json` starting at `start_dir` and walking upwards, opening the configured store.
     pub fn discover(start_dir: impl AsRef<Path>) -> Result<Self, MedhaError> {
-        let home = MedhaConfig::find_home(start_dir).ok_or_else(|| {
-            MedhaError::InvalidArgument {
+        let home =
+            MedhaConfig::find_home(start_dir).ok_or_else(|| MedhaError::InvalidArgument {
                 name: "start_dir",
                 reason: "No Medha store found at or above path".to_string(),
-            }
-        })?;
+            })?;
         let config_file = home.join("config.json");
         let config = MedhaConfig::load_from_file(&config_file)?;
         let db_file = config.path.unwrap_or_else(|| "store.sqlite".to_string());
@@ -469,11 +466,7 @@ impl<'a, S: StorePort> AgentSession<'a, S> {
     }
 
     /// Record positive feedback under this agent's identity.
-    pub fn accept(
-        &mut self,
-        key: &EntityKey,
-        note: Option<&str>,
-    ) -> Result<TrustHint, MedhaError> {
+    pub fn accept(&mut self, key: &EntityKey, note: Option<&str>) -> Result<TrustHint, MedhaError> {
         let now = self.client.now();
         let input = RecordInput {
             key: key.clone(),
@@ -491,11 +484,7 @@ impl<'a, S: StorePort> AgentSession<'a, S> {
     }
 
     /// Record rejection feedback under this agent's identity.
-    pub fn reject(
-        &mut self,
-        key: &EntityKey,
-        note: Option<&str>,
-    ) -> Result<TrustHint, MedhaError> {
+    pub fn reject(&mut self, key: &EntityKey, note: Option<&str>) -> Result<TrustHint, MedhaError> {
         let now = self.client.now();
         let input = RecordInput {
             key: key.clone(),

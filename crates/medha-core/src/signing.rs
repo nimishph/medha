@@ -85,8 +85,14 @@ pub struct SigningPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerifyOutcome {
     Unsigned,
-    Verified { key_id: String, principal: String },
-    Invalid { key_id: Option<String>, reason: String },
+    Verified {
+        key_id: String,
+        principal: String,
+    },
+    Invalid {
+        key_id: Option<String>,
+        reason: String,
+    },
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -325,10 +331,7 @@ pub fn verify_episode_value(episode: &serde_json::Value, keyring: &Keyring) -> V
 
     if let Some(allowed_namespaces) = &record.namespaces {
         if !allowed_namespaces.iter().any(|ns| ns == ep_ns) {
-            return invalid(&format!(
-                "namespace '{}' is outside the key's scope",
-                ep_ns
-            ));
+            return invalid(&format!("namespace '{}' is outside the key's scope", ep_ns));
         }
     }
 
@@ -350,7 +353,10 @@ pub fn verify_episode_value(episode: &serde_json::Value, keyring: &Keyring) -> V
     }
 
     if ep_type == "retract" {
-        let has_target_id = episode.get("targetId").or_else(|| episode.get("target_id")).is_some();
+        let has_target_id = episode
+            .get("targetId")
+            .or_else(|| episode.get("target_id"))
+            .is_some();
         if !has_target_id {
             return invalid("a signed retract must carry targetId");
         }
@@ -368,13 +374,13 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
         reason: "an object {version: 1, keys: [...]}".to_string(),
     })?;
 
-    let version = doc
-        .get("version")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| CoreError::InvalidArgument {
-            name: "keyring.version",
-            reason: "1".to_string(),
-        })?;
+    let version =
+        doc.get("version")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| CoreError::InvalidArgument {
+                name: "keyring.version",
+                reason: "1".to_string(),
+            })?;
     if version != 1 {
         return Err(CoreError::InvalidArgument {
             name: "keyring.version",
@@ -382,23 +388,25 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
         });
     }
 
-    let keys_arr = doc
-        .get("keys")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| CoreError::InvalidArgument {
-            name: "keyring.keys",
-            reason: "an array".to_string(),
-        })?;
+    let keys_arr =
+        doc.get("keys")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| CoreError::InvalidArgument {
+                name: "keyring.keys",
+                reason: "an array".to_string(),
+            })?;
 
     let mut seen = HashSet::new();
     let mut records = Vec::with_capacity(keys_arr.len());
 
     for (idx, entry) in keys_arr.iter().enumerate() {
         let at = format!("keyring.keys[{}]", idx);
-        let obj = entry.as_object().ok_or_else(|| CoreError::InvalidArgument {
-            name: "keyring.keys",
-            reason: format!("{}: a key record", at),
-        })?;
+        let obj = entry
+            .as_object()
+            .ok_or_else(|| CoreError::InvalidArgument {
+                name: "keyring.keys",
+                reason: format!("{}: a key record", at),
+            })?;
 
         let public_key = obj
             .get("publicKey")
@@ -409,13 +417,12 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
             })?;
 
         let derived = key_id_for(public_key)?;
-        let key_id = obj
-            .get("keyId")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| CoreError::InvalidArgument {
+        let key_id = obj.get("keyId").and_then(|v| v.as_str()).ok_or_else(|| {
+            CoreError::InvalidArgument {
                 name: "keyring.keys.keyId",
                 reason: format!("{}.keyId: string", at),
-            })?;
+            }
+        })?;
         if key_id != derived {
             return Err(CoreError::InvalidArgument {
                 name: "keyring.keys.keyId",
@@ -443,13 +450,12 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
             });
         }
 
-        let roles_arr = obj
-            .get("roles")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| CoreError::InvalidArgument {
+        let roles_arr = obj.get("roles").and_then(|v| v.as_array()).ok_or_else(|| {
+            CoreError::InvalidArgument {
                 name: "keyring.keys.roles",
                 reason: format!("{}.roles: array", at),
-            })?;
+            }
+        })?;
         if roles_arr.is_empty() {
             return Err(CoreError::InvalidArgument {
                 name: "keyring.keys.roles",
@@ -474,10 +480,12 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
         }
 
         let namespaces = if let Some(ns_val) = obj.get("namespaces") {
-            let ns_arr = ns_val.as_array().ok_or_else(|| CoreError::InvalidArgument {
-                name: "keyring.keys.namespaces",
-                reason: "array of strings".to_string(),
-            })?;
+            let ns_arr = ns_val
+                .as_array()
+                .ok_or_else(|| CoreError::InvalidArgument {
+                    name: "keyring.keys.namespaces",
+                    reason: "array of strings".to_string(),
+                })?;
             let mut list = Vec::new();
             for s in ns_arr {
                 list.push(s.as_str().unwrap_or("").to_string());
@@ -494,17 +502,18 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
             if rev_val.is_null() {
                 None
             } else {
-                let rev_obj = rev_val.as_object().ok_or_else(|| CoreError::InvalidArgument {
-                    name: "keyring.keys.revoked",
-                    reason: "object".to_string(),
-                })?;
-                let at = rev_obj
-                    .get("at")
-                    .and_then(|v| v.as_i64())
+                let rev_obj = rev_val
+                    .as_object()
                     .ok_or_else(|| CoreError::InvalidArgument {
+                        name: "keyring.keys.revoked",
+                        reason: "object".to_string(),
+                    })?;
+                let at = rev_obj.get("at").and_then(|v| v.as_i64()).ok_or_else(|| {
+                    CoreError::InvalidArgument {
                         name: "keyring.keys.revoked.at",
                         reason: "epoch-ms number".to_string(),
-                    })?;
+                    }
+                })?;
                 let reason = rev_obj
                     .get("reason")
                     .and_then(|v| v.as_str())
@@ -525,7 +534,10 @@ pub fn validate_keyring(raw: &serde_json::Value) -> Result<Keyring, CoreError> {
             .get("supersedes")
             .and_then(|v| v.as_str())
             .map(String::from);
-        let comment = obj.get("comment").and_then(|v| v.as_str()).map(String::from);
+        let comment = obj
+            .get("comment")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         records.push(KeyRecord {
             key_id: derived,
@@ -617,4 +629,3 @@ pub fn verify_snapshot_signature(
         principal: record.principal.clone(),
     }
 }
-
