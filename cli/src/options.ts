@@ -561,3 +561,24 @@ export const primerCommandArgs: ArgsDef = {
     default: false,
   },
 };
+
+export const policyCommandArgs: ArgsDef = {
+  ...readCommonArgs,
+  ...readKeyArgs,
+  context: {
+    type: 'string',
+    description: 'Context environment string, condition query, or JSON attributes map.',
+  },
+  author: {
+    type: 'string',
+    description: 'Author proposing the mutation (e.g. agent:worker, human:alice).',
+  },
+  action: {
+    type: 'string',
+    description: 'Specific mutation or action name proposed.',
+  },
+  'min-trust': {
+    type: 'string',
+    description: 'Minimum trust threshold required to allow execution.',
+  },
+};

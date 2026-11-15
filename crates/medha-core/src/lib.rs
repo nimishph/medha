@@ -5,6 +5,7 @@ pub mod fold;
 pub mod formula;
 pub mod guard;
 pub mod packer;
+pub mod policy_latch;
 pub mod recency;
 pub mod round;
 pub mod signing;
@@ -26,6 +27,10 @@ pub use guard::{guard_factor, is_guarded};
 pub use packer::{
     pack_entities, Mulberry32, PackCandidate, PackOutcome, PackPolicy, PackedEntity,
     DEFAULT_EXPLORATION_RATIO,
+};
+pub use policy_latch::{
+    evaluate_policy_latch, match_condition, PolicyLatchEntityState, PolicyLatchInput,
+    PolicyLatchOutcome, PolicyLatchReason, PolicyLatchRecommendation,
 };
 pub use recency::recency_factor;
 pub use round::round6;

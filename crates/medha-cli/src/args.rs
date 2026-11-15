@@ -118,6 +118,9 @@ pub enum Commands {
 
     #[command(about = "Episode signing: keys, keyring, rotation, revocation and signing mode")]
     Keys(KeysArgs),
+
+    #[command(about = "Evaluate regulated policy compliance, decision trees, and requireHumanFor gating")]
+    Policy(PolicyArgs),
 }
 
 #[derive(Args, Debug, Default)]
@@ -878,4 +881,35 @@ pub struct KeysModeArgs {
 pub struct KeysAdoptArgs {
     #[arg(long, help = "Emit report as JSON")]
     pub json: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PolicyArgs {
+    /// Entity ID
+    #[arg(long, help = "Entity ID")]
+    pub id: String,
+
+    /// Entity namespace
+    #[arg(long, default_value = "", help = "Entity namespace")]
+    pub namespace: String,
+
+    /// Entity kind
+    #[arg(long, default_value = "rule", help = "Entity kind")]
+    pub kind: String,
+
+    /// Context environment string, condition query, or JSON attributes map
+    #[arg(long, help = "Context string or JSON map")]
+    pub context: Option<String>,
+
+    /// Author proposing the mutation (e.g. agent:worker, human:alice)
+    #[arg(long, help = "Author proposing the mutation")]
+    pub author: Option<String>,
+
+    /// Specific mutation or action name proposed
+    #[arg(long, help = "Action name or proposed mutation")]
+    pub action: Option<String>,
+
+    /// Minimum trust threshold required to allow execution
+    #[arg(long, help = "Minimum trust threshold required")]
+    pub min_trust: Option<f64>,
 }

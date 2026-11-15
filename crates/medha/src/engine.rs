@@ -495,6 +495,72 @@ impl<S: StorePort> MedhaEngine<S> {
         })
     }
 
+    /// PolicyLatch (medha-534):
+    /// Regulated agent compliance & human gatekeeper via decision trees and requireHumanFor.
+    pub fn policy_latch(
+        &self,
+        input: &medha_core::policy_latch::PolicyLatchInput,
+        now: i64,
+    ) -> Result<medha_core::policy_latch::PolicyLatchOutcome, MedhaError> {
+        let state_opt = self.store.get(&input.key)?;
+        let latch = self.latch_of(&input.key)?;
+        let is_latched = latch.is_some();
+
+        let kind_spec = self
+            .store
+            .registries()
+            .kind_specs
+            .iter()
+            .find(|k| k.name == input.key.kind);
+
+        let (state_summary, decision_tree) = if let Some(ref s) = state_opt {
+            let summary = medha_core::policy_latch::PolicyLatchEntityState::new(
+                s.status,
+                s.evidence.clone(),
+            );
+            (Some(summary), s.decision_tree.clone())
+        } else {
+            let key_str = input.key.to_string_repr();
+            let all_eps = self.store.episodes(None, None)?;
+            let key_eps: Vec<Episode> = all_eps
+                .into_iter()
+                .filter(|e| e.key.to_string_repr() == key_str)
+                .collect();
+            if !key_eps.is_empty() {
+                let mut temp_state: Option<EntityState> = None;
+                for ep in &key_eps {
+                    temp_state = medha_store::folding::fold_episode_with_registries(
+                        temp_state,
+                        ep,
+                        Some(self.store.registries()),
+                    );
+                }
+                let dt = temp_state
+                    .as_ref()
+                    .map(|s| s.decision_tree.clone())
+                    .unwrap_or_default();
+                let summary = medha_core::policy_latch::PolicyLatchEntityState::new(
+                    LifecycleStatus::Probation,
+                    medha_core::types::Evidence::default(),
+                );
+                (Some(summary), dt)
+            } else {
+                (None, Vec::new())
+            }
+        };
+
+        let outcome = medha_core::policy_latch::evaluate_policy_latch(
+            state_summary.as_ref(),
+            &decision_tree,
+            kind_spec,
+            input,
+            now,
+            is_latched,
+        )?;
+
+        Ok(outcome)
+    }
+
     /// Replays the key's episodes the way the projection does (retractions masked) and reports
     /// the latch still in force, if any. A guard-failure or drift quarantine is not one: it lifts
     /// by itself when the cause clears.

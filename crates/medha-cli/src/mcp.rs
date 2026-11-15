@@ -341,6 +341,24 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                             },
                             "required": ["id", "title"]
                         }
+                    },
+                    {
+                        "name": "policy_latch",
+                        "description": "Regulated agent compliance policy gateway: checks Medha decision trees and requireHumanFor gating before high-risk mutations execute (medha-534).",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string" },
+                                "kind": { "type": "string" },
+                                "namespace": { "type": "string" },
+                                "context": {},
+                                "author": { "type": "string" },
+                                "action": { "type": "string" },
+                                "minTrust": { "type": "number" },
+                                "compact": { "type": "boolean" }
+                            },
+                            "required": ["id"]
+                        }
                     }
                 ]
             }
@@ -830,6 +848,47 @@ fn run_tool<S: StorePort>(
             match crate::primer::get_primer(topic) {
                 Ok(res) => Ok(json!(res)),
                 Err(e) => Err(e),
+            }
+        }
+        "policy_latch" => {
+            let id = match args.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id,
+                None => return Err("Missing required argument: id".to_string()),
+            };
+            let kind = args.get("kind").and_then(|v| v.as_str()).unwrap_or("rule");
+            let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("");
+            let author = args.get("author").and_then(|v| v.as_str()).map(str::to_string);
+            let action = args.get("action").and_then(|v| v.as_str()).map(str::to_string);
+            let min_trust = args.get("minTrust").and_then(|v| v.as_f64());
+            let context = args.get("context").cloned();
+            let is_compact = args.get("compact").and_then(|v| v.as_bool()).unwrap_or(false);
+
+            let input = medha::core::policy_latch::PolicyLatchInput {
+                key: EntityKey::new(namespace, kind, id),
+                context,
+                author,
+                action,
+                min_trust,
+            };
+
+            match engine.policy_latch(&input, now) {
+                Ok(outcome) => {
+                    if is_compact {
+                        Ok(json!({
+                            "allowed": outcome.allowed,
+                            "latched": outcome.latched,
+                            "requiresHuman": outcome.requires_human,
+                            "recommendation": outcome.recommendation,
+                            "reason": outcome.reason,
+                            "trust": outcome.trust,
+                            "status": outcome.status,
+                            "explanation": outcome.explanation,
+                        }))
+                    } else {
+                        Ok(json!(outcome))
+                    }
+                }
+                Err(e) => Err(e.to_string()),
             }
         }
         other => Err(format!("Unknown tool: {}", other)),

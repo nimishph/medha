@@ -6,6 +6,7 @@ mod mcp;
 mod mcp_config;
 mod pack;
 mod params;
+mod policy;
 mod primer;
 mod render;
 mod updater;
@@ -931,6 +932,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Keys(keys_args) => {
             keys::run_keys(keys_args, &mut engine, &home_dir, cli.json)?;
+        }
+        Commands::Policy(policy_args) => {
+            policy::run_policy(policy_args, &engine, now, cli.json)?;
         }
         Commands::Define(args) => {
             let key = EntityKey::new(&args.namespace, &args.kind, &args.id);

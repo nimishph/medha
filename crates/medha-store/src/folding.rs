@@ -407,7 +407,7 @@ pub fn fold_episode_with_registries(
             condition,
             decision,
         } => {
-            let mut state = current?;
+            let mut state = current.unwrap_or_else(|| fresh_state(episode.key.clone()));
             if let Some(branch) = state.decision_tree.iter_mut().find(|c| &c.id == case_id) {
                 branch.condition = condition.clone();
                 branch.decision = decision.clone();

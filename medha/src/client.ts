@@ -21,6 +21,8 @@ import {
   type KindSpec,
   type PackOutcome,
   type Pitfall,
+  type PolicyLatchInput,
+  type PolicyLatchOutcome,
   type PromotionPolicy,
   type Proposal,
   round6,
@@ -799,6 +801,20 @@ export class MedhaClient {
   }
 
   /**
+   * PolicyLatch (medha-534):
+   * Regulated agent compliance & human gatekeeper via decision trees and requireHumanFor.
+   */
+  async policyLatch(
+    input: Omit<PolicyLatchInput, 'key'> & { readonly key: EntityKey | string },
+    options: { readonly now?: number | undefined } = {},
+  ): Promise<PolicyLatchOutcome> {
+    const key = typeof input.key === 'string' ? this.parseKey(input.key) : input.key;
+    const ctx =
+      options.now !== undefined ? { ...this.context(), now: options.now } : this.context();
+    return this.engine.policyLatch({ ...input, key }, ctx);
+  }
+
+  /**
    * Aggregate overall store status, health, and distribution.
    */
   async status(): Promise<ClientStatusReport> {
@@ -968,5 +984,18 @@ export class AgentSession {
     trajectory: TrajectoryEvidence,
   ): Promise<{ readonly proposals: readonly Proposal[]; readonly filedCount: number }> {
     return this.client.distill(trajectory, { autoFile: true });
+  }
+
+  /** Check regulated policy compliance and human gatekeeper rules under this agent's identity. */
+  async policyLatch(
+    input: Omit<PolicyLatchInput, 'key' | 'author'> & {
+      readonly key: EntityKey | string;
+      readonly author?: string | undefined;
+    },
+  ): Promise<PolicyLatchOutcome> {
+    return this.client.policyLatch({
+      ...input,
+      author: input.author ?? `agent:${this.agentId}`,
+    });
   }
 }

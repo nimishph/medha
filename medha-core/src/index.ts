@@ -19,6 +19,7 @@ export * from './limits.ts';
 export * from './migrations.ts';
 export * from './miner-port.ts';
 export * from './packer.ts';
+export * from './policy-latch.ts';
 export * from './recency.ts';
 export * from './rng.ts';
 export * from './rounding.ts';

@@ -29,6 +29,7 @@ import {
   mcpConfigArgs,
   packCommandArgs,
   paramsCommandArgs,
+  policyCommandArgs,
   primerCommandArgs,
   proposeCommandArgs,
   recordCommandArgs,
@@ -329,6 +330,34 @@ export const packCommand = defineCommand({
     environment.stdout(
       args.json === true || report.format === 'json' ? toJson(report) : renderPack(report),
     );
+  },
+});
+
+export const policyCommand = defineCommand({
+  meta: {
+    name: 'policy',
+    description:
+      'Evaluate regulated policy compliance, decision trees, and requireHumanFor gating (medha-534).',
+  },
+  args: policyCommandArgs,
+  async run({ args }) {
+    const environment = currentEnvironment();
+    const { runPolicy, renderPolicy } = await import('./policy.ts');
+    const outcome = await runPolicy(
+      {
+        ...(args.dir === undefined ? {} : { dir: args.dir }),
+        ...(args.home === undefined ? {} : { home: args.home }),
+        ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        id: args.id ?? '',
+        ...(args.context === undefined ? {} : { context: args.context }),
+        ...(args.author === undefined ? {} : { author: args.author }),
+        ...(args.action === undefined ? {} : { action: args.action }),
+        ...(args['min-trust'] === undefined ? {} : { minTrust: args['min-trust'] }),
+      },
+      environment,
+    );
+    environment.stdout(args.json === true ? toJson(outcome) : renderPolicy(outcome));
   },
 });
 
@@ -1102,6 +1131,7 @@ export const commands = defineCommand({
     'remove-episode': removeEpisodeCommand,
     'explain-threshold': explainThresholdCommand,
     pack: packCommand,
+    policy: policyCommand,
     primer: primerCommand,
     ui: uiCommand,
     report: reportCommand,

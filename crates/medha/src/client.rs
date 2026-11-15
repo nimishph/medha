@@ -196,6 +196,15 @@ impl<S: StorePort> MedhaClient<S> {
         self.engine.show(key, self.now())
     }
 
+    /// PolicyLatch (medha-534):
+    /// Evaluate regulated policy compliance, decision trees, and requireHumanFor gating.
+    pub fn policy_latch(
+        &self,
+        input: &medha_core::policy_latch::PolicyLatchInput,
+    ) -> Result<medha_core::policy_latch::PolicyLatchOutcome, MedhaError> {
+        self.engine.policy_latch(input, self.now())
+    }
+
     /// List all entity states in the store.
     pub fn list(&self) -> Result<Vec<EntityState>, MedhaError> {
         self.engine.list()
@@ -569,6 +578,19 @@ impl<'a, S: StorePort> AgentSession<'a, S> {
     /// Retrieve evidential context formatted as a markdown prompt section.
     pub fn pack_prompt(&self, budget: usize) -> Result<String, MedhaError> {
         self.client.pack_prompt(budget)
+    }
+
+    /// PolicyLatch (medha-534):
+    /// Check regulated policy compliance and human gatekeeper rules under this agent session.
+    pub fn policy_latch(
+        &self,
+        input: &medha_core::policy_latch::PolicyLatchInput,
+    ) -> Result<medha_core::policy_latch::PolicyLatchOutcome, MedhaError> {
+        let mut session_input = input.clone();
+        if session_input.author.is_none() {
+            session_input.author = Some(format!("agent:{}", self.agent_id));
+        }
+        self.client.policy_latch(&session_input)
     }
 }
 
