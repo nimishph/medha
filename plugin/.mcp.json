@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@cntxt-labs/medha-cli@0.8.0-alpha.0",
+        "@cntxt-labs/medha-cli@0.8.0-alpha.1",
         "mcp",
         "serve"
       ]
