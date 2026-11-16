@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { programMode, TYPEFLAG, ustarHeader } from './npm-tarball.ts';
-import { MAIN_PACKAGE, PLATFORMS, platformPackage } from './platforms.ts';
+import { MAIN_PACKAGE, PLATFORMS, platformPackage, SDK_PACKAGE } from './platforms.ts';
 
 const root = resolve(import.meta.dir, '..');
 const manifest = (folder: string) =>
@@ -49,7 +49,7 @@ class ModuleNotFound extends Error {
 describe('what is published', () => {
   const cli = manifest('cli');
 
-  test('only the command is public, under the owner named as author, and it is MIT', () => {
+  test('only the command and SDK are public, under the owner named as author, and they are MIT', () => {
     expect(cli.name).toBe(MAIN_PACKAGE);
     expect(cli.private).toBeUndefined();
     expect(cli.publishConfig?.access).toBe('public');
@@ -60,8 +60,18 @@ describe('what is published', () => {
     // Everything else is built into the program, so installing it pulls in nothing.
     expect(cli.dependencies).toBeUndefined();
 
+    const sdk = manifest('medha');
+    expect(sdk.name).toBe(SDK_PACKAGE);
+    expect(sdk.private).toBeUndefined();
+    expect(sdk.publishConfig?.access).toBe('public');
+    expect(sdk.license).toBe('MIT');
+    expect(sdk.author?.name).toBe('nimishph');
+    expect(sdk.files).toEqual(['dist', 'README.md', 'LICENSE']);
+    // All dependencies are bundled into dist, so external installs pull nothing.
+    expect(sdk.dependencies).toBeUndefined();
+
     for (const folder of readdirSync(root, { withFileTypes: true })) {
-      if (!folder.isDirectory() || folder.name === 'cli') continue;
+      if (!folder.isDirectory() || folder.name === 'cli' || folder.name === 'medha') continue;
       try {
         expect(manifest(folder.name).private).toBe(true);
       } catch (failure) {

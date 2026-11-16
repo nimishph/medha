@@ -1,17 +1,54 @@
 {
   "name": "@cntxt-labs/medha",
   "version": "0.8.0-alpha.0",
-  "private": true,
-  "type": "module",
   "description": "Evidential-memory engine facade: planes, sweep, exploration helper, CLI and MCP.",
-  "exports": {
-    ".": "./src/index.ts",
-    "./client": "./src/client.ts"
+  "keywords": [
+    "agent-memory",
+    "trust",
+    "evidence",
+    "ai-agents",
+    "sdk"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "nimishph",
+    "url": "https://github.com/nimishph"
   },
-  "dependencies": {
+  "homepage": "https://github.com/nimishph/medha#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nimishph/medha.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nimishph/medha/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "default": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
     "@cntxt-labs/medha-core": "workspace:*",
     "@cntxt-labs/medha-store": "workspace:*",
     "@cntxt-labs/medha-sync": "workspace:*"
-  },
-  "license": "MIT"
+  }
 }
