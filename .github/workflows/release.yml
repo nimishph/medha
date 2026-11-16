@@ -52,6 +52,13 @@ jobs:
           name: npm-${{ matrix.platform }}
           path: dist/npm/
           if-no-files-found: error
+      - name: Upload SDK distributables
+        if: matrix.platform == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: medha-sdk-dist
+          path: medha/dist/
+          if-no-files-found: error
 
   release:
     name: Publish & Release
@@ -71,6 +78,11 @@ jobs:
           version="$(node -p "require('./cli/package.json').version")"
           if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match cli/package.json version ${version}" >&2
+            exit 1
+          fi
+          sdk_version="$(node -p "require('./medha/package.json').version")"
+          if [ "${version}" != "${sdk_version}" ]; then
+            echo "cli version ${version} does not match medha version ${sdk_version}" >&2
             exit 1
           fi
 
@@ -93,6 +105,11 @@ jobs:
           pattern: medha-*
           path: archives
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: medha-sdk-dist
+          path: medha/dist
 
       # `actions/upload-artifact` stores files in a zip and does NOT carry POSIX permission bits
       # across the job boundary, so every program in `staged/` arrives 0644 no matter what the build
@@ -146,6 +163,8 @@ jobs:
             fi
           }
           for folder in staged/*/; do stage "${folder%/}"; done
+          cp README.md LICENSE medha/
+          stage ./medha
           cp README.md LICENSE SKILL.md cli/
           stage ./cli
 
@@ -155,6 +174,7 @@ jobs:
         run: |
           echo "::notice::Each package above is staged, not live yet. Run 'npm stage approve <id>' (with your own 2FA) for each, or 'npm stage list' to see them again later."
           npm stage list "@cntxt-labs/medha-cli" || true
+          npm stage list "@cntxt-labs/medha" || true
           npm stage list "@cntxt-labs/medha-linux-x64" || true
           npm stage list "@cntxt-labs/medha-linux-arm64" || true
           npm stage list "@cntxt-labs/medha-darwin-arm64" || true

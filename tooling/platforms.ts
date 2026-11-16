@@ -22,6 +22,8 @@ export const PLATFORMS: readonly Platform[] = [
 export const SCOPE = '@cntxt-labs';
 /** The package a user installs; it holds only the launcher and depends on one platform package. */
 export const MAIN_PACKAGE = `${SCOPE}/medha-cli`;
+/** The standalone TypeScript SDK package. */
+export const SDK_PACKAGE = `${SCOPE}/medha`;
 /** The prefix of the per-platform packages, which is the command's name and not the main package's. */
 const PLATFORM_PREFIX = `${SCOPE}/medha`;
 
