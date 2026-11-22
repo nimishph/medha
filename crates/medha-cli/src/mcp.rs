@@ -15,7 +15,46 @@ struct JsonRpcRequest {
     pub params: Option<Value>,
 }
 
-pub fn run_mcp_server<S: StorePort>(mut engine: MedhaEngine<S>) -> io::Result<()> {
+/// The tools the TypeScript MCP server lists, in its order (`cli/src/mcp.ts`). `tools/list`
+/// advertises exactly these.
+const TS_TOOL_ORDER: [&str; 19] = [
+    "hints",
+    "list_entities",
+    "show_entity",
+    "record_signal",
+    "report_guard",
+    "record_decision",
+    "propose",
+    "drift",
+    "simulate",
+    "status",
+    "retract_episode",
+    "remove_episode",
+    "pack_context",
+    "hints_for_context",
+    "verify_guard",
+    "detect_pitfalls",
+    "distill_trajectory",
+    "policy_latch",
+    "primer",
+];
+
+fn ts_tool_list(mut resp: Value) -> Value {
+    if let Some(tools) = resp["result"]["tools"].as_array() {
+        let ordered: Vec<Value> = TS_TOOL_ORDER
+            .iter()
+            .filter_map(|name| tools.iter().find(|t| t["name"] == *name).cloned())
+            .collect();
+        resp["result"]["tools"] = Value::Array(ordered);
+    }
+    resp
+}
+
+pub fn run_mcp_server<S: StorePort>(
+    mut engine: MedhaEngine<S>,
+    home: &std::path::Path,
+) -> io::Result<()> {
+    eprintln!("medha mcp: serving {}", home.display());
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -61,7 +100,7 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
             }
         })),
         "notifications/initialized" => None,
-        "tools/list" => Some(json!({
+        "tools/list" => Some(ts_tool_list(json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {
@@ -359,7 +398,7 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                     }
                 ]
             }
-        })),
+        }))),
         "tools/call" => {
             let params = req.params.unwrap_or(json!({}));
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");

@@ -482,7 +482,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     // 18. mcp server over stdio (all 14 tools check)
     // ==========================================
     let mut mcp_child = Command::new(&bin)
-        .args(["--home", home, "mcp"])
+        .args(["--home", home, "mcp", "serve"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -522,13 +522,16 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         let tools = tools_resp["result"]["tools"]
             .as_array()
             .expect("tools array");
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 19);
 
         let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(tool_names.contains(&"hints"));
         assert!(tool_names.contains(&"list_entities"));
         assert!(tool_names.contains(&"show_entity"));
-        assert!(tool_names.contains(&"explain_threshold"));
+        assert!(
+            !tool_names.contains(&"explain_threshold"),
+            "not a TypeScript MCP tool"
+        );
         assert!(tool_names.contains(&"record_signal"));
         assert!(tool_names.contains(&"report_guard"));
         assert!(tool_names.contains(&"record_decision"));

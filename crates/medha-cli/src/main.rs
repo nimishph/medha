@@ -261,6 +261,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
             return Ok(());
         }
+        // A bare `medha mcp` is usage, as in the TypeScript CLI: the server is `medha mcp serve`.
+        Commands::Mcp(McpArgs { subcommand: None }) => {
+            return Err(Box::new(
+                failure::Failure::usage("No command specified.")
+                    .with_hint("medha help mcp lists the subcommands."),
+            ));
+        }
+        // `mcp config` renders or writes a client's config file; it needs no engine home.
+        Commands::Mcp(McpArgs {
+            subcommand: Some(McpSubcommand::Config(config_args)),
+        }) => {
+            mcp_config::run_mcp_config(config_args, cli.json, cli.dir.as_deref())?;
+            return Ok(());
+        }
         Commands::Issue(issue_args) => {
             let maybe_home = resolve_home(cli.dir.as_deref(), cli.home.as_deref()).ok();
             let store_stats = if let Some(ref h) = maybe_home {
@@ -748,14 +762,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 print!("{}", pack::render_pack(&report));
             }
         }
-        Commands::Mcp(mcp_args) => match mcp_args.subcommand {
-            Some(McpSubcommand::Config(ref config_args)) => {
-                mcp_config::run_mcp_config(config_args, cli.json)?;
-            }
-            _ => {
-                mcp::run_mcp_server(engine)?;
-            }
-        },
+        Commands::Mcp(_) => {
+            mcp::run_mcp_server(engine, &home_dir)?;
+        }
         Commands::Keys(keys_args) => {
             keys::run_keys(keys_args, &mut engine, &home_dir, cli.json)?;
         }
