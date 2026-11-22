@@ -15,6 +15,8 @@ pub enum BackendKind {
     #[default]
     Sqlite,
     Memory,
+    /// One JSON document (`state.jsonl`): the TypeScript `FilePolicyStore` layout.
+    File,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

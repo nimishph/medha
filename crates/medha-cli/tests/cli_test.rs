@@ -92,7 +92,7 @@ fn test_cli_lifecycle_and_pack() {
 
     // 1. Init
     let init_out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args(["--home", home, "--dir", home, "init"])
         .output()
         .expect("init");
     assert!(init_out.status.success());
@@ -157,7 +157,7 @@ fn test_cli_show_reports_the_retirement_latch() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -197,7 +197,7 @@ fn test_cli_reinstate_and_checked_retract() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -256,7 +256,7 @@ fn test_cli_ids_filter_on_list_and_pack() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -301,7 +301,7 @@ fn test_cli_reads_fail_on_a_log_that_fails_integrity() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -351,7 +351,7 @@ fn test_cli_guard_without_kind_is_refused_until_the_entity_has_a_guard() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -433,7 +433,7 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
     let home = dir.path().to_str().unwrap();
 
     let out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args(["--home", home, "--dir", home, "init"])
         .output()
         .expect("init");
     assert!(out.status.success());

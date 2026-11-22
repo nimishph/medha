@@ -16,8 +16,22 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     // ==========================================
     // 1. init (both sqlite and memory)
     // ==========================================
+    // FLAKY and ADOPTED are not built-in signals (the canonical four are APPLY, SKIP,
+    // REJECT_CONTEXT and REJECT_RULE, as in the TypeScript engine): register them as custom ones.
+    let config_path = dir.path().join("registries.json");
+    std::fs::write(
+        &config_path,
+        r#"{"signalSpecs": [
+            {"name": "FLAKY", "value": -0.5, "countsAsTrial": true, "countsAsSuccess": false},
+            {"name": "ADOPTED", "value": 0.6, "countsAsTrial": true, "countsAsSuccess": true}
+        ]}"#,
+    )
+    .expect("write registries");
+    let config_arg = config_path.to_str().expect("config path");
     let init_out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args([
+            "--home", home, "--dir", home, "init", "--config", config_arg,
+        ])
         .output()
         .expect("init");
     assert!(init_out.status.success());
@@ -26,12 +40,12 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
 
     // Verify re-init idempotency
     let reinit_out = Command::new(&bin)
-        .args(["--home", home, "init", "--json"])
+        .args(["--home", home, "--dir", home, "init", "--json"])
         .output()
         .expect("reinit");
     assert!(reinit_out.status.success());
     let reinit_json: Value = serde_json::from_slice(&reinit_out.stdout).expect("parse json");
-    assert_eq!(reinit_json["status"], "exists");
+    assert_eq!(reinit_json["status"], "existing");
 
     // ==========================================
     // 2. propose multiple kinds & namespaces

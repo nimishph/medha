@@ -191,6 +191,13 @@ fn from_store(err: &StoreError) -> Failure {
         )
         .with_context(json!({ "source": store_path, "atSeq": at_seq }))
         .with_hint("restore a MedhaSnapshot, or wipe and re-initialize with --recreate"),
+        StoreError::NamespaceViolation { action, namespace, allowed } => Failure::new(
+            "NamespaceViolationError",
+            "STORE_NAMESPACE_VIOLATION",
+            "store",
+            err.to_string(),
+        )
+        .with_context(json!({ "action": action, "namespace": namespace, "allowed": allowed })),
         StoreError::StoreLayout { found, supported } => Failure::new(
             "StoreLayoutError",
             "STORE_LAYOUT_UNSUPPORTED",

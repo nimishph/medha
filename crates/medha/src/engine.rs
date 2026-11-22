@@ -348,6 +348,20 @@ impl<S: StorePort> MedhaEngine<S> {
         }
     }
 
+    /// Open any store and build an engine on it, keeping how it opened: a log that opened corrupt
+    /// refuses evidence reads (gh-18), as with `open_sqlite`.
+    pub fn open_with(mut store: S, config: MedhaConfig) -> Result<Self, MedhaError> {
+        let opened = store.open()?;
+        Ok(Self {
+            store,
+            sync: Box::new(NoopSyncAdapter),
+            config,
+            signals: medha_core::canonical_signals(),
+            kinds: builtin_kinds(),
+            opened,
+        })
+    }
+
     pub fn new(store: S, sync: Box<dyn SyncPort>, config: MedhaConfig) -> Self {
         let signals = medha_core::canonical_signals();
         let opened = OpenResult::Ok;

@@ -26,6 +26,15 @@ pub enum StoreError {
 
     #[error("Core error: {0}")]
     Core(#[from] medha_core::types::CoreError),
+
+    /// A read or write outside a namespace-scoped store's namespaces (TypeScript
+    /// `NamespaceViolationError`, `STORE_NAMESPACE_VIOLATION`).
+    #[error("Namespace '{namespace}' is outside this store's scope ({}); cannot {action}", allowed.iter().map(|n| format!("'{n}'")).collect::<Vec<_>>().join(", "))]
+    NamespaceViolation {
+        action: String,
+        namespace: String,
+        allowed: Vec<String>,
+    },
 }
 
 impl From<rusqlite::Error> for StoreError {

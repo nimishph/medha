@@ -5,6 +5,8 @@
 mod args;
 mod failure;
 mod help;
+mod home_store;
+mod init;
 mod issue;
 mod keys;
 mod mcp;
@@ -21,14 +23,14 @@ mod write;
 
 use args::*;
 use clap::{CommandFactory, FromArgMatches};
-use medha::config::{BackendKind, MedhaConfig, CONFIG_FILE, MEDHA_HOME_DIR, SQLITE_FILE};
+use medha::config::{MedhaConfig, CONFIG_FILE, MEDHA_HOME_DIR, SQLITE_FILE};
 use medha::core::types::EntityKey;
-use medha::store::{StorePort, StoreRegistries};
+use medha::store::StorePort;
 use medha::{MedhaEngine, SweepOptions};
 use render::*;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::exit;
 
 fn uuid_or_random_hex() -> String {
@@ -37,96 +39,6 @@ fn uuid_or_random_hex() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("{:x}", t)
-}
-
-fn parse_registries_json(content: &str) -> Result<StoreRegistries, String> {
-    let raw: serde_json::Value = serde_json::from_str(content).map_err(|e| e.to_string())?;
-    let target = raw.get("registries").unwrap_or(&raw);
-    let mut regs = StoreRegistries::default();
-    if let Some(kinds) = target.get("kinds").and_then(|v| v.as_array()) {
-        for k in kinds {
-            if let Some(ks) = k.as_str() {
-                if !regs.kinds.contains(&ks.to_string()) {
-                    regs.kinds.push(ks.to_string());
-                }
-            }
-        }
-    }
-    if let Some(signals) = target.get("signalSpecs").and_then(|v| v.as_array()) {
-        for s in signals {
-            let spec: medha::core::types::SignalSpec =
-                serde_json::from_value(s.clone()).map_err(|e| e.to_string())?;
-            regs.signal_specs.push(spec);
-        }
-    }
-    Ok(regs)
-}
-
-const AGENT_SECTION: &str = "\n## Evidential memory: medha\n\nThis project tracks how well its rules, recipes and tools actually work in [medha](https://nimishph.github.io/medha/)\n(engine home: `.medha/`). Medha reports evidence and trust hints; **you** decide what to do with them.\n\n- Before leaning on a project rule, recipe or tool, check its trust: `medha show --id <id>` (add `--json` for structured output).\n- After following a rule or recipe, record whether it worked: `medha record --id <id> --signal APPLY` (or `REJECT_RULE` if it was bad advice, `SKIP` if ignored).\n- Run `medha status` to check engine health and see how many rules have evidence.\n";
-
-/// Append the medha section to the agent instruction files; returns the files actually changed so
-/// `init` can say so instead of editing them silently.
-fn update_agents_instruction_files(explicit: &Option<String>, no_agents_file: bool) -> Vec<String> {
-    if no_agents_file {
-        return Vec::new();
-    }
-    let candidates: Vec<String> = match explicit {
-        Some(p) => vec![p.clone()],
-        None => ["AGENTS.md", "CLAUDE.md"]
-            .iter()
-            .filter(|p| Path::new(p).exists())
-            .map(|p| p.to_string())
-            .collect(),
-    };
-    candidates
-        .into_iter()
-        .filter(|p| update_single_agent_file(Path::new(p)))
-        .collect()
-}
-
-/// Returns whether the file was changed.
-fn update_single_agent_file(path: &Path) -> bool {
-    let existing = fs::read_to_string(path).unwrap_or_default();
-    if existing.contains("## Evidential memory: medha") {
-        return false;
-    }
-    let mut content = existing;
-    if !content.is_empty() && !content.ends_with('\n') {
-        content.push('\n');
-    }
-    content.push_str(AGENT_SECTION);
-    fs::write(path, content).is_ok()
-}
-
-const GITIGNORE_HEADER: &str = "# Written by `medha init`. Safe to edit or delete.
-#
-# config.json is NOT listed here: it is a small, human-authored registry definition (kinds,
-# signals, thresholds), meant to be committed like any other project config file.
-#
-# Everything below is either local-only mechanics or data that has its own sync channel
-# (`medha sync`, over a dedicated git ref or a snapshot file) - tracking it here too would
-# duplicate that channel and produce merge conflicts an ordinary git merge cannot resolve.
-";
-
-/// `.medha/.gitignore`: the store (synced by `medha sync`, not git) plus SQLite's journal files.
-/// Mirrors the TypeScript `writeGitignore`; the README promises the store is ignored by default.
-fn write_gitignore(home: &Path, store_file: &str) -> std::io::Result<PathBuf> {
-    let path = home.join(".gitignore");
-    let body = format!(
-        "{GITIGNORE_HEADER}\n# The store itself: medha sync moves this data, not ordinary commits.\n{f}\n\n# Local-only: SQLite's WAL-mode journal, regenerated and meaningless without the store above.\n{f}-wal\n{f}-shm\n{f}-journal\n",
-        f = store_file
-    );
-    fs::write(&path, body)?;
-    Ok(path)
-}
-
-fn print_updated_agent_files(updated: &[String]) {
-    for f in updated {
-        println!(
-            "  updated:  {} (added the \"Evidential memory: medha\" section)",
-            f
-        );
-    }
 }
 
 fn main() {
@@ -185,6 +97,53 @@ fn usage_failure(err: clap::Error, json_mode: bool) -> i32 {
         _ => failure::Failure::usage(first),
     };
     failure.report(json_mode)
+}
+
+/// The engine on a home's store: the backend config.json names, its registries, the namespace
+/// scope when `scoped`, and git-ref sync when the project is a git repository.
+fn open_engine(
+    home_dir: &std::path::Path,
+    config: &MedhaConfig,
+    scoped: bool,
+) -> Result<MedhaEngine<home_store::HomeStore>, Box<dyn std::error::Error>> {
+    use medha::config::BackendKind;
+    let default_file = match config.backend {
+        BackendKind::File => "state.jsonl",
+        _ => SQLITE_FILE,
+    };
+    let stored = config.path.as_deref().unwrap_or(default_file);
+    let store_path = if std::path::Path::new(stored).is_absolute() {
+        PathBuf::from(stored)
+    } else {
+        home_dir.join(stored)
+    };
+    let store = match config.backend {
+        BackendKind::File => home_store::HomeStore::file(&store_path, config.registries.clone()),
+        BackendKind::Sqlite => home_store::HomeStore::sqlite(&store_path, config.registries.clone()),
+        BackendKind::Memory => {
+            return Err(Box::new(
+                failure::Failure::cli(
+                    "HomeNotInitializedError",
+                    "CLI_NOT_INITIALIZED",
+                    format!("no engine home at {}", home_dir.display()),
+                )
+                .with_hint("run 'medha init' first (the ephemeral memory backend leaves nothing to reopen)"),
+            ));
+        }
+    }
+    .scoped(if scoped { config.namespace_scope.clone() } else { None });
+    let mut engine = MedhaEngine::open_with(store, config.clone())?;
+    engine.use_registries(&config.registries);
+    let repo = if home_dir.file_name().is_some_and(|n| n == MEDHA_HOME_DIR) {
+        home_dir.parent().unwrap_or(home_dir)
+    } else {
+        home_dir
+    };
+    let git = medha_sync::GitRefSyncAdapter::new(repo);
+    if git.is_git_repo() {
+        engine.set_sync(Box::new(git));
+    }
+    Ok(engine)
 }
 
 /// An entity key from `--namespace/--kind/--id`; an empty id is an invalid argument (exit 2), as in
@@ -346,165 +305,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle `init` without requiring an existing .medha directory
     if let Commands::Init(init_args) = &cli.command {
-        let home_dir = home_path(cli.dir.as_deref(), cli.home.as_deref());
-
-        if init_args.recreate && home_dir.exists() {
-            let _ = fs::remove_dir_all(&home_dir);
-        }
-
-        let store_str = init_args.store.as_deref().unwrap_or(&init_args.backend);
-        if store_str != "sqlite" && store_str != "file" && store_str != "memory" {
-            eprintln!("medha error: invalid --store / --backend '{}'", store_str);
-            exit(2);
-        }
-
-        if store_str == "memory" && init_args.path.is_some() {
-            eprintln!("medha error: --path cannot be used with memory backend");
-            exit(2);
-        }
-
-        if home_dir.join(CONFIG_FILE).exists() {
-            if init_args.namespace.is_some() || init_args.no_namespace {
-                eprintln!(
-                    "medha error: --namespace requires --recreate alongside it: {} is already initialized",
-                    home_dir.display()
-                );
-                exit(1);
-            }
-
-            // Check config drift
-            if let Some(ref cfg_path) = init_args.config {
-                let existing_cfg = MedhaConfig::load_from_file(home_dir.join(CONFIG_FILE))?;
-                let cfg_content = fs::read_to_string(cfg_path)?;
-                let new_registries = match parse_registries_json(&cfg_content) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        eprintln!("medha error: invalid config: {}", e);
-                        exit(1);
-                    }
-                };
-                if existing_cfg.registries != new_registries {
-                    eprintln!(
-                        "medha error: RegistryDriftError: registries in {} differ from {}",
-                        cfg_path,
-                        home_dir.join(CONFIG_FILE).display()
-                    );
-                    exit(1);
-                }
-            }
-
-            let updated =
-                update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
-
-            if cli.json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "status": "exists",
-                        "path": home_dir.display().to_string(),
-                        "agentFilesUpdated": updated,
-                    })
-                );
-            } else {
-                println!("medha: already initialized at {}", home_dir.display());
-                print_updated_agent_files(&updated);
-            }
-            return Ok(());
-        }
-
-        fs::create_dir_all(&home_dir)?;
-
-        let backend = if store_str == "memory" {
-            BackendKind::Memory
-        } else {
-            BackendKind::Sqlite
-        };
-
-        let store_path = if backend == BackendKind::Sqlite {
-            Some(
-                init_args
-                    .path
-                    .clone()
-                    .unwrap_or_else(|| SQLITE_FILE.to_string()),
-            )
-        } else {
-            None
-        };
-
-        let registries = if let Some(ref cfg_path) = init_args.config {
-            let content = match fs::read_to_string(cfg_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!(
-                        "medha error: failed to read config file {}: {}",
-                        cfg_path, e
-                    );
-                    exit(1);
-                }
-            };
-            match parse_registries_json(&content) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("medha error: invalid config: {}", e);
-                    exit(1);
-                }
-            }
-        } else {
-            StoreRegistries::default()
-        };
-
-        let config = MedhaConfig {
-            backend: backend.clone(),
-            path: store_path.clone(),
-            registries: registries.clone(),
-            ..Default::default()
-        };
-
-        config.save_to_file(home_dir.join(CONFIG_FILE))?;
-
-        if backend == BackendKind::Sqlite {
-            let db_rel = store_path.unwrap_or_else(|| SQLITE_FILE.to_string());
-            let db_abs = home_dir.join(db_rel);
-            let mut eng = MedhaEngine::open_sqlite(db_abs.to_string_lossy().to_string())?;
-            eng.use_registries(&registries);
-            if let Some(ref backup_path) = init_args.backup {
-                let backup_content = fs::read_to_string(backup_path)?;
-                let raw_val: serde_json::Value = serde_json::from_str(&backup_content)?;
-                let snapshot = medha_sync::migrate_snapshot(raw_val)?;
-                if let Some(ref episodes) = snapshot.episodes {
-                    let _ = eng.store_mut().replace_log(episodes)?;
-                }
-            }
-        }
-
-        let gitignore = match &config.path {
-            Some(store_file) if backend == BackendKind::Sqlite => {
-                Some(write_gitignore(&home_dir, store_file)?)
-            }
-            _ => None,
-        };
-        let updated =
-            update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
-
+        let report = init::run(init_args, cli.dir.as_deref(), cli.home.as_deref(), now)?;
         if cli.json {
-            println!(
-                "{}",
-                serde_json::json!({
-                    "status": "created",
-                    "path": home_dir.display().to_string(),
-                    "gitignore": gitignore.as_ref().map(|p| p.display().to_string()),
-                    "agentFilesUpdated": updated,
-                })
-            );
+            println!("{}", serde_json::to_string_pretty(&report)?);
         } else {
-            println!("medha: initialized engine home at {}", home_dir.display());
-            if let Some(ref g) = gitignore {
-                println!(
-                    "  gitignore: {} (store is synced with `medha sync`, not git)",
-                    g.display()
-                );
-            }
-            print_updated_agent_files(&updated);
+            print!("{}", init::render(&report));
         }
         return Ok(());
     }
@@ -515,11 +320,22 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     let config = MedhaConfig::load_from_file(home_dir.join(CONFIG_FILE))?;
 
-    // Open backend
-    let db_path = home_dir.join(config.path.as_deref().unwrap_or(SQLITE_FILE));
-    let mut engine =
-        MedhaEngine::open_sqlite_with_sync(db_path.to_string_lossy().to_string(), &home_dir)?;
-    engine.use_registries(&config.registries);
+    // Open the store config.json commits to. Agent-facing commands run on the namespace-scoped
+    // engine; host/admin commands (sync, maintenance, reports) see the whole store, as in the
+    // TypeScript CLI's `openHome` (engine vs adminEngine).
+    let admin = matches!(
+        cli.command,
+        Commands::Sync(_)
+            | Commands::Maintain(_)
+            | Commands::Compact(_)
+            | Commands::Preflight(_)
+            | Commands::Sweep(_)
+            | Commands::Report(_)
+            | Commands::Ui(_)
+            | Commands::RemoveEpisode(_)
+            | Commands::Keys(_)
+    );
+    let mut engine = open_engine(&home_dir, &config, !admin)?;
 
     match cli.command {
         Commands::Init(_) => unreachable!(),
