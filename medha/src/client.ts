@@ -4,14 +4,15 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   type Anchor,
   CANONICAL_SIGNALS,
   type Context,
   type ContextFilter,
   type ContextTargets,
+  canonicalJson,
   type EntityDefinition,
   type EntityKey,
   type EntityState,
@@ -31,7 +32,13 @@ import {
   type SyncPort,
   type TrajectoryEvidence,
 } from '@cntxt-labs/medha-core';
-import { FilePolicyStore, MemoryStore, SQLiteStore, scopeStore } from '@cntxt-labs/medha-store';
+import {
+  FilePolicyStore,
+  MemoryStore,
+  resolveRegistries,
+  SQLiteStore,
+  scopeStore,
+} from '@cntxt-labs/medha-store';
 import {
   type EntityDetail,
   type ListFilter,
@@ -65,6 +72,22 @@ export interface ClientOpenOptions {
   readonly sync?: SyncPort | undefined;
   /** Optional permissions policy. */
   readonly permissions?: WritePermissionsPolicy | undefined;
+}
+
+/**
+ * Options for creating a Medha home on disk with {@link MedhaClient.init}.
+ */
+export interface ClientInitOptions extends Omit<ClientOpenOptions, 'path' | 'store'> {
+  /** Storage backend for the new home. Default: `sqlite` (same as `medha init`). */
+  readonly backend?: 'sqlite' | 'file' | undefined;
+  /** Custom kinds to register, in addition to the built-in `rule`, `recipe` and `tool`. */
+  readonly kinds?: readonly string[] | undefined;
+  /** Kind specs (thresholds, recency, weighting) for built-in or custom kinds. */
+  readonly kindSpecs?: readonly KindSpec[] | undefined;
+  /** Custom signals to register, in addition to the canonical four. */
+  readonly signalSpecs?: readonly SignalSpec[] | undefined;
+  /** Restrict this home's engine to these namespaces (`medha init --namespace`). */
+  readonly namespaceScope?: readonly string[] | undefined;
 }
 
 /**
@@ -280,6 +303,28 @@ function findMedhaHome(startDir: string, override?: string | undefined): string 
   return null;
 }
 
+const CONFIG_SCHEMA_URL =
+  'https://raw.githubusercontent.com/nimishph/medha/main/schemas/config.v1.json';
+
+/** `.medha/.gitignore` for a home created by {@link MedhaClient.init}; mirrors `medha init`. */
+function gitignoreFor(backend: 'sqlite' | 'file', storeFile: string): string {
+  const local =
+    backend === 'sqlite'
+      ? [`${storeFile}-wal`, `${storeFile}-shm`, `${storeFile}-journal`]
+      : [`${storeFile}.bak`, `${storeFile}.tmp`];
+  return [
+    '# Written by MedhaClient.init(). Safe to edit or delete.',
+    '#',
+    '# config.json is NOT listed here: it is the registry definition, meant to be committed.',
+    '# The store is shared with `medha sync`, not ordinary commits.',
+    storeFile,
+    '',
+    '# Local-only working files.',
+    ...local,
+    '',
+  ].join('\n');
+}
+
 function resolvePath(homeDir: string, targetPath: string): string {
   if (isAbsolute(targetPath)) {
     return targetPath;
@@ -332,6 +377,103 @@ export class MedhaClient {
       ...(options.actor !== undefined ? { actor: options.actor } : {}),
       ...(options.clock !== undefined ? { clock: options.clock } : {}),
     });
+  }
+
+  /**
+   * Create a Medha home on disk (the SDK counterpart of `medha init`) and open it.
+   *
+   * Writes `<dir>/.medha/config.json` (or `home`), the store, and a `.gitignore` that keeps the
+   * store's data out of git while `config.json` stays committable. The result is a home the CLI,
+   * the MCP server and {@link MedhaClient.open} all read.
+   *
+   * Idempotent: when the home already has a `config.json` it is opened as is. Passing registries
+   * (`kinds`, `kindSpecs`, `signalSpecs`) or `namespaceScope` that differ from the existing
+   * config is rejected rather than silently ignored; edit `config.json` to change them.
+   */
+  static async init(options: ClientInitOptions = {}): Promise<MedhaClient> {
+    const startDir = resolve(options.dir ?? process.cwd());
+    const home =
+      options.home === undefined ? join(startDir, '.medha') : resolve(startDir, options.home);
+    const configPath = join(home, 'config.json');
+    const backend = options.backend ?? 'sqlite';
+    if (backend !== 'sqlite' && backend !== 'file') {
+      throw new InvalidArgumentError('backend', "'sqlite' or 'file'", backend);
+    }
+    const hostRegistries = {
+      ...(options.kinds !== undefined ? { kinds: options.kinds } : {}),
+      ...(options.kindSpecs !== undefined ? { kindSpecs: options.kindSpecs } : {}),
+      ...(options.signalSpecs !== undefined ? { signalSpecs: options.signalSpecs } : {}),
+    };
+    // resolveRegistries reads `kinds` before `kindSpecs`, so a kind named only by a spec has to be
+    // listed in `kinds` too or it would never be registered.
+    // Built-in kinds, the canonical signals and the `week` anchor are always added by
+    // resolveRegistries, matching `medha init`'s default registries.
+    const requested = resolveRegistries({
+      kinds: [...(options.kinds ?? []), ...(options.kindSpecs ?? []).map((spec) => spec.name)],
+      signalSpecs: options.signalSpecs ?? [],
+      anchorKinds: [],
+      ...(options.kindSpecs !== undefined ? { kindSpecs: options.kindSpecs } : {}),
+    });
+    const scope =
+      options.namespaceScope === undefined
+        ? undefined
+        : [...new Set(options.namespaceScope.map((n) => n.trim()).filter((n) => n !== ''))];
+    if (scope !== undefined && scope.length === 0) {
+      throw new InvalidArgumentError(
+        'namespaceScope',
+        'at least one non-empty namespace',
+        options.namespaceScope,
+      );
+    }
+
+    if (existsSync(configPath)) {
+      const existing = JSON.parse(readFileSync(configPath, 'utf8')) as {
+        readonly registries?: Parameters<typeof resolveRegistries>[0];
+        readonly namespaceScope?: readonly string[];
+      };
+      const askedForRegistries = Object.keys(hostRegistries).length > 0;
+      if (
+        askedForRegistries &&
+        canonicalJson(resolveRegistries(existing.registries)) !== canonicalJson(requested)
+      ) {
+        throw new InvalidArgumentError(
+          'registries',
+          `the registries already in ${configPath} (edit config.json to change them)`,
+          hostRegistries,
+        );
+      }
+      if (
+        scope !== undefined &&
+        canonicalJson([...(existing.namespaceScope ?? [])].sort()) !==
+          canonicalJson([...scope].sort())
+      ) {
+        throw new InvalidArgumentError(
+          'namespaceScope',
+          `the namespaceScope already in ${configPath} (edit config.json to change it)`,
+          options.namespaceScope,
+        );
+      }
+      return MedhaClient.open({ ...options, dir: startDir, home });
+    }
+
+    const storeFile = backend === 'sqlite' ? 'store.sqlite' : 'state.jsonl';
+    mkdirSync(home, { recursive: true });
+    // Same on-disk shape as `medha init`: the store path is relative to the home so a committed
+    // config.json resolves from any checkout location.
+    const config = {
+      $schema: CONFIG_SCHEMA_URL,
+      layoutVersion: 1,
+      backend,
+      path: storeFile,
+      ...(scope === undefined ? {} : { namespaceScope: scope }),
+      registries: requested,
+    };
+    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    const gitignorePath = join(home, '.gitignore');
+    if (!existsSync(gitignorePath)) {
+      writeFileSync(gitignorePath, gitignoreFor(backend, storeFile), 'utf8');
+    }
+    return MedhaClient.open({ ...options, dir: startDir, home });
   }
 
   /**
@@ -406,11 +548,13 @@ export class MedhaClient {
     if (backend === 'memory') {
       store = new MemoryStore(rawConfig.registries);
     } else if (backend === 'file') {
+      // FilePolicyStore joins `document` and `backup` onto `dir`, so they must be bare file names:
+      // passing the absolute path doubled it and made every write to a file-backend home fail.
       const docPath = resolvePath(homeDir, rawConfig.path ?? 'state.jsonl');
       store = new FilePolicyStore({
-        dir: homeDir,
-        document: docPath,
-        backup: `${docPath}.bak`,
+        dir: dirname(docPath),
+        document: basename(docPath),
+        backup: `${basename(docPath)}.bak`,
         registries: rawConfig.registries,
       });
     } else {
