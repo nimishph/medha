@@ -1,9 +1,12 @@
 name: Release
 
-# Trigger on version tags (e.g. v0.1.0)
+# Trigger on version tags (e.g. v0.1.0). Alpha tags (e.g. v0.8.0-alpha.1) do not run this workflow:
+# alphas are built and published by hand. The negated pattern must come after the one it narrows.
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
+      - '!v*-alpha*'
 
 permissions:
   contents: write
