@@ -56,31 +56,68 @@ fn parse_registries_json(content: &str) -> Result<StoreRegistries, String> {
 
 const AGENT_SECTION: &str = "\n## Evidential memory: medha\n\nThis project tracks how well its rules, recipes and tools actually work in [medha](https://nimishph.github.io/medha/)\n(engine home: `.medha/`). Medha reports evidence and trust hints; **you** decide what to do with them.\n\n- Before leaning on a project rule, recipe or tool, check its trust: `medha show --id <id>` (add `--json` for structured output).\n- After following a rule or recipe, record whether it worked: `medha record --id <id> --signal APPLY` (or `REJECT_RULE` if it was bad advice, `SKIP` if ignored).\n- Run `medha status` to check engine health and see how many rules have evidence.\n";
 
-fn update_agents_instruction_files(explicit: &Option<String>, no_agents_file: bool) {
+/// Append the medha section to the agent instruction files; returns the files actually changed so
+/// `init` can say so instead of editing them silently.
+fn update_agents_instruction_files(explicit: &Option<String>, no_agents_file: bool) -> Vec<String> {
     if no_agents_file {
-        return;
+        return Vec::new();
     }
-    if let Some(ref p) = explicit {
-        update_single_agent_file(Path::new(p));
-        return;
-    }
-    if Path::new("AGENTS.md").exists() {
-        update_single_agent_file(Path::new("AGENTS.md"));
-    }
-    if Path::new("CLAUDE.md").exists() {
-        update_single_agent_file(Path::new("CLAUDE.md"));
-    }
+    let candidates: Vec<String> = match explicit {
+        Some(p) => vec![p.clone()],
+        None => ["AGENTS.md", "CLAUDE.md"]
+            .iter()
+            .filter(|p| Path::new(p).exists())
+            .map(|p| p.to_string())
+            .collect(),
+    };
+    candidates
+        .into_iter()
+        .filter(|p| update_single_agent_file(Path::new(p)))
+        .collect()
 }
 
-fn update_single_agent_file(path: &Path) {
+/// Returns whether the file was changed.
+fn update_single_agent_file(path: &Path) -> bool {
     let existing = fs::read_to_string(path).unwrap_or_default();
-    if !existing.contains("## Evidential memory: medha") {
-        let mut content = existing;
-        if !content.is_empty() && !content.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push_str(AGENT_SECTION);
-        let _ = fs::write(path, content);
+    if existing.contains("## Evidential memory: medha") {
+        return false;
+    }
+    let mut content = existing;
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(AGENT_SECTION);
+    fs::write(path, content).is_ok()
+}
+
+const GITIGNORE_HEADER: &str = "# Written by `medha init`. Safe to edit or delete.
+#
+# config.json is NOT listed here: it is a small, human-authored registry definition (kinds,
+# signals, thresholds), meant to be committed like any other project config file.
+#
+# Everything below is either local-only mechanics or data that has its own sync channel
+# (`medha sync`, over a dedicated git ref or a snapshot file) - tracking it here too would
+# duplicate that channel and produce merge conflicts an ordinary git merge cannot resolve.
+";
+
+/// `.medha/.gitignore`: the store (synced by `medha sync`, not git) plus SQLite's journal files.
+/// Mirrors the TypeScript `writeGitignore`; the README promises the store is ignored by default.
+fn write_gitignore(home: &Path, store_file: &str) -> std::io::Result<PathBuf> {
+    let path = home.join(".gitignore");
+    let body = format!(
+        "{GITIGNORE_HEADER}\n# The store itself: medha sync moves this data, not ordinary commits.\n{f}\n\n# Local-only: SQLite's WAL-mode journal, regenerated and meaningless without the store above.\n{f}-wal\n{f}-shm\n{f}-journal\n",
+        f = store_file
+    );
+    fs::write(&path, body)?;
+    Ok(path)
+}
+
+fn print_updated_agent_files(updated: &[String]) {
+    for f in updated {
+        println!(
+            "  updated:  {} (added the \"Evidential memory: medha\" section)",
+            f
+        );
     }
 }
 
@@ -235,15 +272,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
+            let updated =
+                update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
 
             if cli.json {
                 println!(
                     "{}",
-                    serde_json::json!({ "status": "exists", "path": home_dir.display().to_string() })
+                    serde_json::json!({
+                        "status": "exists",
+                        "path": home_dir.display().to_string(),
+                        "agentFilesUpdated": updated,
+                    })
                 );
             } else {
                 println!("medha: already initialized at {}", home_dir.display());
+                print_updated_agent_files(&updated);
             }
             return Ok(());
         }
@@ -313,15 +356,34 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
+        let gitignore = match &config.path {
+            Some(store_file) if backend == BackendKind::Sqlite => {
+                Some(write_gitignore(&home_dir, store_file)?)
+            }
+            _ => None,
+        };
+        let updated =
+            update_agents_instruction_files(&init_args.agents_file, init_args.no_agents_file);
 
         if cli.json {
             println!(
                 "{}",
-                serde_json::json!({ "status": "created", "path": home_dir.display().to_string() })
+                serde_json::json!({
+                    "status": "created",
+                    "path": home_dir.display().to_string(),
+                    "gitignore": gitignore.as_ref().map(|p| p.display().to_string()),
+                    "agentFilesUpdated": updated,
+                })
             );
         } else {
             println!("medha: initialized engine home at {}", home_dir.display());
+            if let Some(ref g) = gitignore {
+                println!(
+                    "  gitignore: {} (store is synced with `medha sync`, not git)",
+                    g.display()
+                );
+            }
+            print_updated_agent_files(&updated);
         }
         return Ok(());
     }
@@ -366,6 +428,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Record(args) => {
             let key = EntityKey::new(&args.namespace, &args.kind, &args.id);
+            // As in the MCP `record_signal` tool: a signal on an unknown entity without --ensure
+            // would append an orphan episode that never surfaces in `list`, while printing
+            // "recorded". Refuse it instead.
+            if !args.ensure && engine.get(&key)?.is_none() {
+                return Err(format!(
+                    "{} is unknown: nothing was recorded. Propose it first (medha propose --id {}) \
+                     or pass --ensure to create it.",
+                    key.to_string_repr(),
+                    args.id
+                )
+                .into());
+            }
             let res = engine.record(RecordInput {
                 key: key.clone(),
                 signal: args.signal.clone(),
@@ -729,8 +803,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::Compact(_) => {
-            let comp = engine.compact(now)?;
+        Commands::Compact(compact_args) => {
+            if let Some(older) = compact_args.older_than {
+                if older <= 0.0 {
+                    eprintln!("medha error: --older-than must be positive");
+                    exit(2);
+                }
+            }
+            let comp = engine.compact_older_than(now, compact_args.older_than)?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&comp)?);
             } else {
@@ -1107,7 +1187,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         exit(2);
                     }
                 }
-                let comp = engine.compact(now)?;
+                let comp = engine.compact_older_than(now, compact_args.older_than)?;
                 if cli.json {
                     println!(
                         "{}",

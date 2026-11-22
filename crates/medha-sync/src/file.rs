@@ -222,8 +222,28 @@ impl SyncPort for FileSyncAdapter {
             }
         }
 
-        let entities = store.list()?;
-        let episodes = store.episodes(None, None)?;
+        let local_episodes = store.episodes(None, None)?;
+        // A push from a fresh process has observed nothing, so the CAS check above cannot guard
+        // it. Never clobber a teammate's evidence: write the union of the file's episodes and
+        // ours. An unreadable file is refused rather than overwritten.
+        let remote_episodes = match self.read_raw_file() {
+            None => Vec::new(),
+            Some(raw) => {
+                let val: serde_json::Value = serde_json::from_str(&raw)?;
+                migrate_snapshot(val)?.episodes.unwrap_or_default()
+            }
+        };
+        let (entities, episodes) = if remote_episodes.is_empty() {
+            (store.list()?, local_episodes)
+        } else {
+            let merged = merge_episodes(&local_episodes, &remote_episodes);
+            let mut folded: Vec<_> =
+                medha_store::folding::fold_log_with_registries(&merged, Some(store.registries()))
+                    .into_values()
+                    .collect();
+            folded.sort_by_key(|s| s.key.to_string_repr());
+            (folded, merged)
+        };
         let as_of = now.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

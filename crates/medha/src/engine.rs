@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::config::MedhaConfig;
 use crate::errors::MedhaError;
 use crate::maintenance::{
-    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport,
+    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport, DEFAULT_FOLD_DAYS,
 };
 use medha_core::decision::Decision;
 use medha_core::drift::ema_step;
@@ -12,6 +12,7 @@ use medha_core::packer::{
     pack_entities, PackCandidate, PackOutcome, PackPolicy, DEFAULT_EXPLORATION_RATIO,
 };
 use medha_core::round::round6;
+use medha_core::thresholds::DAY_MS;
 use medha_core::thresholds::DEFAULT_EMA_ALPHA;
 use medha_core::types::{
     Anchor, EntityKey, LifecycleStatus, RecencyConfig, SignalSpec, Thresholds, TrustHint,
@@ -516,8 +517,10 @@ impl<S: StorePort> MedhaEngine<S> {
             .find(|k| k.name == input.key.kind);
 
         let (state_summary, decision_tree) = if let Some(ref s) = state_opt {
+            let trust = self.hint(&input.key, now)?.trust;
             let summary =
-                medha_core::policy_latch::PolicyLatchEntityState::new(s.status, s.evidence.clone());
+                medha_core::policy_latch::PolicyLatchEntityState::new(s.status, s.evidence.clone())
+                    .with_trust(trust);
             (Some(summary), s.decision_tree.clone())
         } else {
             let key_str = input.key.to_string_repr();
@@ -1187,23 +1190,110 @@ impl<S: StorePort> MedhaEngine<S> {
         })
     }
 
+    /// Fold the *entire* log into one baseline per entity (the `keys adopt` path). For routine
+    /// maintenance use [`Self::compact_older_than`], which keeps recent history retractable.
     pub fn compact(&mut self, _now: i64) -> Result<CompactionReport, MedhaError> {
-        let eps = self.store.episodes(None, None)?;
+        self.compact_before(i64::MAX)
+    }
+
+    /// Fold only episodes older than `older_than_days` (default [`DEFAULT_FOLD_DAYS`]) into
+    /// baselines, keeping the newer suffix verbatim — mirrors the TypeScript `compactPrefix`.
+    pub fn compact_older_than(
+        &mut self,
+        now: i64,
+        older_than_days: Option<f64>,
+    ) -> Result<CompactionReport, MedhaError> {
+        let days = older_than_days.unwrap_or(DEFAULT_FOLD_DAYS);
+        let cutoff_at = now.saturating_sub((days * DAY_MS) as i64);
+        self.compact_before(cutoff_at)
+    }
+
+    fn compact_before(&mut self, cutoff_at: i64) -> Result<CompactionReport, MedhaError> {
+        let mut eps = self.store.episodes(None, None)?;
+        eps.sort_by_key(|e| e.seq);
         let before_count = eps.len();
-
-        // Baseline compaction of historical states
         let states = self.store.list()?;
-        let mut new_eps = Vec::new();
 
-        for (seq, s) in states.iter().cloned().enumerate() {
+        // The folded prefix is the longest run of episodes strictly older than the cutoff.
+        let border = eps.iter().take_while(|e| e.at < cutoff_at).count();
+        if border == 0 {
+            return Ok(CompactionReport {
+                before_count,
+                after_count: before_count,
+                removed_count: 0,
+            });
+        }
+        let (prefix, suffix) = eps.split_at(border);
+        let max_prefix_seq = prefix.last().map(|e| e.seq).unwrap_or(0);
+
+        // A retraction in the suffix may target the prefix: its effect belongs in the baseline,
+        // so mask that target while folding and drop the spent retraction. A retraction that
+        // targets a kept episode is renumbered below; one that targets nothing is dropped.
+        let suffix_seqs: std::collections::HashSet<u64> = suffix.iter().map(|e| e.seq).collect();
+        let mut spent_on_prefix: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let kept_suffix: Vec<&Episode> = suffix
+            .iter()
+            .filter(|e| match &e.payload {
+                EpisodePayload::Retract { target_seq, .. } => {
+                    if *target_seq > max_prefix_seq {
+                        suffix_seqs.contains(target_seq)
+                    } else {
+                        spent_on_prefix.insert(*target_seq);
+                        false
+                    }
+                }
+                _ => true,
+            })
+            .collect();
+
+        let prefix_live: Vec<Episode> = prefix
+            .iter()
+            .filter(|e| !spent_on_prefix.contains(&e.seq))
+            .cloned()
+            .collect();
+        let folded = medha_store::folding::fold_log_with_registries(
+            &prefix_live,
+            Some(self.store.registries()),
+        );
+        let mut last_at: HashMap<String, i64> = HashMap::new();
+        for e in prefix {
+            let k = e.key.to_string_repr();
+            let entry = last_at.entry(k).or_insert(e.at);
+            if e.at > *entry {
+                *entry = e.at;
+            }
+        }
+        let mut baseline_states: Vec<EntityState> = folded.into_values().collect();
+        baseline_states.sort_by_key(|s| s.key.to_string_repr());
+
+        let mut new_eps = Vec::with_capacity(baseline_states.len() + kept_suffix.len());
+        for (seq, s) in baseline_states.into_iter().enumerate() {
+            let at = last_at
+                .get(&s.key.to_string_repr())
+                .copied()
+                .unwrap_or(cutoff_at);
             new_eps.push(Episode {
                 seq: seq as u64,
                 key: s.key.clone(),
-                at: s.last_signal_at.unwrap_or(0),
+                at,
                 author: None,
                 sig: None,
                 payload: EpisodePayload::Baseline { state: s },
             });
+        }
+        let offset = new_eps.len() as u64;
+        let new_seq_of: HashMap<u64, u64> = kept_suffix
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.seq, offset + i as u64))
+            .collect();
+        for (i, e) in kept_suffix.iter().enumerate() {
+            let mut ep = (*e).clone();
+            ep.seq = offset + i as u64;
+            if let EpisodePayload::Retract { target_seq, .. } = &mut ep.payload {
+                *target_seq = new_seq_of[target_seq];
+            }
+            new_eps.push(ep);
         }
 
         // Bake-and-verify: verify fold-equivalence in memory before replacing the log

@@ -10,11 +10,25 @@ use serde::{Deserialize, Serialize};
 pub struct PolicyLatchEntityState {
     pub status: LifecycleStatus,
     pub evidence: Evidence,
+    /// The calibrated trust score (TS `trustOf(state, now, kindSpec).trust`). When absent, the
+    /// default evaluation falls back to the raw success ratio `k / n`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust: Option<f64>,
 }
 
 impl PolicyLatchEntityState {
     pub fn new(status: LifecycleStatus, evidence: Evidence) -> Self {
-        Self { status, evidence }
+        Self {
+            status,
+            evidence,
+            trust: None,
+        }
+    }
+
+    /// Attach the calibrated trust score used for the default evaluation and `minTrust` gate.
+    pub fn with_trust(mut self, trust: f64) -> Self {
+        self.trust = Some(trust);
+        self
     }
 }
 
@@ -420,8 +434,11 @@ pub fn evaluate_policy_latch(
         }
     }
 
-    // 4. Default evaluation when no branch matches or tree is empty
-    let current_trust = state.evidence.k / state.evidence.n.max(1.0);
+    // 4. Default evaluation when no branch matches or tree is empty. Gate on the calibrated
+    // trust (as the TS kernel does), not the raw success ratio: 1/1 successes is not trust 1.0.
+    let current_trust = state
+        .trust
+        .unwrap_or_else(|| state.evidence.k / state.evidence.n.max(1.0));
     let req_human = kind_spec
         .and_then(|k| k.decision_policy.as_ref())
         .and_then(|p| p.require_human_for.as_ref());

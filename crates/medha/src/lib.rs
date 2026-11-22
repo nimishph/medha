@@ -14,7 +14,9 @@ pub use engine::{
     ThresholdExplanation,
 };
 pub use errors::MedhaError;
-pub use maintenance::{CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport};
+pub use maintenance::{
+    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport, DEFAULT_FOLD_DAYS,
+};
 
 // Re-export underlying foundational layers
 pub use medha_core as core;
