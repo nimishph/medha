@@ -438,14 +438,14 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("sync push");
     assert!(sync_push.status.success());
-    assert!(String::from_utf8_lossy(&sync_push.stdout).contains("sync push complete"));
+    assert!(String::from_utf8_lossy(&sync_push.stdout).contains("Sync push completed successfully"));
 
     let sync_status = Command::new(&bin)
         .args(["--home", home, "sync", "--file", sync_path, "status"])
         .output()
         .expect("sync status");
     assert!(sync_status.status.success());
-    assert!(String::from_utf8_lossy(&sync_status.stdout).contains("Synced"));
+    assert!(String::from_utf8_lossy(&sync_status.stdout).contains("Sync Status: SYNCED"));
 
     let sync_reconcile = Command::new(&bin)
         .args(["--home", home, "sync", "--file", sync_path, "reconcile"])

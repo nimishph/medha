@@ -18,6 +18,7 @@ mod policy;
 mod primer;
 mod read;
 mod render;
+mod sync_view;
 mod ts_view;
 mod updater;
 mod write;
@@ -90,6 +91,63 @@ fn usage_failure(err: clap::Error, json_mode: bool) -> i32 {
         _ => failure::Failure::usage(first),
     };
     failure.report(json_mode)
+}
+
+/// Refuse a malformed `signing` block in config.json, as the TypeScript `readConfig` does: a typo
+/// there must not quietly leave signing off.
+fn validate_signing_config(home_dir: &std::path::Path) -> Result<(), failure::Failure> {
+    let path = home_dir.join(CONFIG_FILE);
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(());
+    };
+    let Some(signing) = raw.get("signing") else {
+        return Ok(());
+    };
+    let shown = path.display().to_string();
+    let invalid = |problem: String| {
+        failure::Failure::cli(
+            "ConfigFileError",
+            "CLI_CONFIG_INVALID",
+            format!("cannot read {shown}: {problem}"),
+        )
+        .with_context(serde_json::json!({ "path": shown, "problem": problem }))
+    };
+    let Some(obj) = signing.as_object() else {
+        return Err(invalid("signing must be an object".to_string()));
+    };
+    let unknown: Vec<&String> = obj
+        .keys()
+        .filter(|k| *k != "mode" && *k != "defaultKey")
+        .collect();
+    if !unknown.is_empty() {
+        let names: Vec<&str> = unknown.iter().map(|k| k.as_str()).collect();
+        return Err(invalid(format!(
+            "signing has unknown key(s): {}",
+            names.join(", ")
+        )));
+    }
+    let modes = ["off", "warn", "require"];
+    if !obj
+        .get("mode")
+        .and_then(|m| m.as_str())
+        .is_some_and(|m| modes.contains(&m))
+    {
+        return Err(invalid(format!(
+            "signing.mode must be one of {}",
+            modes.join(", ")
+        )));
+    }
+    if let Some(k) = obj.get("defaultKey") {
+        if !k.as_str().is_some_and(|k| k.starts_with("ed25519:")) {
+            return Err(invalid(
+                "signing.defaultKey must be a key id (ed25519:…)".to_string(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The engine on a home's store: the backend config.json names, its registries, the namespace
@@ -279,12 +337,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let maybe_home = resolve_home(cli.dir.as_deref(), cli.home.as_deref()).ok();
             let store_stats = if let Some(ref h) = maybe_home {
                 if let Ok(config) = MedhaConfig::load_from_file(h.join(CONFIG_FILE)) {
-                    let db_path = h.join(config.path.as_deref().unwrap_or(SQLITE_FILE));
-                    if let Ok(eng) = MedhaEngine::open_sqlite(db_path.to_string_lossy().to_string())
-                    {
+                    if let Ok(eng) = open_engine(h, &config, false) {
                         let pref = eng
                             .preflight()
-                            .map(|p| if p.ok { "clean" } else { "issues" })
+                            .map(|p| if p.ok { "ok" } else { "corrupt" })
                             .unwrap_or("error");
                         let ents = eng.store().list().map(|l| l.len()).unwrap_or(0);
                         let eps = eng
@@ -293,8 +349,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             .map(|l| l.len())
                             .unwrap_or(0);
                         format!(
-                            "backend: {:?}, entities: {}, episodes: {}, preflight: {}",
-                            config.backend, ents, eps, pref
+                            "backend: {}, entities: {}, episodes: {}, preflight: {}",
+                            format!("{:?}", config.backend).to_lowercase(),
+                            ents,
+                            eps,
+                            pref
                         )
                     } else {
                         "None (store open failed)".to_string()
@@ -306,8 +365,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 "None (uninitialized or store not found)".to_string()
             };
             let report = issue::create_issue_report(
-                issue_args.title.as_deref(),
-                issue_args.open,
+                Some(issue_args.title.join(" "))
+                    .filter(|t| !t.is_empty())
+                    .as_deref(),
+                issue_args.open && !issue_args.no_open,
                 cli.json,
                 &store_stats,
             );
@@ -336,6 +397,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let home_dir = resolve_home(cli.dir.as_deref(), cli.home.as_deref())?;
     let home_str = home_dir.display().to_string();
 
+    validate_signing_config(&home_dir)?;
     let config = MedhaConfig::load_from_file(home_dir.join(CONFIG_FILE))?;
 
     // Open the store config.json commits to. Agent-facing commands run on the namespace-scoped
@@ -570,52 +632,32 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 ));
             }
 
-            match args.action {
+            let (value, text) = match args.action {
                 SyncAction::Status => {
-                    let sync_report = engine.sync_status()?;
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&sync_report)?);
-                    } else {
-                        println!("medha: sync status: {:?}", sync_report.state);
-                        println!("  local count:  {}", sync_report.local_count);
-                        if let Some(rc) = sync_report.remote_count {
-                            println!("  remote count: {}", rc);
-                        }
-                    }
+                    let v = sync_view::status_json(&engine.sync_status()?);
+                    let t = sync_view::render_status(&v);
+                    (v, t)
                 }
                 SyncAction::Pull => {
-                    let res = engine.sync_pull()?;
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&res)?);
-                    } else {
-                        println!(
-                            "medha: sync pull complete (updated: {}, pulled: {}, local total: {})",
-                            res.updated, res.pulled_count, res.local_total
-                        );
-                    }
+                    let v = sync_view::pull_json(&engine.sync_pull()?);
+                    let t = sync_view::render_pull(&v);
+                    (v, t)
                 }
                 SyncAction::Push => {
-                    let res = engine.sync_push(Some(now))?;
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&res)?);
-                    } else {
-                        println!(
-                            "medha: sync push complete (pushed: {}, commit: {:?})",
-                            res.pushed_count, res.commit
-                        );
-                    }
+                    let v = sync_view::push_json(&engine.sync_push(Some(now))?);
+                    let t = sync_view::render_push(&v);
+                    (v, t)
                 }
                 SyncAction::Reconcile => {
-                    let res = engine.sync_reconcile(Some(now))?;
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&res)?);
-                    } else {
-                        println!(
-                            "medha: sync reconcile complete (pulled: {}, pushed: {}, total: {})",
-                            res.pulled_count, res.pushed_count, res.total_count
-                        );
-                    }
+                    let v = sync_view::reconcile_json(&engine.sync_reconcile(Some(now))?);
+                    let t = sync_view::render_reconcile(&v);
+                    (v, t)
                 }
+            };
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                println!("{text}");
             }
         }
         Commands::Compact(compact_args) => {

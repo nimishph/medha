@@ -604,11 +604,23 @@ pub struct ParamsArgs {}
 
 #[derive(Args, Debug, Default)]
 pub struct IssueArgs {
-    #[arg(value_name = "TITLE", help = "Optional title for the issue")]
-    pub title: Option<String>,
+    /// Words of the title; several are joined with spaces, as the TypeScript CLI does.
+    #[arg(value_name = "TITLE", num_args = 0.., help = "Optional title for the issue")]
+    pub title: Vec<String>,
 
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, help = "Open the issue in the default web browser")]
+    #[arg(
+        long,
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        help = "Open the issue in the default web browser"
+    )]
     pub open: bool,
+
+    #[arg(
+        long = "no-open",
+        help = "Print the issue URL without opening a browser"
+    )]
+    pub no_open: bool,
 }
 
 #[derive(Args, Debug, Default)]

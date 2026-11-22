@@ -38,8 +38,18 @@ pub fn create_issue_report(
         .to_string();
 
     let version = env!("CARGO_PKG_VERSION");
-    let platform = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
+    // Node's names (`process.platform`, `process.arch`), so reports from either CLI read alike.
+    let platform = match std::env::consts::OS {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        "x86" => "ia32",
+        other => other,
+    };
 
     let body = format!(
         "### Description\n\
