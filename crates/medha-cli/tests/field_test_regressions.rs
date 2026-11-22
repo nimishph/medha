@@ -40,8 +40,10 @@ fn init_writes_gitignore_and_reports_agent_files() {
     assert!(!String::from_utf8_lossy(&again.stdout).contains("updated:"));
 }
 
+/// As in the TypeScript CLI: without --ensure a signal on an unknown entity is logged but has no
+/// effect, and the CLI says so ("NOT recorded") instead of printing "recorded".
 #[test]
-fn record_on_unknown_entity_without_ensure_is_refused() {
+fn record_on_unknown_entity_without_ensure_says_not_recorded() {
     let dir = tempdir().expect("tmp");
     assert!(medha(dir.path(), &["init", "--no-agents-file"])
         .status
@@ -52,20 +54,30 @@ fn record_on_unknown_entity_without_ensure_is_refused() {
         dir.path(),
         &["record", "--id", "ghost", "--signal", "APPLY"],
     );
-    assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown"));
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("NOT recorded") && stdout.contains("pass --ensure"),
+        "{stdout}"
+    );
     assert_eq!(
         episode_count(dir.path()),
-        before,
-        "no orphan episode written"
+        before + 1,
+        "the attempt is logged"
     );
+
+    let show = medha(dir.path(), &["--json", "show", "--id", "ghost"]);
+    let v: serde_json::Value = serde_json::from_slice(&show.stdout).expect("json");
+    assert_eq!(v["detail"]["known"], false);
+    assert_eq!(v["detail"]["noEffect"], serde_json::json!([before]));
 
     let ok = medha(
         dir.path(),
         &["record", "--id", "ghost", "--signal", "APPLY", "--ensure"],
     );
     assert!(ok.status.success());
-    assert_eq!(episode_count(dir.path()), before + 1);
+    assert!(String::from_utf8_lossy(&ok.stdout).contains("recorded APPLY"));
+    assert_eq!(episode_count(dir.path()), before + 2);
 }
 
 #[test]

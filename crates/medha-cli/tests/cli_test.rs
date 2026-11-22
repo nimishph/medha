@@ -209,7 +209,7 @@ fn test_cli_reinstate_and_checked_retract() {
     );
     let refused = run(&["reinstate", "--id", "ok1", "--reason", "x"]);
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("is not latched"));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("a latched entity"));
 
     assert!(
         run(&["override", "--id", "ok1", "--status", "retired", "--reason", "stale"])
@@ -236,7 +236,7 @@ fn test_cli_reinstate_and_checked_retract() {
     }
     let wrong = run(&["retract", "--seq", "0", "--reason", "x", "--id", "b"]);
     assert!(!wrong.status.success());
-    assert!(String::from_utf8_lossy(&wrong.stderr).contains("belongs to rule/ok1"));
+    assert!(String::from_utf8_lossy(&wrong.stderr).contains("belongs to /rule/ok1"));
 
     for seq in ["7", "6"] {
         let out = run(&["retract", "--seq", seq, "--reason", "x", "--id", "b"]);
@@ -375,7 +375,7 @@ fn test_cli_guard_without_kind_is_refused_until_the_entity_has_a_guard() {
     assert!(reused.status.success());
     let show = run(&["--json", "show", "--id", "g1"]);
     let parsed: serde_json::Value = serde_json::from_slice(&show.stdout).expect("show json");
-    assert_eq!(parsed["hint"]["status"], "quarantined");
+    assert_eq!(parsed["detail"]["hint"]["status"], "quarantined");
 }
 
 /// A store's `config.json` decides which signals and kinds exist, for this engine as for the

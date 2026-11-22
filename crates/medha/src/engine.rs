@@ -94,6 +94,34 @@ pub struct RecordInput {
     pub case_id: Option<String>,
 }
 
+/// Everything a proposal can carry (the TypeScript `Proposal`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposeInput {
+    pub key: EntityKey,
+    pub provenance: String,
+    #[serde(default)]
+    pub theta0: Option<f64>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub evidence_refs: Option<Vec<String>>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    pub at: i64,
+}
+
+/// The appended proposal and the promotion decision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposeOutcome {
+    pub appended: AppendResult,
+    pub promoted: bool,
+    pub promotion_reason: String,
+    /// Every distinct source that has proposed this entity, this one included.
+    pub provenances: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GuardInput {
     pub key: EntityKey,
@@ -814,6 +842,30 @@ impl<S: StorePort> MedhaEngine<S> {
 
     pub fn record(&mut self, input: RecordInput) -> Result<AppendResult, MedhaError> {
         self.require_kind(&input.key)?;
+        if let Some(case_id) = &input.case_id {
+            // A typo'd caseId would fold into the entity as usual and leave the named branch
+            // untouched. Refuse it and name the branches that exist (as the TypeScript engine does).
+            let mut known: Vec<String> = self
+                .store
+                .get(&input.key)?
+                .map(|s| s.decision_tree.iter().map(|c| c.id.clone()).collect())
+                .unwrap_or_default();
+            if !known.iter().any(|id| id == case_id) {
+                known.sort();
+                let expected = if known.is_empty() {
+                    "a decision case id (this entity has no decision branches yet)".to_string()
+                } else {
+                    format!(
+                        "an existing decision case id of this entity (has: {})",
+                        known.join(", ")
+                    )
+                };
+                return Err(MedhaError::InvalidArgument {
+                    name: "options.caseId",
+                    reason: format!("expected {expected}, received {case_id}"),
+                });
+            }
+        }
         let spec = self.signals.get(&input.signal).cloned().ok_or_else(|| {
             MedhaError::InvalidArgument {
                 name: "signal",
@@ -914,6 +966,18 @@ impl<S: StorePort> MedhaEngine<S> {
         at: i64,
         expect: Option<&EntityKey>,
     ) -> Result<RetractOutcome, MedhaError> {
+        self.retract_checked_by(seq, reason, at, expect, None)
+    }
+
+    /// `retract_checked` with the retracting author recorded on the episode.
+    pub fn retract_checked_by(
+        &mut self,
+        seq: u64,
+        reason: &str,
+        at: i64,
+        expect: Option<&EntityKey>,
+        author: Option<String>,
+    ) -> Result<RetractOutcome, MedhaError> {
         let all_eps = self.store.episodes(None, None)?;
         let target_key = all_eps
             .iter()
@@ -922,12 +986,14 @@ impl<S: StorePort> MedhaEngine<S> {
             .ok_or_else(|| MedhaError::NotFound(format!("Episode with sequence {}", seq)))?;
         if let Some(expected) = expect {
             if expected != &target_key {
+                // The TypeScript engine's wording; the part after "\nhint: " is the hint.
+                let label = |k: &EntityKey| format!("{}/{}/{}", k.namespace, k.kind, k.id);
                 return Err(MedhaError::InvalidArgument {
-                    name: "seq",
+                    name: "targetSeq",
                     reason: format!(
-                        "episode #{seq} belongs to {}, not {}; check the seq with `medha show`",
-                        target_key.to_string_repr(),
-                        expected.to_string_repr()
+                        "expected an episode of {}, received {seq}\nhint: episode #{seq} belongs to {}; check the seq with 'medha show'",
+                        label(expected),
+                        label(&target_key)
                     ),
                 });
             }
@@ -946,7 +1012,7 @@ impl<S: StorePort> MedhaEngine<S> {
         let episode_input = EpisodeInput {
             key: target_key.clone(),
             at,
-            author: None,
+            author,
             sig: None,
             payload: EpisodePayload::Retract {
                 target_seq: seq,
@@ -1060,25 +1126,88 @@ impl<S: StorePort> MedhaEngine<S> {
         description: Option<String>,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
-        self.require_kind(key)?;
-        let episode_input = EpisodeInput {
-            key: key.clone(),
-            at,
-            author: None,
-            sig: None,
-            payload: EpisodePayload::Proposal {
+        Ok(self
+            .propose_with(ProposeInput {
+                key: key.clone(),
                 provenance: provenance.to_string(),
                 theta0,
                 description,
                 evidence_refs: None,
-                anchor: None,
-                promoted: None,
-                promotion_reason: None,
+                author: None,
                 note: None,
+                at,
+            })?
+            .appended)
+    }
+
+    /// Propose with the default promotion policy (spec §7.3, TypeScript `convergingSourcesPolicy`):
+    /// promoted once at least two distinct sources have proposed the entity. Promotion is recorded
+    /// on the episode and reported; it never changes the fold.
+    pub fn propose_with(&mut self, input: ProposeInput) -> Result<ProposeOutcome, MedhaError> {
+        const MIN_SOURCES: usize = 2;
+        self.require_kind(&input.key)?;
+        if input.provenance.trim().is_empty() {
+            return Err(MedhaError::InvalidArgument {
+                name: "provenance",
+                reason: format!("expected a non-empty string, received {}", input.provenance),
+            });
+        }
+        let repr = input.key.to_string_repr();
+        let mut provenances: Vec<String> = Vec::new();
+        for e in self.store.episodes(None, None)? {
+            if e.key.to_string_repr() != repr {
+                continue;
+            }
+            if let EpisodePayload::Proposal { provenance, .. } = &e.payload {
+                if !provenances.contains(provenance) {
+                    provenances.push(provenance.clone());
+                }
+            }
+        }
+        if !provenances.contains(&input.provenance) {
+            provenances.push(input.provenance.clone());
+        }
+        let promoted = provenances.len() >= MIN_SOURCES;
+        let reason = if promoted {
+            format!(
+                "{} converging sources: {} (threshold >= {MIN_SOURCES})",
+                provenances.len(),
+                provenances.join(", ")
+            )
+        } else {
+            format!(
+                "Requires >= {MIN_SOURCES} converging sources; saw {} ({})",
+                provenances.len(),
+                if provenances.is_empty() {
+                    "none".to_string()
+                } else {
+                    provenances.join(", ")
+                }
+            )
+        };
+        let episode_input = EpisodeInput {
+            key: input.key.clone(),
+            at: input.at,
+            author: input.author,
+            sig: None,
+            payload: EpisodePayload::Proposal {
+                provenance: input.provenance,
+                theta0: input.theta0,
+                description: input.description,
+                evidence_refs: input.evidence_refs,
+                anchor: None,
+                promoted: Some(promoted),
+                promotion_reason: Some(reason.clone()),
+                note: input.note,
             },
         };
-
-        Ok(self.store.append(episode_input)?)
+        let appended = self.store.append(episode_input)?;
+        Ok(ProposeOutcome {
+            appended,
+            promoted,
+            promotion_reason: reason,
+            provenances,
+        })
     }
 
     pub fn define(

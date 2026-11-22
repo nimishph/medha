@@ -43,10 +43,7 @@ pub fn run_mcp_server<S: StorePort>(mut engine: MedhaEngine<S>) -> io::Result<()
 
 fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest) -> Option<Value> {
     let id = req.id?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = crate::clock_now();
 
     match req.method.as_str() {
         "initialize" => Some(json!({

@@ -60,13 +60,12 @@ pub fn render_pack(report: &PackReport) -> String {
                 ""
             };
             lines.push(format!(
-                "- **`{}`** (trust: {:.3}, status: `{:?}`, cost: {}t, density: {:.3}){}",
+                "- **{}**{} (trust: {:.3}, cost: {}, admitted: {})",
                 item.key.to_string_repr(),
+                tag,
                 item.hint.trust,
-                item.hint.status,
                 item.cost,
-                item.density,
-                tag
+                item.admitted_by
             ));
         }
     }

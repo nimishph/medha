@@ -10,8 +10,8 @@ pub use config::{
 };
 pub use engine::{
     ConditionStatus, EnginePackOptions, GateExplanation, GuardInput, LatchEvidence, LiftedStatus,
-    MedhaEngine, RecordInput, RetractOutcome, ShowReport, SimulationReport, StatusLatch,
-    ThresholdExplanation,
+    MedhaEngine, ProposeInput, ProposeOutcome, RecordInput, RetractOutcome, ShowReport,
+    SimulationReport, StatusLatch, ThresholdExplanation,
 };
 pub use errors::MedhaError;
 pub use maintenance::{

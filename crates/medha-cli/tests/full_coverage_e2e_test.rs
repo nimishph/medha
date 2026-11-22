@@ -224,7 +224,12 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     assert!(show_json.status.success());
     let parsed_show: Value = serde_json::from_slice(&show_json.stdout).expect("parse json");
     assert_eq!(parsed_show["key"]["id"], "rule-strict-typing");
-    assert!(parsed_show["hint"]["trust"].as_f64().unwrap() > 0.0);
+    assert!(
+        parsed_show["detail"]["hint"]["trustScore"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
 
     // ==========================================
     // 6. explain-threshold
@@ -243,7 +248,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("explain");
     assert!(explain_out.status.success());
     let explain_str = String::from_utf8_lossy(&explain_out.stdout);
-    assert!(explain_str.contains("explain thresholds"));
+    assert!(explain_str.contains("thresholds for"));
     assert!(explain_str.contains("trusted:"));
     assert!(explain_str.contains("active:"));
 
@@ -343,7 +348,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("show quarantine");
     let show_q_json: Value = serde_json::from_slice(&show_quarantine.stdout).expect("parse json");
-    assert_eq!(show_q_json["hint"]["status"], "quarantined");
+    assert_eq!(show_q_json["detail"]["hint"]["status"], "quarantined");
 
     let ov_restore = Command::new(&bin)
         .args([

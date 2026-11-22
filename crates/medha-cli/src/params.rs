@@ -137,21 +137,108 @@ pub fn params_report(as_of: i64) -> ParamsReport {
     }
 }
 
-pub fn render_params(report: &ParamsReport) -> String {
-    let mut out = Vec::new();
-    out.push("medha: canonical model parameters:".to_string());
-    out.push(format!("  note: {}", report.note));
-    for param in &report.params {
-        let unit_str = param
-            .unit
-            .as_ref()
-            .map(|u| format!(" {}", u))
-            .unwrap_or_default();
-        out.push(format!(
-            "  {:<26} {:<10}{}  ({})",
-            param.name, param.value, unit_str, param.doc
+/// The TypeScript `ParamsReport` (`cli/src/read.ts` `paramsReport`): the same catalog with the
+/// TypeScript note and sources, the sweep constants, and the configured kind specs.
+pub fn params_report_ts(
+    as_of: i64,
+    kind_specs: Option<&[medha::core::fold::KindSpec]>,
+) -> serde_json::Value {
+    use serde_json::json;
+    let base = params_report(as_of);
+    let ema = [
+        "DEFAULT_EMA_ALPHA",
+        "MIN_SAMPLES_FOR_DRIFT",
+        "DRIFT_THRESHOLD",
+    ];
+    let mut params: Vec<serde_json::Value> = base
+        .params
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name,
+                "value": p.value,
+                "source": if ema.contains(&p.name.as_str()) { "medha-core: ema.ts" } else { "medha-core: thresholds.ts" },
+                "doc": p.doc,
+            })
+        })
+        .collect();
+    for (name, value, unit, doc) in [
+        (
+            "DEFAULT_SWEEP_INTERVAL_MS",
+            json!(DEFAULT_SWEEP_INTERVAL_MS),
+            "ms",
+            "Session-start sweep cadence",
+        ),
+        (
+            "DEFAULT_FOLD_DAYS",
+            json!(medha::maintenance::DEFAULT_FOLD_DAYS as i64),
+            "days",
+            "Episodes older than this fold into baselines",
+        ),
+        (
+            "DEFAULT_RETENTION_DAYS",
+            json!(DEFAULT_RETENTION_DAYS),
+            "days",
+            "Stale entities older than this are retired",
+        ),
+    ] {
+        params.push(json!({ "name": name, "value": value, "unit": unit, "source": "medha: maintenance.ts", "doc": doc }));
+    }
+    let mut v = json!({
+        "asOf": as_of,
+        "note": "read-only: model parameters are canonical constants in medha-core — the lean engine has no mutable params store",
+        "params": params,
+    });
+    if let Some(specs) = kind_specs.filter(|s| !s.is_empty()) {
+        v["kinds"] = serde_json::to_value(specs).unwrap_or(json!([]));
+    }
+    v
+}
+
+/// `DEFAULT_SWEEP_INTERVAL_MS` and `DEFAULT_RETENTION_DAYS` from `medha/src/maintenance.ts`.
+pub const DEFAULT_SWEEP_INTERVAL_MS: i64 = 86_400_000;
+pub const DEFAULT_RETENTION_DAYS: i64 = 90;
+
+/// `medha params`, as the TypeScript `renderParams` prints it.
+pub fn render_params_ts(report: &serde_json::Value) -> String {
+    let mut lines = vec![
+        "medha: canonical model parameters (read-only)".to_string(),
+        format!("  note: {}", report["note"].as_str().unwrap_or("")),
+        "  NAME                          VALUE      SOURCE".to_string(),
+    ];
+    for p in report["params"].as_array().cloned().unwrap_or_default() {
+        let value = match p["value"].as_f64() {
+            Some(v) => format!("{v:.3}"),
+            None => p["value"].as_str().unwrap_or("").to_string(),
+        };
+        lines.push(format!(
+            "  {:<28} {:>8}   {}",
+            p["name"].as_str().unwrap_or(""),
+            value,
+            p["source"].as_str().unwrap_or("")
         ));
     }
-    out.push("".to_string());
-    out.join("\n")
+    if let Some(kinds) = report["kinds"].as_array().filter(|k| !k.is_empty()) {
+        lines.push(String::new());
+        lines.push("  CONFIGURED KIND TRUST CONFIGURATIONS:".to_string());
+        for k in kinds {
+            lines.push(format!(
+                "    - kind '{}':",
+                k["name"].as_str().unwrap_or("")
+            ));
+            if let Some(d) = k["description"].as_str() {
+                lines.push(format!("        description: {d}"));
+            }
+            if let Some(w) = k["evidenceWeighting"].as_str() {
+                lines.push(format!("        evidenceWeighting: {w}"));
+            }
+            if !k["thresholds"].is_null() {
+                lines.push(format!("        thresholds: {}", k["thresholds"]));
+            }
+            if !k["recency"].is_null() {
+                lines.push(format!("        recency: {}", k["recency"]));
+            }
+        }
+    }
+    format!("{}\n", lines.join("\n"))
 }
