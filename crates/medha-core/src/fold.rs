@@ -33,8 +33,31 @@ pub struct SignalLimits {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct KindDecisionPolicy {
-    #[serde(default, alias = "require_human_for")]
+    /// `"apply"` or a list of decision types. The TypeScript config accepts both forms; the
+    /// string reads here as `["apply"]`.
+    #[serde(
+        default,
+        alias = "require_human_for",
+        deserialize_with = "deserialize_require_human_for"
+    )]
     pub require_human_for: Option<Vec<String>>,
+}
+
+fn deserialize_require_human_for<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<OneOrMany>::deserialize(deserializer)? {
+        None => None,
+        Some(OneOrMany::One(s)) => Some(vec![s]),
+        Some(OneOrMany::Many(v)) => Some(v),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

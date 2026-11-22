@@ -94,6 +94,54 @@ pub struct RecordInput {
     pub case_id: Option<String>,
 }
 
+/// A decision-tree write (see `MedhaEngine::decision_with`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionInput {
+    pub key: EntityKey,
+    /// An existing branch to edit; `None` mints a new branch id.
+    pub case_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub detach: bool,
+    pub condition: String,
+    pub decision: Decision,
+    pub author: Option<String>,
+    pub at: i64,
+}
+
+/// The canonical form two conditions are compared in: trimmed, whitespace collapsed, lowercase.
+pub fn normalize_condition(condition: &str) -> String {
+    condition
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// `<entity-id>-dec-<5 base36 chars>`, salted by the key (TypeScript `newDecisionCaseId`).
+fn new_decision_case_id(key: &EntityKey, at: i64) -> String {
+    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let fnv = |input: &str| -> u32 {
+        let mut hash: u32 = 0x811c_9dc5;
+        for b in input.bytes() {
+            hash ^= u32::from(b);
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+        hash
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let salt = fnv(&format!("{}/{}/{}", key.namespace, key.kind, key.id));
+    let mut seed = salt ^ nanos ^ (at as u32);
+    let mut suffix = String::new();
+    for i in 0..5u32 {
+        seed = fnv(&format!("{seed}:{i}"));
+        suffix.push(ALPHABET[(seed % ALPHABET.len() as u32) as usize] as char);
+    }
+    format!("{}-dec-{suffix}", key.id)
+}
+
 /// Everything a proposal can carry (the TypeScript `Proposal`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProposeInput {
@@ -1267,6 +1315,151 @@ impl<S: StorePort> MedhaEngine<S> {
         };
 
         Ok(self.store.append(episode_input)?)
+    }
+
+    /// Grow or edit a branch of an entity's decision tree, validated as the TypeScript engine does
+    /// (`validateDecisionTreeEdit`, medha-arj.4): a given `case_id` must name an existing branch
+    /// (it is an edit); a parent must exist and must not be the branch or one of its descendants;
+    /// no sibling may already use the same (normalized) condition; and a decision type the kind's
+    /// `decisionPolicy.requireHumanFor` gates needs a `human:` author. Returns the case id.
+    pub fn decision_with(
+        &mut self,
+        input: DecisionInput,
+    ) -> Result<(AppendResult, String), MedhaError> {
+        self.require_kind(&input.key)?;
+        let tree = self
+            .store
+            .get(&input.key)?
+            .map(|s| s.decision_tree)
+            .unwrap_or_default();
+        let invalid =
+            |name: &'static str, expected: String, received: &str| MedhaError::InvalidArgument {
+                name,
+                reason: format!("expected {expected}, received {received}"),
+            };
+        let mut known: Vec<String> = tree.iter().map(|c| c.id.clone()).collect();
+        known.sort();
+        let existing = |known: &[String]| {
+            if known.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "an existing decision case id of this entity (has: {})",
+                    known.join(", ")
+                ))
+            }
+        };
+        let case_id = match &input.case_id {
+            Some(id) => {
+                if !known.contains(id) {
+                    return Err(invalid(
+                        "decision.caseId",
+                        existing(&known).unwrap_or_else(|| {
+                            "not supplied: this entity has no decision branches to edit".to_string()
+                        }),
+                        id,
+                    ));
+                }
+                id.clone()
+            }
+            None => new_decision_case_id(&input.key, input.at),
+        };
+        if input.detach && input.parent_id.is_some() {
+            return Err(invalid(
+                "decision.detach",
+                "not combined with a parentId (detach means 'move to the top level')".to_string(),
+                input.parent_id.as_deref().unwrap_or(""),
+            ));
+        }
+        let parent = if input.detach {
+            None
+        } else {
+            input.parent_id.clone().or_else(|| {
+                tree.iter()
+                    .find(|c| c.id == case_id)
+                    .and_then(|c| c.parent_id.clone())
+            })
+        };
+        if let Some(p) = &parent {
+            if p == &case_id {
+                return Err(invalid(
+                    "decision.parentId",
+                    "a branch other than itself".to_string(),
+                    p,
+                ));
+            }
+            if !known.contains(p) {
+                return Err(invalid(
+                    "decision.parentId",
+                    existing(&known).unwrap_or_else(|| {
+                        "a decision case id (this entity has no decision branches yet)".to_string()
+                    }),
+                    p,
+                ));
+            }
+            let mut cursor = Some(p.clone());
+            while let Some(c) = cursor {
+                if c == case_id {
+                    return Err(invalid(
+                        "decision.parentId",
+                        "a branch that is not a descendant of this branch".to_string(),
+                        p,
+                    ));
+                }
+                cursor = tree
+                    .iter()
+                    .find(|k| k.id == c)
+                    .and_then(|k| k.parent_id.clone());
+            }
+        }
+        let normalized = normalize_condition(&input.condition);
+        if let Some(dup) = tree.iter().find(|k| {
+            k.id != case_id
+                && k.parent_id == parent
+                && normalize_condition(&k.condition) == normalized
+        }) {
+            return Err(invalid(
+                "decision.condition",
+                format!(
+                    "a condition no sibling of this branch already uses (sibling {} uses it)",
+                    dup.id
+                ),
+                &input.condition,
+            ));
+        }
+        let decision_type = match &input.decision {
+            Decision::Apply => "apply",
+            Decision::Ignore => "ignore",
+            Decision::Probability { .. } => "probability",
+        };
+        let gated = self
+            .store
+            .registries()
+            .kind_spec(&input.key.kind)
+            .and_then(|ks| ks.decision_policy.as_ref())
+            .and_then(|p| p.require_human_for.as_ref())
+            .is_some_and(|types| types.iter().any(|t| t == decision_type));
+        if gated && !medha_core::decision::is_human_author(input.author.as_deref()) {
+            // The part after the hint separator is the hint (see the CLI's failure mapping).
+            return Err(MedhaError::PermissionDenied(format!(
+                "Permission denied for 'decision:{decision_type}': kind '{}' requires a human to grant a '{decision_type}' branch\nhint: Do not retry with another author: 'human:' is a label the caller sets itself, and passing it is not verification. Escalate to a human, who must run this command themselves.",
+                input.key.kind
+            )));
+        }
+        let appended = self.store.append(EpisodeInput {
+            key: input.key.clone(),
+            at: input.at,
+            author: input.author,
+            sig: None,
+            payload: EpisodePayload::Decision {
+                case_id: case_id.clone(),
+                parent_id: input.parent_id,
+                detach: input.detach.then_some(true),
+                condition: input.condition,
+                decision: input.decision,
+            },
+        })?;
+        Ok((appended, case_id))
     }
 
     pub fn decision(

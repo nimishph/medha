@@ -184,13 +184,19 @@ fn from_store(err: &StoreError) -> Failure {
     match err {
         StoreError::InvalidArgument { name, reason } => invalid_reason(name, reason),
         StoreError::Core(c) => from_core(c),
-        StoreError::CorruptStore { store_path, at_seq, .. } => Failure::cli(
-            "StoreCorruptError",
-            "CLI_STORE_CORRUPT",
-            format!("store is corrupt — the log is unrecoverable from seq {at_seq}"),
+        // The store's own error (TypeScript `CorruptStoreError`); `init` raises CLI_STORE_CORRUPT
+        // itself when bootstrap finds a corrupt store.
+        StoreError::CorruptStore {
+            store_path,
+            at_seq,
+            reason,
+        } => Failure::new(
+            "CorruptStoreError",
+            "STORE_LOG_CORRUPT",
+            "store",
+            format!("store is corrupt — the log is unrecoverable from seq {at_seq}: {reason}"),
         )
-        .with_context(json!({ "source": store_path, "atSeq": at_seq }))
-        .with_hint("restore a MedhaSnapshot, or wipe and re-initialize with --recreate"),
+        .with_context(json!({ "source": store_path, "atSeq": at_seq })),
         StoreError::NamespaceViolation { action, namespace, allowed } => Failure::new(
             "NamespaceViolationError",
             "STORE_NAMESPACE_VIOLATION",
@@ -218,12 +224,23 @@ pub fn classify(err: &(dyn std::error::Error + 'static)) -> Failure {
             MedhaError::InvalidArgument { name, reason } => invalid_reason(name, reason),
             MedhaError::Core(c) => from_core(c),
             MedhaError::Store(s) => from_store(s),
-            MedhaError::PermissionDenied(msg) => Failure::new(
-                "PermissionDeniedError",
-                "CORE_PERMISSION_DENIED",
-                "core",
-                msg.clone(),
-            ),
+            MedhaError::PermissionDenied(msg) => {
+                // Like invalid-argument reasons, the message may carry a hint after "\nhint: ".
+                let (message, hint) = match msg.split_once("\nhint: ") {
+                    Some((m, h)) => (m.to_string(), Some(h.to_string())),
+                    None => (msg.clone(), None),
+                };
+                let f = Failure::new(
+                    "PermissionDeniedError",
+                    "CORE_PERMISSION_DENIED",
+                    "core",
+                    message,
+                );
+                match hint {
+                    Some(h) => f.with_hint(h),
+                    None => f,
+                }
+            }
             MedhaError::Config(msg) => {
                 Failure::cli("ConfigFileError", "CLI_CONFIG_INVALID", msg.clone())
             }

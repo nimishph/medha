@@ -514,3 +514,103 @@ pub fn render_remove_episode(r: &Value) -> String {
         )
     }
 }
+
+pub fn decision<S: StorePort>(
+    engine: &mut MedhaEngine<S>,
+    home: &str,
+    key: EntityKey,
+    args: &crate::args::DecisionArgs,
+    now: i64,
+) -> Res<Value> {
+    use medha::core::decision::Decision;
+    non_empty(
+        "--condition",
+        "a non-empty string",
+        Some(args.condition.as_str()),
+    )?;
+    let chosen = [args.apply, args.ignore, args.probability.is_some()]
+        .iter()
+        .filter(|b| **b)
+        .count();
+    if chosen != 1 {
+        return Err(Box::new(Failure::invalid(
+            "--apply/--ignore/--probability",
+            "exactly one of --apply, --ignore, or --probability",
+            if chosen == 0 {
+                "none given"
+            } else {
+                "more than one given"
+            },
+        )));
+    }
+    let decision = if args.apply {
+        Decision::Apply
+    } else if args.ignore {
+        Decision::Ignore
+    } else {
+        let p = args.probability.unwrap_or(f64::NAN);
+        if !(p.is_finite() && (0.0..=1.0).contains(&p)) {
+            return Err(Box::new(Failure::invalid(
+                "--probability",
+                "a number in [0,1]",
+                p,
+            )));
+        }
+        Decision::Probability { value: p }
+    };
+    require_kind(engine, &key.kind)?;
+    if args.detach && args.parent.is_some() {
+        return Err(Box::new(Failure::invalid(
+            "--detach/--parent",
+            "not both (--detach means \"move to the top level\")",
+            format!(
+                "{{\"detach\":true,\"parent\":\"{}\"}}",
+                args.parent.as_deref().unwrap_or("")
+            ),
+        )));
+    }
+    let at = parse_timestamp(args.at.as_deref(), now)?;
+    let (_, case_id) = engine.decision_with(medha::DecisionInput {
+        key: key.clone(),
+        case_id: args.case_id.clone(),
+        parent_id: args.parent.clone(),
+        detach: args.detach,
+        condition: args.condition.clone(),
+        decision: decision.clone(),
+        author: resolve_author(args.author.as_deref()),
+        at,
+    })?;
+    let mut report = json!({ "home": home, "key": key_json(&key), "caseId": case_id });
+    // The effective parent when it was given or detached; an edit that omits it keeps the old one.
+    if args.detach {
+        report["parentId"] = Value::Null;
+    } else if let Some(p) = &args.parent {
+        report["parentId"] = json!(p);
+    }
+    report["condition"] = json!(args.condition);
+    report["decision"] = serde_json::to_value(&decision)?;
+    Ok(report)
+}
+
+pub fn render_decision(r: &Value, key: &EntityKey) -> String {
+    let d = &r["decision"];
+    let label = match d["type"].as_str() {
+        Some("probability") => format!("probability({})", d["value"]),
+        Some(t) => t.to_string(),
+        None => String::new(),
+    };
+    let mut lines = vec![format!(
+        "medha: decision case {} on {}",
+        r["caseId"].as_str().unwrap_or(""),
+        key_label(key)
+    )];
+    if let Some(p) = r["parentId"].as_str() {
+        lines.push(format!("  parent:    {p}"));
+    }
+    lines.push(format!(
+        "  condition: {}",
+        r["condition"].as_str().unwrap_or("")
+    ));
+    lines.push(format!("  decision:  {label}"));
+    format!("{}\n", lines.join("\n"))
+}

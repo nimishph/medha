@@ -7,9 +7,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use medha::store::{
-    AppendResult, EntityKey, EntityState, Episode, EpisodeInput, EpisodePayload, MemoryStore,
-    OpenResult, ReplaceLogResult, SqliteStore, SqliteStoreOptions, StoreError, StorePort,
-    StoreRegistries,
+    AppendResult, CorruptLocation, EntityKey, EntityState, Episode, EpisodeInput, EpisodePayload,
+    MemoryStore, OpenResult, ReplaceLogResult, SqliteStore, SqliteStoreOptions, StoreError,
+    StorePort, StoreRegistries,
 };
 use serde_json::{json, Value};
 
@@ -61,14 +61,6 @@ fn io(e: std::io::Error) -> StoreError {
     StoreError::Database(e.to_string())
 }
 
-fn corrupt(path: &Path, reason: &str) -> StoreError {
-    StoreError::CorruptStore {
-        store_path: path.display().to_string(),
-        at_seq: 0,
-        reason: reason.to_string(),
-    }
-}
-
 impl StorePort for FileDocStore {
     fn name(&self) -> &'static str {
         "file"
@@ -87,9 +79,20 @@ impl StorePort for FileDocStore {
         if !self.path.exists() {
             return Ok(OpenResult::Ok);
         }
+        // A document that cannot be read, or a log that breaks, opens as corrupt (as the TypeScript
+        // FilePolicyStore does): the readable prefix is loaded, reads refuse to answer from it, and
+        // preflight reports where it broke instead of the command failing outright.
         let text = fs::read_to_string(&self.path).map_err(io)?;
-        let doc: Value = serde_json::from_str(&text)
-            .map_err(|_| corrupt(&self.path, "not a valid store document"))?;
+        let source = self.path.display().to_string();
+        let corrupt_at = |at_seq: u64| OpenResult::Corrupt {
+            location: CorruptLocation {
+                source: source.clone(),
+                at_seq,
+            },
+        };
+        let Ok(doc) = serde_json::from_str::<Value>(&text) else {
+            return Ok(corrupt_at(0));
+        };
         if doc["layoutVersion"].as_u64().is_some_and(|v| v > 1) {
             return Err(StoreError::StoreLayout {
                 found: doc["layoutVersion"].as_u64().unwrap_or(0) as u32,
@@ -97,14 +100,22 @@ impl StorePort for FileDocStore {
             });
         }
         let Some(raw) = doc["episodes"].as_array() else {
-            return Err(corrupt(&self.path, "the document has no episode log"));
+            return Ok(corrupt_at(0));
         };
-        let episodes: Vec<Episode> = raw
-            .iter()
-            .map(|e| serde_json::from_value(e.clone()))
-            .collect::<Result<_, _>>()
-            .map_err(|_| corrupt(&self.path, "an episode could not be read"))?;
-        self.inner.replace_log(&episodes)?;
+        let mut episodes: Vec<Episode> = Vec::new();
+        let mut broke_at = None;
+        for (i, e) in raw.iter().enumerate() {
+            match serde_json::from_value::<Episode>(e.clone()) {
+                Ok(ep) if ep.seq == i as u64 => episodes.push(ep),
+                _ => {
+                    broke_at = Some(i as u64);
+                    break;
+                }
+            }
+        }
+        if self.inner.replace_log(&episodes).is_err() {
+            return Ok(corrupt_at(0));
+        }
         if let Some(meta) = doc["meta"].as_object() {
             for (k, v) in meta {
                 if let Some(v) = v.as_str() {
@@ -113,7 +124,10 @@ impl StorePort for FileDocStore {
                 }
             }
         }
-        Ok(OpenResult::Ok)
+        Ok(match broke_at {
+            Some(seq) => corrupt_at(seq),
+            None => OpenResult::Ok,
+        })
     }
     fn close(&mut self) -> Result<(), StoreError> {
         self.inner.close()

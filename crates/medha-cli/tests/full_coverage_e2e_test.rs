@@ -401,7 +401,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("compact");
     assert!(compact_out.status.success());
-    assert!(String::from_utf8_lossy(&compact_out.stdout).contains("compaction complete"));
+    assert!(String::from_utf8_lossy(&compact_out.stdout).contains("compaction for"));
 
     // ==========================================
     // 14. preflight
@@ -412,7 +412,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("preflight");
     assert!(preflight_out.status.success());
     let preflight_str = String::from_utf8_lossy(&preflight_out.stdout);
-    assert!(preflight_str.contains("preflight integrity: OK"));
+    assert!(preflight_str.contains("status:     ok"));
 
     // ==========================================
     // 15. status
@@ -475,8 +475,8 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("pack json");
     assert!(pack_json.status.success());
     let pack_j: Value = serde_json::from_slice(&pack_json.stdout).expect("parse pack json");
-    assert!(!pack_j["selected"].as_array().unwrap().is_empty());
-    assert!(pack_j["totalCost"].as_u64().unwrap() <= 1000);
+    assert!(!pack_j["outcome"]["selected"].as_array().unwrap().is_empty());
+    assert!(pack_j["outcome"]["totalCost"].as_u64().unwrap() <= 1000);
 
     // ==========================================
     // 18. mcp server over stdio (all 14 tools check)

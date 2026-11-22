@@ -144,9 +144,9 @@ fn test_cli_lifecycle_and_pack() {
         .expect("pack json");
     assert!(pack_json.status.success());
     let parsed: serde_json::Value = serde_json::from_slice(&pack_json.stdout).expect("parse json");
-    assert_eq!(parsed["mandatoryCount"], 0);
-    assert_eq!(parsed["meritCount"], 1);
-    assert!(parsed["totalCost"].as_u64().unwrap() <= 500);
+    assert_eq!(parsed["outcome"]["mandatoryCount"], 0);
+    assert_eq!(parsed["outcome"]["meritCount"], 1);
+    assert!(parsed["outcome"]["totalCost"].as_u64().unwrap() <= 500);
 }
 
 /// `show` and `explain-threshold` say when and why a status is latched (gh-20), with the same
@@ -281,7 +281,7 @@ fn test_cli_ids_filter_on_list_and_pack() {
 
     let pack = run(&["--json", "pack", "--budget", "2000", "--ids", "live-a"]);
     let parsed: serde_json::Value = serde_json::from_slice(&pack.stdout).expect("pack json");
-    let selected: Vec<&str> = parsed["selected"]
+    let selected: Vec<&str> = parsed["outcome"]["selected"]
         .as_array()
         .unwrap()
         .iter()
@@ -335,7 +335,7 @@ fn test_cli_reads_fail_on_a_log_that_fails_integrity() {
 
     let preflight = run(&["preflight"]);
     assert_eq!(preflight.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&preflight.stdout).contains("FAILED"));
+    assert!(String::from_utf8_lossy(&preflight.stdout).contains("is corrupt — preflight exits 1"));
 
     let status = run(&["status"]);
     assert_eq!(status.status.code(), Some(1));

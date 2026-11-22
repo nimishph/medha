@@ -9,6 +9,7 @@ mod home_store;
 mod init;
 mod issue;
 mod keys;
+mod maintain;
 mod mcp;
 mod mcp_config;
 mod pack;
@@ -32,14 +33,6 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
-
-fn uuid_or_random_hex() -> String {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{:x}", t)
-}
 
 fn main() {
     let command = Cli::command();
@@ -144,6 +137,17 @@ fn open_engine(
         engine.set_sync(Box::new(git));
     }
     Ok(engine)
+}
+
+/// The Rust hints behind a pack outcome's `selected` or `rejected` list, in order.
+fn report_items<'a>(
+    outcome: &'a medha::core::packer::PackOutcome,
+    list: &str,
+) -> Vec<Option<&'a medha::core::types::TrustHint>> {
+    match list {
+        "selected" => outcome.selected.iter().map(|i| Some(&i.hint)).collect(),
+        _ => outcome.rejected.iter().map(|_| None).collect(),
+    }
 }
 
 /// An entity key from `--namespace/--kind/--id`; an empty id is an invalid argument (exit 2), as in
@@ -601,39 +605,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::Compact(compact_args) => {
-            if let Some(older) = compact_args.older_than {
-                if older <= 0.0 {
-                    eprintln!("medha error: --older-than must be positive");
-                    exit(2);
-                }
-            }
-            let comp = engine.compact_older_than(now, compact_args.older_than)?;
+            let report = maintain::compact(&mut engine, &home_str, compact_args.older_than, now)?;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&comp)?);
+                println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!(
-                    "medha: compaction complete: before={}, after={}, removed={}",
-                    comp.before_count, comp.after_count, comp.removed_count
-                );
+                print!("{}", maintain::render_compact(&report));
             }
         }
         Commands::Preflight(_) => {
-            let pre = engine.preflight()?;
+            let report = maintain::preflight(&engine, &home_str, now)?;
             if cli.json {
-                println!("{}", serde_json::to_string_pretty(&pre)?);
+                println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!(
-                    "medha: preflight integrity: {}",
-                    if pre.ok { "OK" } else { "FAILED" }
-                );
-                println!("  entities: {}", pre.total_entities);
-                println!("  episodes: {}", pre.total_episodes);
-                for issue in &pre.issues {
-                    println!("  issue:    {}", issue);
-                }
+                print!("{}", maintain::render_preflight(&report));
             }
-            // A failed preflight exits 1, as in the TypeScript CLI, so scripts can gate on it.
-            if !pre.ok {
+            if maintain::is_corrupt(&report) {
                 exit(1);
             }
         }
@@ -726,7 +712,38 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 format: args.format.to_lowercase(),
             };
             if cli.json || report.format == "json" {
-                println!("{}", serde_json::to_string_pretty(&report.outcome)?);
+                // The TypeScript PackReport: {home, budget, outcome (with TypeScript hints and its
+                // own budget), format}.
+                let mut outcome = serde_json::to_value(&report.outcome)?;
+                for list in ["selected", "rejected"] {
+                    let items = report_items(&report.outcome, list);
+                    if let Some(arr) = outcome[list].as_array_mut() {
+                        for (slot, hint) in arr.iter_mut().zip(items) {
+                            if let Some(h) = hint {
+                                slot["hint"] = ts_view::hint_of(&engine, h, now)?;
+                            }
+                        }
+                    }
+                }
+                let mut ordered = serde_json::Map::new();
+                for k in ["selected", "rejected"] {
+                    ordered.insert(k.to_string(), outcome[k].take());
+                }
+                ordered.insert("budget".to_string(), serde_json::json!(report.budget));
+                if let Some(rest) = outcome.as_object() {
+                    for (k, v) in rest {
+                        if !ordered.contains_key(k) {
+                            ordered.insert(k.clone(), v.clone());
+                        }
+                    }
+                }
+                let json_report = serde_json::json!({
+                    "home": report.home,
+                    "budget": report.budget,
+                    "outcome": ordered,
+                    "format": report.format,
+                });
+                println!("{}", serde_json::to_string_pretty(&json_report)?);
             } else {
                 print!("{}", pack::render_pack(&report));
             }
@@ -781,68 +798,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Decision(args) => {
             let key = key_from(&args.namespace, &args.kind, &args.id)?;
-            let chosen = [args.apply, args.ignore, args.probability.is_some()]
-                .iter()
-                .filter(|&&b| b)
-                .count();
-            if chosen != 1 {
-                eprintln!(
-                    "medha error: exactly one of --apply, --ignore, or --probability must be specified"
-                );
-                exit(2);
-            }
-            if args.detach && args.parent.is_some() {
-                eprintln!("medha error: --detach and --parent cannot both be used");
-                exit(2);
-            }
-            let decision = if args.apply {
-                medha_core::decision::Decision::Apply
-            } else if args.ignore {
-                medha_core::decision::Decision::Ignore
-            } else {
-                let p = args.probability.unwrap();
-                if !(0.0..=1.0).contains(&p) {
-                    eprintln!("medha error: --probability must be between 0.0 and 1.0");
-                    exit(2);
-                }
-                medha_core::decision::Decision::Probability { value: p }
-            };
-            let case_id = args
-                .case_id
-                .unwrap_or_else(|| format!("c-{}", uuid_or_random_hex()));
-            let parent_id = if args.detach { None } else { args.parent };
-            let at = now;
-            let _ = engine.decision(
-                &key,
-                &case_id,
-                parent_id.clone(),
-                &args.condition,
-                decision.clone(),
-                at,
-            )?;
+            let report = write::decision(&mut engine, &home_str, key.clone(), &args, now)?;
             if cli.json {
-                let mut out = serde_json::json!({
-                    "home": home_dir.display().to_string(),
-                    "key": key,
-                    "caseId": case_id,
-                    "condition": args.condition,
-                    "decision": decision,
-                });
-                if let Some(ref pid) = parent_id {
-                    out["parentId"] = serde_json::json!(pid);
-                }
-                println!("{}", serde_json::to_string_pretty(&out)?);
+                println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!(
-                    "medha: decision case {} on {}",
-                    case_id,
-                    key.to_string_repr()
-                );
-                if let Some(ref pid) = parent_id {
-                    println!("  parent:    {}", pid);
-                }
-                println!("  condition: {}", args.condition);
-                println!("  decision:  {:?}", decision);
+                print!("{}", write::render_decision(&report, &key));
             }
         }
         Commands::RemoveEpisode(args) => {
@@ -855,157 +815,42 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Maintain(maintain_args) => match maintain_args.action {
             MaintainAction::Preflight(_) => {
-                let pre = engine.preflight()?;
+                let report = maintain::preflight(&engine, &home_str, now)?;
                 if cli.json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "home": home_dir.display().to_string(),
-                            "asOf": now,
-                            "preflight": pre,
-                        }))?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
-                    println!(
-                        "medha: preflight integrity: {}",
-                        if pre.ok { "OK" } else { "FAILED" }
-                    );
-                    println!("  entities: {}", pre.total_entities);
-                    println!("  episodes: {}", pre.total_episodes);
+                    print!("{}", maintain::render_preflight(&report));
                 }
-                if !pre.ok {
+                if maintain::is_corrupt(&report) {
                     exit(1);
                 }
             }
             MaintainAction::Compact(compact_args) => {
-                if let Some(older) = compact_args.older_than {
-                    if older <= 0.0 {
-                        eprintln!("medha error: --older-than must be positive");
-                        exit(2);
-                    }
-                }
-                let comp = engine.compact_older_than(now, compact_args.older_than)?;
+                let report =
+                    maintain::compact(&mut engine, &home_str, compact_args.older_than, now)?;
                 if cli.json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "home": home_dir.display().to_string(),
-                            "asOf": now,
-                            "report": comp,
-                        }))?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
-                    println!(
-                        "medha: compaction complete: before={}, after={}, removed={}",
-                        comp.before_count, comp.after_count, comp.removed_count
-                    );
+                    print!("{}", maintain::render_compact(&report));
                 }
             }
             MaintainAction::Backup(backup_args) => {
-                let target_path = match backup_args.resolved_path() {
-                    Ok(p) => PathBuf::from(p),
-                    Err(e) => {
-                        eprintln!("medha error: {}", e);
-                        exit(2);
-                    }
-                };
-                let episodes = engine.store().episodes(None, None)?;
-                let states = engine.store().list()?;
-                let snapshot = serde_json::json!({
-                    "format": "sutras.medha/v1",
-                    "formatVersion": 1,
-                    "exportedAt": now,
-                    "registries": config.registries,
-                    "entities": states,
-                    "episodes": episodes,
-                    "meta": {
-                        "medha.maintenance.last_sweep": engine.store().get_meta("medha.maintenance.last_sweep")?.unwrap_or_default(),
-                    }
-                });
-                let json_bytes = serde_json::to_string_pretty(&snapshot)?;
-                fs::write(&target_path, json_bytes)?;
+                let path = backup_args.resolved_path().unwrap_or("").to_string();
+                let registries = serde_json::to_value(&config.registries)?;
+                let report = maintain::backup(&engine, &home_str, &registries, &path, now)?;
                 if cli.json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "home": home_dir.display().to_string(),
-                            "asOf": now,
-                            "path": target_path.display().to_string(),
-                            "snapshot": snapshot,
-                        }))?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
-                    println!(
-                        "medha: exported snapshot to {} ({} episodes, {} entities)",
-                        target_path.display(),
-                        episodes.len(),
-                        states.len()
-                    );
+                    print!("{}", maintain::render_backup(&report));
                 }
             }
             MaintainAction::Restore(restore_args) => {
-                let source_path = match restore_args.resolved_path() {
-                    Ok(p) => PathBuf::from(p),
-                    Err(e) => {
-                        eprintln!("medha error: {}", e);
-                        exit(2);
-                    }
-                };
-                let content = match fs::read_to_string(&source_path) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!(
-                            "medha error: SnapshotFileError: cannot read snapshot file {}: {}",
-                            source_path.display(),
-                            e
-                        );
-                        exit(1);
-                    }
-                };
-                let raw_val: serde_json::Value = match serde_json::from_str(&content) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!(
-                            "medha error: SnapshotFileError: invalid JSON in {}: {}",
-                            source_path.display(),
-                            e
-                        );
-                        exit(1);
-                    }
-                };
-                let snapshot = match medha_sync::migrate_snapshot(raw_val) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!(
-                            "medha error: SnapshotFileError: invalid snapshot in {}: {}",
-                            source_path.display(),
-                            e
-                        );
-                        exit(1);
-                    }
-                };
-                let before_count = engine.store().episodes(None, None)?.len();
-                let episodes = snapshot.episodes.unwrap_or_default();
-                let replace_res = engine.store_mut().replace_log(&episodes)?;
-                if let Some(meta_map) = snapshot.meta {
-                    for (k, v) in meta_map {
-                        let _ = engine.store_mut().set_meta(&k, &v);
-                    }
-                }
+                let path = restore_args.resolved_path().unwrap_or("").to_string();
+                let report = maintain::restore(&mut engine, &home_str, &path, now)?;
                 if cli.json {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "home": home_dir.display().to_string(),
-                            "asOf": now,
-                            "path": source_path.display().to_string(),
-                            "restored": { "from": replace_res.from, "to": replace_res.to },
-                            "episodes": { "before": before_count, "after": episodes.len() },
-                        }))?
-                    );
+                    println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {
-                    println!("medha: restored store from {}", source_path.display());
-                    println!("  episodes: {} restored", episodes.len());
+                    print!("{}", maintain::render_restore(&report));
                 }
             }
             MaintainAction::Sweep(sweep_args) => {
