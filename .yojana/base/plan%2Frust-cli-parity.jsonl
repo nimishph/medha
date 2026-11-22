@@ -1,7 +1,9 @@
 {"planId":"plan/rust-cli-parity","status":"draft"}
 {"id":"req-commands","revision":"r_44b03d3dabad00e6"}
+{"id":"req-engine-signing","revision":"r_534e0a37922f30b1"}
 {"id":"req-flags","revision":"r_c7fea686c580043a"}
-{"id":"req-init","revision":"r_b37fff98e1437e11"}
+{"id":"req-help","revision":"r_06652550213a0c56"}
+{"id":"req-init","revision":"r_597debecafa05069"}
 {"id":"req-json-shapes","revision":"r_3b7bd2d41619dc85"}
 {"id":"req-suite-green","revision":"r_71acb17c1c567075"}
 {"id":"req-text-output","revision":"r_032722f3824c2fd9"}

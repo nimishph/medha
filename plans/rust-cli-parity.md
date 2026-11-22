@@ -72,7 +72,7 @@ CLAUDE.md, validates `--config` strictly, honours `--backend`, `--namespace`, `-
 
 ```yojana:claim
 kind: text
-expression: /README\.md/ in crates/medha-cli/src/main.rs
+expression: /README\.md/ in crates/medha-cli/src/init.rs
 ```
 
 ## Requirement: remaining command groups match {#req-commands}
@@ -84,3 +84,46 @@ namespace-scoped home behave as the TypeScript CLI does.
 kind: path
 expression: crates/medha-cli/src/mcp_config.rs
 ```
+
+## Requirement: the Rust engine signs episodes {#req-engine-signing}
+
+The two remaining `medha keys` cases need episode signing in the Rust engine: in `require` mode a
+write is signed with the home's key and an author other than the key's principal is refused,
+legacy (unsigned) episodes count only after `keys adopt`, rotation keeps past episodes valid and
+deletes the old private key, and revocation disowns a key's episodes. Today every Rust write
+stores `sig: None`; `crates/medha-cli/src/keys.rs` manages keys but nothing signs with them.
+
+```yojana:claim
+kind: text
+expression: '/sig: Some\(/ in crates/medha/src/engine.rs'
+```
+
+## Requirement: help lists distill and styles on a terminal {#req-help}
+
+`medha --help` lists every command the TypeScript CLI has, `distill` included (the Rust CLI has no
+`distill` command yet, though the MCP `distill_trajectory` tool exists), and adds bold section
+headings only when stdout is a terminal.
+
+```yojana:claim
+kind: text
+expression: /Distill/ in crates/medha-cli/src/args.rs
+```
+
+## Status and known gaps (2026-11-22)
+
+Gate: `bun run test:cli-parity` passes 214 of 219 (was 105). Left: 2 `keys` cases
+(req-engine-signing), 2 `--help` cases (req-help), and the MCP subprocess handshake, which cannot
+pass through this gate: the TypeScript CLI's `MEDHA_CLI_BINARY` delegation runs the binary with
+`spawnSync`, so an interactive stdio session never streams. The Rust server lists the TypeScript
+server's 19 tools; a direct handshake works.
+
+Found along the way, not yet addressed:
+
+- The Rust core still treats `ADOPTED`, `HEURISTIC` and `FLAKY` as built-in signals when a home has
+  no registries. `init` now writes the TypeScript registries (the canonical four), so configured
+  homes match; an engine opened without a config does not.
+- The Rust engine applies only the `ema` weight updater; `record --updater` accepts only `ema`.
+- MCP tool outputs (not covered by the CLI suite) still serialize Rust-shaped hints.
+- `cli/src/docs.ts` shows an MCP config with `"args": ["mcp"]`; both CLIs need `["mcp", "serve"]`.
+- Deliberate difference kept: without `--dir`/`--home`, the Rust CLI also looks for `.medha/` in
+  parent directories (hooks run from subdirectories rely on it).
