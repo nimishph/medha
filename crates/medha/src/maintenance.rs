@@ -1,6 +1,9 @@
 use medha_core::types::LifecycleStatus;
 use serde::{Deserialize, Serialize};
 
+/// Episodes older than this many days are folded into baselines by default (TS `DEFAULT_FOLD_DAYS`).
+pub const DEFAULT_FOLD_DAYS: f64 = 90.0;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SweepOptions {
     pub prune_retired: bool,

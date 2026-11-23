@@ -24,6 +24,7 @@ pub const GROUPS: &[(&str, &[&str])] = &[
             "remove-episode",
             "override",
             "reinstate",
+            "distill",
         ],
     ),
     (
@@ -101,8 +102,34 @@ pub fn sections(cmd: &Command) -> Vec<(String, Vec<(String, String)>)> {
     out
 }
 
-/// A clap help template for the root command with the commands laid out in sections.
+/// Whether help should be styled: `FORCE_COLOR` (`0` = off) and `NO_COLOR` win, else stdout is a
+/// terminal. The TypeScript CLI styles help only when its stdout is a terminal.
+pub fn styled() -> bool {
+    if let Ok(v) = std::env::var("FORCE_COLOR") {
+        return v != "0" && !v.is_empty();
+    }
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+/// A clap help template for the root command with the commands laid out in sections; headings
+/// are bold when `styled` (TypeScript `help(styled)`).
+#[cfg(test)]
 pub fn grouped_template(cmd: &Command) -> String {
+    grouped_template_styled(cmd, false)
+}
+
+pub fn grouped_template_styled(cmd: &Command, styled: bool) -> String {
+    let bold = |text: &str| {
+        if styled {
+            format!("\u{1b}[1m{text}\u{1b}[22m")
+        } else {
+            text.to_string()
+        }
+    };
     let groups = sections(cmd);
     let width = groups
         .iter()
@@ -112,7 +139,7 @@ pub fn grouped_template(cmd: &Command) -> String {
 
     let mut text = String::from("{about}\n\nUSAGE: {usage}\n");
     for (title, entries) in &groups {
-        text.push_str(&format!("\n{}:\n", title.to_uppercase()));
+        text.push_str(&format!("\n{}:\n", bold(&title.to_uppercase())));
         for (name, about) in entries {
             text.push_str(&format!("  {name:<width$}  {about}\n"));
         }

@@ -10,7 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.8.0-alpha.1"
+version = "0.8.0-alpha.2"
 edition = "2021"
 authors = ["Nimish Phalnikar <https://github.com/nimishph>"]
 license = "MIT"
@@ -18,7 +18,7 @@ repository = "https://github.com/nimishph/medha"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 thiserror = "2.0"
 ed25519-dalek = { version = "2.1", default-features = false, features = ["rand_core"] }
 sha2 = "0.10"

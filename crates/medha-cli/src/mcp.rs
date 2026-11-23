@@ -15,7 +15,46 @@ struct JsonRpcRequest {
     pub params: Option<Value>,
 }
 
-pub fn run_mcp_server<S: StorePort>(mut engine: MedhaEngine<S>) -> io::Result<()> {
+/// The tools the TypeScript MCP server lists, in its order (`cli/src/mcp.ts`). `tools/list`
+/// advertises exactly these.
+const TS_TOOL_ORDER: [&str; 19] = [
+    "hints",
+    "list_entities",
+    "show_entity",
+    "record_signal",
+    "report_guard",
+    "record_decision",
+    "propose",
+    "drift",
+    "simulate",
+    "status",
+    "retract_episode",
+    "remove_episode",
+    "pack_context",
+    "hints_for_context",
+    "verify_guard",
+    "detect_pitfalls",
+    "distill_trajectory",
+    "policy_latch",
+    "primer",
+];
+
+fn ts_tool_list(mut resp: Value) -> Value {
+    if let Some(tools) = resp["result"]["tools"].as_array() {
+        let ordered: Vec<Value> = TS_TOOL_ORDER
+            .iter()
+            .filter_map(|name| tools.iter().find(|t| t["name"] == *name).cloned())
+            .collect();
+        resp["result"]["tools"] = Value::Array(ordered);
+    }
+    resp
+}
+
+pub fn run_mcp_server<S: StorePort>(
+    mut engine: MedhaEngine<S>,
+    home: &std::path::Path,
+) -> io::Result<()> {
+    eprintln!("medha mcp: serving {}", home.display());
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -43,10 +82,7 @@ pub fn run_mcp_server<S: StorePort>(mut engine: MedhaEngine<S>) -> io::Result<()
 
 fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest) -> Option<Value> {
     let id = req.id?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now = crate::clock_now();
 
     match req.method.as_str() {
         "initialize" => Some(json!({
@@ -64,7 +100,7 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
             }
         })),
         "notifications/initialized" => None,
-        "tools/list" => Some(json!({
+        "tools/list" => Some(ts_tool_list(json!({
             "jsonrpc": "2.0",
             "id": id,
             "result": {
@@ -362,7 +398,7 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                     }
                 ]
             }
-        })),
+        }))),
         "tools/call" => {
             let params = req.params.unwrap_or(json!({}));
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -372,7 +408,14 @@ fn handle_request<S: StorePort>(engine: &mut MedhaEngine<S>, req: JsonRpcRequest
                 .get("compact")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let result_val = run_tool(engine, tool_name, &args, now);
+            // The TypeScript server's result shapes: tools whose report differs answer from
+            // mcp_shapes; any Rust hint left in a result becomes the TypeScript EvidentialHint.
+            let result_val = crate::mcp_shapes::ts_tool(engine, tool_name, &args, now)
+                .unwrap_or_else(|| run_tool(engine, tool_name, &args, now))
+                .map(|mut v| {
+                    crate::mcp_shapes::ts_hints(engine, &mut v, now);
+                    v
+                });
             match result_val {
                 Ok(content_json) => {
                     let text = if is_compact {
@@ -926,6 +969,139 @@ fn run_tool<S: StorePort>(
                 }
                 Err(e) => Err(e.to_string()),
             }
+        }
+        "hints_for_context" => {
+            let strings = |name: &str| -> Option<Vec<String>> {
+                args.get(name).and_then(|v| v.as_array()).map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(String::from))
+                        .collect()
+                })
+            };
+            let filter = medha::ContextFilter {
+                files: strings("files"),
+                languages: strings("languages"),
+                query: args.get("query").and_then(|v| v.as_str()).map(String::from),
+            };
+            let opts = medha::EnginePackOptions {
+                budget: args.get("budget").and_then(|v| v.as_u64()).unwrap_or(2000) as usize,
+                kind: Some(
+                    args.get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("rule")
+                        .to_string(),
+                ),
+                ..Default::default()
+            };
+            let outcome = engine
+                .pack_in_context(opts, Some(&filter), now)
+                .map_err(|e| e.to_string())?;
+            if args.get("compact").and_then(|v| v.as_bool()) == Some(true) {
+                let selected: Vec<Value> = outcome
+                    .selected
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "key": s.key,
+                            "trust": s.hint.trust,
+                            "status": format!("{:?}", s.hint.status).to_lowercase(),
+                            "admittedBy": s.admitted_by,
+                        })
+                    })
+                    .collect();
+                return Ok(json!({
+                    "selectedCount": outcome.selected.len(),
+                    "totalCost": outcome.total_cost,
+                    "selected": selected,
+                }));
+            }
+            let mut v = serde_json::to_value(&outcome).map_err(|e| e.to_string())?;
+            if let Some(arr) = v["selected"].as_array_mut() {
+                for (slot, item) in arr.iter_mut().zip(&outcome.selected) {
+                    slot["hint"] = crate::ts_view::hint_of(engine, &item.hint, now)
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            Ok(v)
+        }
+        "verify_guard" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or("Invalid id: expected an entity id")?;
+            let guard = args
+                .get("guard")
+                .and_then(|v| v.as_str())
+                .ok_or("Invalid guard: expected a guard name")?;
+            let mut pass = args.get("ok").and_then(|v| v.as_bool());
+            if pass.is_none() {
+                if let Some(cmd) = args
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .filter(|c| !c.trim().is_empty())
+                {
+                    let status = if cfg!(windows) {
+                        std::process::Command::new("cmd").args(["/C", cmd]).status()
+                    } else {
+                        std::process::Command::new("sh").args(["-c", cmd]).status()
+                    };
+                    pass = Some(status.map(|s| s.success()).unwrap_or(false));
+                }
+            }
+            let Some(pass) = pass else {
+                return Err("Invalid ok or command: expected must provide either an explicit ok boolean or a command to execute, received undefined".to_string());
+            };
+            let key = EntityKey::new(
+                args.get("namespace").and_then(|v| v.as_str()).unwrap_or(""),
+                args.get("kind").and_then(|v| v.as_str()).unwrap_or("rule"),
+                id,
+            );
+            engine
+                .guard(medha::GuardInput {
+                    key: key.clone(),
+                    ok: pass,
+                    kind: Some(guard.to_string()),
+                    at: now,
+                    author: None,
+                    note: None,
+                })
+                .map_err(|e| e.to_string())?;
+            let hint = crate::ts_view::hint(engine, &key, now).map_err(|e| e.to_string())?;
+            let lifted = pass && hint["status"] != "quarantined";
+            Ok(json!({ "id": id, "guard": guard, "ok": pass, "hint": hint, "lifted": lifted }))
+        }
+        "detect_pitfalls" => {
+            let pitfalls = engine
+                .detect_pitfalls(
+                    args.get("kind").and_then(|v| v.as_str()),
+                    args.get("namespace").and_then(|v| v.as_str()),
+                    args.get("minFailures")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(5.0),
+                    args.get("limit")
+                        .and_then(|v| v.as_u64())
+                        .map(|l| l as usize),
+                    now,
+                )
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(pitfalls).map_err(|e| e.to_string())
+        }
+        "distill_trajectory" => {
+            let auto_file = args
+                .get("autoFile")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trajectory: medha::TrajectoryEvidence =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let (proposals, filed) = engine
+                .distill_trajectory(&trajectory, auto_file, now)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "incidentId": trajectory.id,
+                "proposals": proposals,
+                "filedCount": filed,
+                "autoFiled": auto_file,
+            }))
         }
         other => Err(format!("Unknown tool: {}", other)),
     }

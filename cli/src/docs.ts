@@ -139,7 +139,7 @@ medha pack --budget 500 --format markdown
 - **\`medha distill\`**: Retrospectively mine incident trajectories into candidate rules.
 - **\`medha ui\`**: Launch the interactive evidential memory web dashboard.
 - **\`medha docs\`**: Launch the zero-dependency offline local documentation reader.
-- **\`medha mcp\`**: Start the stdio Model Context Protocol (MCP) server for agents.
+- **\`medha mcp serve\`**: Start the stdio Model Context Protocol (MCP) server for agents.
 - **\`medha maintain\`**: Store maintenance, compaction, and diagnostics.
 `,
   },
@@ -161,7 +161,7 @@ Add Medha to your MCP configuration:
   "mcpServers": {
     "medha": {
       "command": "medha",
-      "args": ["mcp"]
+      "args": ["mcp", "serve"]
     }
   }
 }

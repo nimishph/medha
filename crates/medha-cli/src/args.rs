@@ -10,6 +10,13 @@ pub struct Cli {
     #[arg(long, global = true, help = "Path to Medha home directory (.medha)")]
     pub home: Option<String>,
 
+    #[arg(
+        long,
+        global = true,
+        help = "Project directory whose .medha/ home to use (default: current directory)"
+    )]
+    pub dir: Option<String>,
+
     #[arg(long, global = true, help = "Output response formatted as JSON")]
     pub json: bool,
 
@@ -24,6 +31,11 @@ pub enum Commands {
 
     #[command(about = "Propose a candidate rule or entity (enters on probation)")]
     Propose(ProposeArgs),
+
+    #[command(
+        about = "Distill an incident trajectory or retrospective trace into candidate rules with commit anchors (medha-c8z.5)."
+    )]
+    Distill(DistillArgs),
 
     #[command(about = "Record a signal observation (APPLY, REJECT_RULE, etc.)")]
     Record(RecordArgs),
@@ -141,8 +153,12 @@ pub struct ListArgs {
         help = "Filter: only these entity ids, comma-separated (e.g. the rules your host still has)"
     )]
     pub ids: Option<String>,
-    #[arg(long, help = "Pagination limit")]
-    pub limit: Option<usize>,
+    #[arg(long, help = "Pagination limit (a positive integer, default 1000)")]
+    pub limit: Option<String>,
+    #[arg(long, help = "Continue from the cursor a previous page printed")]
+    pub cursor: Option<String>,
+    #[arg(long, help = "Only drifting entities")]
+    pub drifting: bool,
 }
 
 /// `--ids a,b,c` → the ids; an empty list is refused rather than matching nothing (gh-23).
@@ -165,8 +181,8 @@ pub struct StatusArgs {}
 
 #[derive(Args, Debug, Default)]
 pub struct DriftArgs {
-    #[arg(long, help = "Pagination limit")]
-    pub limit: Option<usize>,
+    #[arg(long, help = "At most this many entities (a positive integer)")]
+    pub limit: Option<String>,
 }
 
 #[derive(Args, Debug, Default)]
@@ -249,6 +265,28 @@ pub struct InitArgs {
 }
 
 #[derive(Args, Debug)]
+pub struct DistillArgs {
+    #[arg(
+        long,
+        help = "Path to trajectory or incident transcript file (JSON or text)"
+    )]
+    pub file: Option<String>,
+
+    #[arg(long, help = "Incident or session identifier")]
+    pub incident: Option<String>,
+
+    #[arg(long, help = "Resolving commit SHA anchor")]
+    pub commit: Option<String>,
+
+    #[arg(
+        long = "auto-file",
+        alias = "autoFile",
+        help = "Automatically file distilled proposals on probation in the store"
+    )]
+    pub auto_file: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct ProposeArgs {
     #[arg(long, help = "Entity identifier")]
     pub id: String,
@@ -264,13 +302,28 @@ pub struct ProposeArgs {
     pub namespace: String,
 
     #[arg(long, help = "Source provenance of the proposal (e.g. review, linter)")]
-    pub source: String,
+    pub source: Option<String>,
 
     #[arg(long, help = "Baseline theta0 prior (default 0.5)")]
     pub theta0: Option<f64>,
 
     #[arg(long, help = "Description or prompt text")]
     pub description: Option<String>,
+
+    #[arg(long, help = "Proposal text")]
+    pub text: Option<String>,
+
+    #[arg(long, help = "Comma-separated evidence references")]
+    pub evidence: Option<String>,
+
+    #[arg(long, help = "Author identifier (default: $MEDHA_AUTHOR, $USER)")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "When it happened: ISO 8601 or epoch ms (default: now)")]
+    pub at: Option<String>,
+
+    #[arg(long, help = "Note or rationale")]
+    pub note: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -305,6 +358,18 @@ pub struct RecordArgs {
 
     #[arg(long, help = "Note or rationale")]
     pub note: Option<String>,
+
+    #[arg(
+        long,
+        help = "Decision branch to attribute the evidence to (must be a branch of this entity)"
+    )]
+    pub case_id: Option<String>,
+
+    #[arg(long, help = "When it happened: ISO 8601 or epoch ms (default: now)")]
+    pub at: Option<String>,
+
+    #[arg(long, help = "Weight updater to use (default: ema)")]
+    pub updater: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -325,8 +390,11 @@ pub struct GuardArgs {
     #[arg(long, help = "Guard check passed")]
     pub ok: bool,
 
-    #[arg(long, conflicts_with = "ok", help = "Guard check failed")]
+    #[arg(long, help = "Guard check failed")]
     pub fail: bool,
+
+    #[arg(long, help = "When it happened: ISO 8601 or epoch ms (default: now)")]
+    pub at: Option<String>,
 
     #[arg(
         long = "guard",
@@ -355,6 +423,9 @@ pub struct ShowArgs {
 
     #[arg(long, default_value = "", help = "Entity namespace")]
     pub namespace: String,
+
+    #[arg(long, help = "How many recent episodes to show (default 10)")]
+    pub recent: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -461,16 +532,28 @@ pub struct ReinstateArgs {
     pub namespace: String,
 
     #[arg(long, help = "Why a human is lifting the latch; kept in the audit log")]
-    pub reason: String,
+    pub reason: Option<String>,
+
+    #[arg(long, help = "Author identifier (default: $MEDHA_AUTHOR, $USER)")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "When it happened: ISO 8601 or epoch ms (default: now)")]
+    pub at: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct RetractArgs {
     #[arg(long, help = "Episode sequence number to retract")]
-    pub seq: u64,
+    pub seq: Option<String>,
 
     #[arg(long, help = "Reason for the retraction")]
-    pub reason: String,
+    pub reason: Option<String>,
+
+    #[arg(long, help = "Author identifier (default: $MEDHA_AUTHOR, $USER)")]
+    pub author: Option<String>,
+
+    #[arg(long, help = "When it happened: ISO 8601 or epoch ms (default: now)")]
+    pub at: Option<String>,
 
     #[arg(
         long,
@@ -548,17 +631,34 @@ pub struct ParamsArgs {}
 
 #[derive(Args, Debug, Default)]
 pub struct IssueArgs {
-    #[arg(value_name = "TITLE", help = "Optional title for the issue")]
-    pub title: Option<String>,
+    /// Words of the title; several are joined with spaces, as the TypeScript CLI does.
+    #[arg(value_name = "TITLE", num_args = 0.., help = "Optional title for the issue")]
+    pub title: Vec<String>,
 
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set, help = "Open the issue in the default web browser")]
+    #[arg(
+        long,
+        default_value_t = true,
+        action = clap::ArgAction::Set,
+        help = "Open the issue in the default web browser"
+    )]
     pub open: bool,
+
+    #[arg(
+        long = "no-open",
+        help = "Print the issue URL without opening a browser"
+    )]
+    pub no_open: bool,
 }
 
 #[derive(Args, Debug, Default)]
 pub struct PackArgs {
-    #[arg(long, required = true, help = "Maximum token/cost budget")]
-    pub budget: usize,
+    #[arg(
+        long,
+        required = true,
+        allow_hyphen_values = true,
+        help = "Maximum token/cost budget"
+    )]
+    pub budget: String,
 
     #[arg(long, help = "Filter by kind (default: rule)")]
     pub kind: Option<String>,
@@ -574,12 +674,17 @@ pub struct PackArgs {
 
     #[arg(
         long,
+        allow_hyphen_values = true,
         help = "Proportion of budget for exploring probation entities (default: 0.15)"
     )]
-    pub exploration: Option<f64>,
+    pub exploration: Option<String>,
 
-    #[arg(long, help = "Seed for deterministic exploration sampling")]
-    pub seed: Option<u64>,
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        help = "Seed for deterministic exploration sampling"
+    )]
+    pub seed: Option<String>,
 
     #[arg(
         long,
@@ -738,7 +843,7 @@ impl RestoreArgs {
 #[derive(Args, Debug, Default, Clone)]
 pub struct RemoveEpisodeArgs {
     #[arg(long, help = "Episode sequence number to remove")]
-    pub seq: u64,
+    pub seq: Option<String>,
 
     #[arg(long, help = "Author identifier, kept in the removal audit trail")]
     pub author: Option<String>,

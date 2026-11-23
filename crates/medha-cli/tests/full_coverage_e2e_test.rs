@@ -16,8 +16,22 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     // ==========================================
     // 1. init (both sqlite and memory)
     // ==========================================
+    // FLAKY and ADOPTED are not built-in signals (the canonical four are APPLY, SKIP,
+    // REJECT_CONTEXT and REJECT_RULE, as in the TypeScript engine): register them as custom ones.
+    let config_path = dir.path().join("registries.json");
+    std::fs::write(
+        &config_path,
+        r#"{"signalSpecs": [
+            {"name": "FLAKY", "value": -0.5, "countsAsTrial": true, "countsAsSuccess": false},
+            {"name": "ADOPTED", "value": 0.6, "countsAsTrial": true, "countsAsSuccess": true}
+        ]}"#,
+    )
+    .expect("write registries");
+    let config_arg = config_path.to_str().expect("config path");
     let init_out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args([
+            "--home", home, "--dir", home, "init", "--config", config_arg,
+        ])
         .output()
         .expect("init");
     assert!(init_out.status.success());
@@ -26,12 +40,12 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
 
     // Verify re-init idempotency
     let reinit_out = Command::new(&bin)
-        .args(["--home", home, "init", "--json"])
+        .args(["--home", home, "--dir", home, "init", "--json"])
         .output()
         .expect("reinit");
     assert!(reinit_out.status.success());
     let reinit_json: Value = serde_json::from_slice(&reinit_out.stdout).expect("parse json");
-    assert_eq!(reinit_json["status"], "exists");
+    assert_eq!(reinit_json["status"], "existing");
 
     // ==========================================
     // 2. propose multiple kinds & namespaces
@@ -224,7 +238,12 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
     assert!(show_json.status.success());
     let parsed_show: Value = serde_json::from_slice(&show_json.stdout).expect("parse json");
     assert_eq!(parsed_show["key"]["id"], "rule-strict-typing");
-    assert!(parsed_show["hint"]["trust"].as_f64().unwrap() > 0.0);
+    assert!(
+        parsed_show["detail"]["hint"]["trustScore"]
+            .as_f64()
+            .unwrap()
+            > 0.0
+    );
 
     // ==========================================
     // 6. explain-threshold
@@ -243,7 +262,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("explain");
     assert!(explain_out.status.success());
     let explain_str = String::from_utf8_lossy(&explain_out.stdout);
-    assert!(explain_str.contains("explain thresholds"));
+    assert!(explain_str.contains("thresholds for"));
     assert!(explain_str.contains("trusted:"));
     assert!(explain_str.contains("active:"));
 
@@ -343,7 +362,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("show quarantine");
     let show_q_json: Value = serde_json::from_slice(&show_quarantine.stdout).expect("parse json");
-    assert_eq!(show_q_json["hint"]["status"], "quarantined");
+    assert_eq!(show_q_json["detail"]["hint"]["status"], "quarantined");
 
     let ov_restore = Command::new(&bin)
         .args([
@@ -382,7 +401,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("compact");
     assert!(compact_out.status.success());
-    assert!(String::from_utf8_lossy(&compact_out.stdout).contains("compaction complete"));
+    assert!(String::from_utf8_lossy(&compact_out.stdout).contains("compaction for"));
 
     // ==========================================
     // 14. preflight
@@ -393,7 +412,7 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("preflight");
     assert!(preflight_out.status.success());
     let preflight_str = String::from_utf8_lossy(&preflight_out.stdout);
-    assert!(preflight_str.contains("preflight integrity: OK"));
+    assert!(preflight_str.contains("status:     ok"));
 
     // ==========================================
     // 15. status
@@ -419,14 +438,14 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .output()
         .expect("sync push");
     assert!(sync_push.status.success());
-    assert!(String::from_utf8_lossy(&sync_push.stdout).contains("sync push complete"));
+    assert!(String::from_utf8_lossy(&sync_push.stdout).contains("Sync push completed successfully"));
 
     let sync_status = Command::new(&bin)
         .args(["--home", home, "sync", "--file", sync_path, "status"])
         .output()
         .expect("sync status");
     assert!(sync_status.status.success());
-    assert!(String::from_utf8_lossy(&sync_status.stdout).contains("Synced"));
+    assert!(String::from_utf8_lossy(&sync_status.stdout).contains("Sync Status: SYNCED"));
 
     let sync_reconcile = Command::new(&bin)
         .args(["--home", home, "sync", "--file", sync_path, "reconcile"])
@@ -456,14 +475,14 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         .expect("pack json");
     assert!(pack_json.status.success());
     let pack_j: Value = serde_json::from_slice(&pack_json.stdout).expect("parse pack json");
-    assert!(!pack_j["selected"].as_array().unwrap().is_empty());
-    assert!(pack_j["totalCost"].as_u64().unwrap() <= 1000);
+    assert!(!pack_j["outcome"]["selected"].as_array().unwrap().is_empty());
+    assert!(pack_j["outcome"]["totalCost"].as_u64().unwrap() <= 1000);
 
     // ==========================================
     // 18. mcp server over stdio (all 14 tools check)
     // ==========================================
     let mut mcp_child = Command::new(&bin)
-        .args(["--home", home, "mcp"])
+        .args(["--home", home, "mcp", "serve"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -503,13 +522,16 @@ fn test_medha_complete_100pct_feature_matrix_e2e() {
         let tools = tools_resp["result"]["tools"]
             .as_array()
             .expect("tools array");
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 19);
 
         let tool_names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(tool_names.contains(&"hints"));
         assert!(tool_names.contains(&"list_entities"));
         assert!(tool_names.contains(&"show_entity"));
-        assert!(tool_names.contains(&"explain_threshold"));
+        assert!(
+            !tool_names.contains(&"explain_threshold"),
+            "not a TypeScript MCP tool"
+        );
         assert!(tool_names.contains(&"record_signal"));
         assert!(tool_names.contains(&"report_guard"));
         assert!(tool_names.contains(&"record_decision"));

@@ -44,7 +44,11 @@ fn key_dir() -> PathBuf {
     PathBuf::from(".medha_keys")
 }
 
-fn private_key_path(key_id: &str) -> PathBuf {
+pub fn private_key_path_for(key_id: &str) -> PathBuf {
+    private_key_path(key_id)
+}
+
+pub(crate) fn private_key_path(key_id: &str) -> PathBuf {
     let safe_id = key_id.replace(':', "_");
     key_dir().join(format!("{}.key", safe_id))
 }
@@ -91,9 +95,9 @@ fn write_config(
     Ok(())
 }
 
-pub fn run_keys<S: StorePort>(
+pub fn run_keys(
     args: KeysArgs,
-    engine: &mut MedhaEngine<S>,
+    engine: &mut MedhaEngine<crate::home_store::HomeStore>,
     home_dir: &Path,
     global_json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -233,43 +237,83 @@ fn run_generate(
     Ok(())
 }
 
+/// `keys list`, as the TypeScript `runKeysList` / `renderKeysList`.
 fn run_list(home_dir: &Path, json_out: bool) -> Result<(), Box<dyn std::error::Error>> {
     let keyring = load_keyring(home_dir)?;
     let config = read_config(home_dir)?;
-    let signing_obj = config.get("signing");
-    let mode = signing_obj
-        .and_then(|s| s.get("mode"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("off");
-    let default_key = signing_obj
-        .and_then(|s| s.get("defaultKey"))
-        .and_then(|v| v.as_str());
-
-    if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "mode": mode,
-                "defaultKey": default_key,
-                "keyring": keyring
-            }))?
-        );
-    } else {
-        println!("signing mode: {}", mode);
-        if let Some(dk) = default_key {
-            println!("default key:  {}", dk);
-        }
-        println!("\nkeyring ({} key(s)):", keyring.keys.len());
-        for k in &keyring.keys {
-            let status = if k.revoked.is_some() {
-                " [REVOKED]"
+    let mode = config["signing"]["mode"]
+        .as_str()
+        .unwrap_or("off")
+        .to_string();
+    let default_key = config["signing"]["defaultKey"].as_str().map(String::from);
+    let keys: Vec<serde_json::Value> = keyring
+        .keys
+        .iter()
+        .map(|k| {
+            let mut v = serde_json::json!({
+                "keyId": k.key_id,
+                "principal": k.principal,
+                "roles": k.roles,
+            });
+            if let Some(ns) = &k.namespaces {
+                v["namespaces"] = serde_json::json!(ns);
+            }
+            v["state"] = serde_json::json!(if k.revoked.is_some() {
+                "revoked"
             } else if k.valid_until.is_some() {
-                " [ROTATED]"
+                "rotated"
             } else {
-                ""
-            };
-            println!("  - {} as {}{}", k.key_id, k.principal, status);
+                "active"
+            });
+            v["hasPrivateKey"] = serde_json::json!(private_key_path(&k.key_id).exists());
+            v["isDefault"] = serde_json::json!(default_key.as_deref() == Some(k.key_id.as_str()));
+            v
+        })
+        .collect();
+    let report = serde_json::json!({
+        "mode": mode,
+        "keyringPath": keyring_path(home_dir).display().to_string(),
+        "keys": keys,
+    });
+    if json_out {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+    println!("signing mode: {mode}");
+    println!("keyring: {}", keyring_path(home_dir).display());
+    if keys.is_empty() {
+        println!("no keys (run `medha keys generate --principal <id>`)");
+    }
+    for k in &keys {
+        let mut flags = vec![k["state"].as_str().unwrap_or("").to_string()];
+        if k["hasPrivateKey"] == true {
+            flags.push("private key here".to_string());
         }
+        if k["isDefault"] == true {
+            flags.push("default".to_string());
+        }
+        let roles: Vec<String> = k["roles"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|r| r.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let scope = k["namespaces"]
+            .as_array()
+            .map(|a| {
+                let ns: Vec<&str> = a.iter().filter_map(|n| n.as_str()).collect();
+                format!(" ns={}", ns.join(","))
+            })
+            .unwrap_or_default();
+        println!(
+            "{}  {}  [{}]{scope}  ({})",
+            k["keyId"].as_str().unwrap_or(""),
+            k["principal"].as_str().unwrap_or(""),
+            roles.join(","),
+            flags.join(", ")
+        );
     }
     Ok(())
 }
@@ -280,9 +324,7 @@ fn run_rotate(
     json_out: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut keyring = load_keyring(home_dir)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as i64;
+    let now = crate::clock_now();
 
     let old_idx = keyring
         .keys
@@ -319,6 +361,12 @@ fn run_rotate(
     };
     keyring.keys.push(new_record);
     save_keyring(home_dir, &keyring)?;
+    // The retired key keeps verifying past episodes from the keyring; its private half goes.
+    let old_path = private_key_path(&old_key.key_id);
+    let deleted_old_private_key = old_path.exists();
+    if deleted_old_private_key {
+        fs::remove_file(&old_path)?;
+    }
 
     // Update default key if it was the old key
     let mut config = read_config(home_dir)?;
@@ -338,7 +386,9 @@ fn run_rotate(
             serde_json::to_string_pretty(&serde_json::json!({
                 "retired": args.key_id,
                 "keyId": new_key_id,
-                "privateKeyPath": priv_path.display().to_string()
+                "validUntil": now,
+                "privateKeyPath": priv_path.display().to_string(),
+                "deletedOldPrivateKey": deleted_old_private_key,
             }))?
         );
     } else {
@@ -385,8 +435,8 @@ fn run_revoke(
     Ok(())
 }
 
-fn run_verify<S: StorePort>(
-    engine: &mut MedhaEngine<S>,
+fn run_verify(
+    engine: &mut MedhaEngine<crate::home_store::HomeStore>,
     home_dir: &Path,
     json_out: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -483,29 +533,45 @@ fn run_mode(
     Ok(())
 }
 
-fn run_adopt<S: StorePort>(
-    engine: &mut MedhaEngine<S>,
+/// `keys adopt` (TypeScript `Medha#adopt`): fold the whole log into baselines and sign them with
+/// this home's key, so a home switching to `require` keeps the evidence it already has.
+fn run_adopt(
+    engine: &mut MedhaEngine<crate::home_store::HomeStore>,
     json_out: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_millis() as i64;
-    let report = engine.compact(now)?;
+    engine.store().require_signer()?;
+    let now = crate::clock_now();
+    let before = engine.store().episodes(None, None)?;
+    engine.compact(now)?;
+    // Signing happens after the compaction is written, so a baseline that will not verify puts
+    // the original log back: adoption either completes or leaves the store as it was.
+    let baselines = match engine.store_mut().sign_baselines() {
+        Ok(n) => n,
+        Err(e) => {
+            engine.store_mut().replace_log(&before)?;
+            return Err(Box::new(e));
+        }
+    };
+    let remaining = engine.store().episodes(None, None)?.len();
+    let folded = match (before.first(), before.last()) {
+        (Some(a), Some(b)) if baselines > 0 => {
+            serde_json::json!({ "from": a.seq, "to": b.seq })
+        }
+        _ => serde_json::Value::Null,
+    };
+    let report = serde_json::json!({
+        "baselinesWritten": baselines,
+        "folded": folded,
+        "remainingEpisodes": remaining,
+    });
     if json_out {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "baselinesWritten": report.after_count,
-                "remainingEpisodes": report.after_count,
-                "beforeCount": report.before_count,
-                "afterCount": report.after_count,
-                "removedCount": report.removed_count,
-            }))?
-        );
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if folded.is_null() {
+        println!("nothing to adopt");
     } else {
         println!(
-            "adopted into {} baseline(s); {} episode(s) remaining",
-            report.after_count, report.after_count
+            "adopted seq {}..{} into {} signed baseline(s); {} episode(s) in the log",
+            folded["from"], folded["to"], baselines, remaining
         );
     }
     Ok(())

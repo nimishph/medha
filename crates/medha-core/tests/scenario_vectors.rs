@@ -24,7 +24,19 @@ fn load_scenarios_json() -> Value {
 fn test_all_scenarios_conformance() {
     let json = load_scenarios_json();
     let scenarios = json["scenarios"].as_array().expect("scenarios array");
-    let signals = canonical_signals();
+    // The vectors use the host signal ADOPTED (docs/spec/vectors/README.md), registered here as a
+    // host would in config.json.
+    let mut signals = canonical_signals();
+    signals.insert(
+        "ADOPTED".to_string(),
+        medha_core::types::SignalSpec {
+            name: "ADOPTED".to_string(),
+            value: 0.6,
+            counts_as_trial: true,
+            counts_as_success: true,
+            description: Some("Adopted with weight 0.6".to_string()),
+        },
+    );
 
     for scenario in scenarios {
         let name = scenario["name"].as_str().expect("scenario name");

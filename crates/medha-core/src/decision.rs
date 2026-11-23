@@ -58,7 +58,9 @@ pub fn score_decision_case(
         guard: &guard,
         distinct_anchor_count: 0,
         ema: &kase.ema,
-        last_signal_at: None,
+        // As the TypeScript `branchState`: a branch with evidence was last signalled when its EMA
+        // last moved. Without it recency read as never-signalled and pinned trust to the floor.
+        last_signal_at: (kase.evidence.n > 0.0).then_some(kase.ema.updated_at),
         now,
         stored_status: LifecycleStatus::Probation,
         status_override: None,

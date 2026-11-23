@@ -33,8 +33,31 @@ pub struct SignalLimits {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct KindDecisionPolicy {
-    #[serde(default, alias = "require_human_for")]
+    /// `"apply"` or a list of decision types. The TypeScript config accepts both forms; the
+    /// string reads here as `["apply"]`.
+    #[serde(
+        default,
+        alias = "require_human_for",
+        deserialize_with = "deserialize_require_human_for"
+    )]
     pub require_human_for: Option<Vec<String>>,
+}
+
+fn deserialize_require_human_for<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<OneOrMany>::deserialize(deserializer)? {
+        None => None,
+        Some(OneOrMany::One(s)) => Some(vec![s]),
+        Some(OneOrMany::Many(v)) => Some(v),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -92,6 +115,9 @@ impl Default for EntityFoldState {
     }
 }
 
+/// The four canonical signals (TypeScript `CANONICAL_SIGNALS`): `APPLY`, `SKIP`,
+/// `REJECT_CONTEXT`, `REJECT_RULE`. Anything else is a host signal, registered in config.json; an
+/// episode with an unregistered signal makes the TypeScript engine read the store as corrupt.
 pub fn canonical_signals() -> HashMap<String, SignalSpec> {
     let mut map = HashMap::new();
     map.insert(
@@ -132,36 +158,6 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
             counts_as_trial: false,
             counts_as_success: false,
             description: Some("Skipped / not applicable".to_string()),
-        },
-    );
-    map.insert(
-        "ADOPTED".to_string(),
-        SignalSpec {
-            name: "ADOPTED".to_string(),
-            value: 0.6,
-            counts_as_trial: true,
-            counts_as_success: true,
-            description: Some("Adopted with weight 0.6".to_string()),
-        },
-    );
-    map.insert(
-        "HEURISTIC".to_string(),
-        SignalSpec {
-            name: "HEURISTIC".to_string(),
-            value: 0.3,
-            counts_as_trial: true,
-            counts_as_success: true,
-            description: Some("Heuristic success".to_string()),
-        },
-    );
-    map.insert(
-        "FLAKY".to_string(),
-        SignalSpec {
-            name: "FLAKY".to_string(),
-            value: -0.5,
-            counts_as_trial: true,
-            counts_as_success: false,
-            description: Some("Flaky trial failure".to_string()),
         },
     );
     map

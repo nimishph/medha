@@ -92,7 +92,7 @@ fn test_cli_lifecycle_and_pack() {
 
     // 1. Init
     let init_out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args(["--home", home, "--dir", home, "init"])
         .output()
         .expect("init");
     assert!(init_out.status.success());
@@ -144,9 +144,9 @@ fn test_cli_lifecycle_and_pack() {
         .expect("pack json");
     assert!(pack_json.status.success());
     let parsed: serde_json::Value = serde_json::from_slice(&pack_json.stdout).expect("parse json");
-    assert_eq!(parsed["mandatoryCount"], 0);
-    assert_eq!(parsed["meritCount"], 1);
-    assert!(parsed["totalCost"].as_u64().unwrap() <= 500);
+    assert_eq!(parsed["outcome"]["mandatoryCount"], 0);
+    assert_eq!(parsed["outcome"]["meritCount"], 1);
+    assert!(parsed["outcome"]["totalCost"].as_u64().unwrap() <= 500);
 }
 
 /// `show` and `explain-threshold` say when and why a status is latched (gh-20), with the same
@@ -157,7 +157,7 @@ fn test_cli_show_reports_the_retirement_latch() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -197,7 +197,7 @@ fn test_cli_reinstate_and_checked_retract() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -209,7 +209,7 @@ fn test_cli_reinstate_and_checked_retract() {
     );
     let refused = run(&["reinstate", "--id", "ok1", "--reason", "x"]);
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("is not latched"));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("a latched entity"));
 
     assert!(
         run(&["override", "--id", "ok1", "--status", "retired", "--reason", "stale"])
@@ -236,7 +236,7 @@ fn test_cli_reinstate_and_checked_retract() {
     }
     let wrong = run(&["retract", "--seq", "0", "--reason", "x", "--id", "b"]);
     assert!(!wrong.status.success());
-    assert!(String::from_utf8_lossy(&wrong.stderr).contains("belongs to rule/ok1"));
+    assert!(String::from_utf8_lossy(&wrong.stderr).contains("belongs to /rule/ok1"));
 
     for seq in ["7", "6"] {
         let out = run(&["retract", "--seq", seq, "--reason", "x", "--id", "b"]);
@@ -256,7 +256,7 @@ fn test_cli_ids_filter_on_list_and_pack() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -281,7 +281,7 @@ fn test_cli_ids_filter_on_list_and_pack() {
 
     let pack = run(&["--json", "pack", "--budget", "2000", "--ids", "live-a"]);
     let parsed: serde_json::Value = serde_json::from_slice(&pack.stdout).expect("pack json");
-    let selected: Vec<&str> = parsed["selected"]
+    let selected: Vec<&str> = parsed["outcome"]["selected"]
         .as_array()
         .unwrap()
         .iter()
@@ -301,7 +301,7 @@ fn test_cli_reads_fail_on_a_log_that_fails_integrity() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -335,7 +335,7 @@ fn test_cli_reads_fail_on_a_log_that_fails_integrity() {
 
     let preflight = run(&["preflight"]);
     assert_eq!(preflight.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&preflight.stdout).contains("FAILED"));
+    assert!(String::from_utf8_lossy(&preflight.stdout).contains("is corrupt — preflight exits 1"));
 
     let status = run(&["status"]);
     assert_eq!(status.status.code(), Some(1));
@@ -351,7 +351,7 @@ fn test_cli_guard_without_kind_is_refused_until_the_entity_has_a_guard() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().to_str().expect("path str");
     let run = |args: &[&str]| {
-        let mut all = vec!["--home", home];
+        let mut all = vec!["--home", home, "--dir", home];
         all.extend_from_slice(args);
         Command::new(&bin).args(&all).output().expect("medha")
     };
@@ -375,7 +375,7 @@ fn test_cli_guard_without_kind_is_refused_until_the_entity_has_a_guard() {
     assert!(reused.status.success());
     let show = run(&["--json", "show", "--id", "g1"]);
     let parsed: serde_json::Value = serde_json::from_slice(&show.stdout).expect("show json");
-    assert_eq!(parsed["hint"]["status"], "quarantined");
+    assert_eq!(parsed["detail"]["hint"]["status"], "quarantined");
 }
 
 /// A store's `config.json` decides which signals and kinds exist, for this engine as for the
@@ -433,7 +433,7 @@ fn test_cli_policy_decision_tree_and_require_human_gate() {
     let home = dir.path().to_str().unwrap();
 
     let out = Command::new(&bin)
-        .args(["--home", home, "init"])
+        .args(["--home", home, "--dir", home, "init"])
         .output()
         .expect("init");
     assert!(out.status.success());

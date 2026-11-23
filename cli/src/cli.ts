@@ -100,6 +100,9 @@ export async function runCli(argv: readonly string[], environment: Environment):
       if (v !== undefined) childEnv[k] = v;
     }
     childEnv.MEDHA_NOW = String(environment.now());
+    // The binary writes to a pipe here, so pass on whether the caller's stdout is a terminal
+    // (help styling follows stdout).
+    childEnv.FORCE_COLOR = environment.stdoutIsTTY === true ? '1' : '0';
 
     const res = spawnSync(binary, argv as string[], {
       cwd: environment.cwd,

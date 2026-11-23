@@ -9,12 +9,15 @@ pub use config::{
     BackendKind, MedhaConfig, CONFIG_FILE, CONFIG_LAYOUT_VERSION, MEDHA_HOME_DIR, SQLITE_FILE,
 };
 pub use engine::{
-    ConditionStatus, EnginePackOptions, GateExplanation, GuardInput, LatchEvidence, LiftedStatus,
-    MedhaEngine, RecordInput, RetractOutcome, ShowReport, SimulationReport, StatusLatch,
-    ThresholdExplanation,
+    is_builtin_updater, matches_context_targets, ConditionStatus, ContextFilter, DecisionInput,
+    DistilledProposal, EnginePackOptions, GateExplanation, GuardInput, LatchEvidence, LiftedStatus,
+    MedhaEngine, Pitfall, ProposeInput, ProposeOutcome, RecordInput, RetractOutcome, ShowReport,
+    SimulationReport, StatusLatch, ThresholdExplanation, TrajectoryEvidence, TrajectoryLesson,
 };
 pub use errors::MedhaError;
-pub use maintenance::{CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport};
+pub use maintenance::{
+    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport, DEFAULT_FOLD_DAYS,
+};
 
 // Re-export underlying foundational layers
 pub use medha_core as core;

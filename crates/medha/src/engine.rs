@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::config::MedhaConfig;
 use crate::errors::MedhaError;
 use crate::maintenance::{
-    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport,
+    CompactionReport, PreflightReport, SweepChange, SweepOptions, SweepReport, DEFAULT_FOLD_DAYS,
 };
 use medha_core::decision::Decision;
 use medha_core::drift::ema_step;
@@ -12,6 +12,7 @@ use medha_core::packer::{
     pack_entities, PackCandidate, PackOutcome, PackPolicy, DEFAULT_EXPLORATION_RATIO,
 };
 use medha_core::round::round6;
+use medha_core::thresholds::DAY_MS;
 use medha_core::thresholds::DEFAULT_EMA_ALPHA;
 use medha_core::types::{
     Anchor, EntityKey, LifecycleStatus, RecencyConfig, SignalSpec, Thresholds, TrustHint,
@@ -91,6 +92,348 @@ pub struct RecordInput {
     pub note: Option<String>,
     #[serde(default)]
     pub case_id: Option<String>,
+}
+
+/// The built-in weight updaters (TypeScript `BUILTIN_UPDATERS`), by name.
+pub const BUILTIN_UPDATERS: [&str; 4] = ["ema", "wilson", "sliding-window", "asymmetric-penalty"];
+
+/// Whether `name` is a built-in updater (`asymmetric` is the alias of `asymmetric-penalty`).
+pub fn is_builtin_updater(name: &str) -> bool {
+    let n = name.to_lowercase();
+    BUILTIN_UPDATERS.contains(&n.as_str()) || n == "asymmetric"
+}
+
+fn clamp_round(v: f64) -> Result<f64, MedhaError> {
+    Ok(round6(v.clamp(0.0, 1.0))?)
+}
+
+/// One weight update from the entity's state, as the TypeScript built-in updaters compute it.
+/// Returns the updater actually used and the new weight (clamped to [0, 1], rounded to 6 places).
+fn compute_weight(
+    name: &str,
+    state: &medha_store::EntityState,
+    spec: &SignalSpec,
+) -> Result<(String, f64), MedhaError> {
+    let current = state.ema.mu;
+    let initial = state.ema.theta0;
+    let samples = state.evidence.n;
+    let accepted = state.evidence.k;
+    let success = spec.counts_as_trial && spec.counts_as_success;
+    let canonical = name.to_lowercase();
+    let (used, weight) = match canonical.as_str() {
+        "wilson" => {
+            let positive = accepted + if success { 1.0 } else { 0.0 };
+            let total = samples + 1.0;
+            let w = if total < 5.0 {
+                round6(0.5 * initial + 0.5 * (positive / total))?
+            } else {
+                medha_core::wilson::wilson_lower_bound(
+                    positive,
+                    total,
+                    medha_core::thresholds::WILSON_Z,
+                )?
+            };
+            ("wilson", w)
+        }
+        "sliding-window" => {
+            let step = 1.0 / (samples + 1.0).clamp(10.0, 50.0);
+            let delta = if success {
+                step * (1.0 - current)
+            } else if spec.name == "REJECT_CONTEXT" {
+                -step * 0.5 * current
+            } else if spec.counts_as_trial {
+                -step * current
+            } else {
+                0.0
+            };
+            ("sliding-window", current + delta)
+        }
+        "asymmetric-penalty" | "asymmetric" => {
+            let delta = if success {
+                0.04 * (1.0 - current)
+            } else if spec.name == "REJECT_CONTEXT" {
+                -0.05 * current
+            } else if spec.counts_as_trial {
+                -0.25 * current
+            } else {
+                0.0
+            };
+            ("asymmetric-penalty", current + delta)
+        }
+        _ => (
+            "ema",
+            ema_step(Some(current), spec.value, DEFAULT_EMA_ALPHA)?,
+        ),
+    };
+    Ok((used.to_string(), clamp_round(weight)?))
+}
+
+/// The active context a pack is matched against (TypeScript `ContextFilter`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContextFilter {
+    #[serde(default)]
+    pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+/// A glob as the TypeScript packer reads it: `**` any path, `*` within a segment, case-insensitive.
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match p.first() {
+            None => t.is_empty(),
+            Some('*') if p.get(1) == Some(&'*') => (0..=t.len()).any(|i| go(&p[2..], &t[i..])),
+            Some('*') => {
+                let mut i = 0;
+                loop {
+                    if go(&p[1..], &t[i..]) {
+                        return true;
+                    }
+                    if i >= t.len() || t[i] == '/' {
+                        return false;
+                    }
+                    i += 1;
+                }
+            }
+            Some(c) => t.first().is_some_and(|x| x == c) && go(&p[1..], &t[1..]),
+        }
+    }
+    let p: Vec<char> = pattern.to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    go(&p, &t)
+}
+
+/// TypeScript `matchesContextTargets`: no targets (or no filter) match everything; otherwise a
+/// file, a language or a query keyword must match.
+pub fn matches_context_targets(
+    targets: Option<&medha_store::ContextTargets>,
+    filter: &ContextFilter,
+) -> bool {
+    let Some(t) = targets else {
+        return true;
+    };
+    let files = t.files.clone().unwrap_or_default();
+    let langs = t.languages.clone().unwrap_or_default();
+    let keywords = t.keywords.clone().unwrap_or_default();
+    if files.is_empty() && langs.is_empty() && keywords.is_empty() {
+        return true;
+    }
+    if let Some(active) = filter.files.as_ref().filter(|f| !f.is_empty()) {
+        for pattern in &files {
+            for file in active {
+                if file == pattern
+                    || file.ends_with(pattern.as_str())
+                    || pattern.ends_with(file.as_str())
+                    || file.contains(pattern.as_str())
+                    || (pattern.contains('*') && glob_matches(pattern, file))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Some(active) = filter.languages.as_ref().filter(|l| !l.is_empty()) {
+        let targets: Vec<String> = langs.iter().map(|l| l.to_lowercase()).collect();
+        if active.iter().any(|l| targets.contains(&l.to_lowercase())) {
+            return true;
+        }
+    }
+    if let Some(q) = &filter.query {
+        let q = q.to_lowercase();
+        if keywords.iter().any(|k| q.contains(&k.to_lowercase())) {
+            return true;
+        }
+    }
+    false
+}
+
+/// A trap the negative-evidence radar reports (TypeScript `Pitfall`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pitfall {
+    pub key: EntityKey,
+    pub status: String,
+    pub trials: f64,
+    pub successes: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_guard: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_note: Option<String>,
+    pub reason: String,
+}
+
+/// A number as JavaScript prints it in a template string (`5`, not `5.0`).
+fn js_number(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
+/// A decision-tree write (see `MedhaEngine::decision_with`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecisionInput {
+    pub key: EntityKey,
+    /// An existing branch to edit; `None` mints a new branch id.
+    pub case_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub detach: bool,
+    pub condition: String,
+    pub decision: Decision,
+    pub author: Option<String>,
+    pub at: i64,
+}
+
+/// The canonical form two conditions are compared in: trimmed, whitespace collapsed, lowercase.
+pub fn normalize_condition(condition: &str) -> String {
+    condition
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// `<entity-id>-dec-<5 base36 chars>`, salted by the key (TypeScript `newDecisionCaseId`).
+fn new_decision_case_id(key: &EntityKey, at: i64) -> String {
+    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    let fnv = |input: &str| -> u32 {
+        let mut hash: u32 = 0x811c_9dc5;
+        for b in input.bytes() {
+            hash ^= u32::from(b);
+            hash = hash.wrapping_mul(0x0100_0193);
+        }
+        hash
+    };
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let salt = fnv(&format!("{}/{}/{}", key.namespace, key.kind, key.id));
+    let mut seed = salt ^ nanos ^ (at as u32);
+    let mut suffix = String::new();
+    for i in 0..5u32 {
+        seed = fnv(&format!("{seed}:{i}"));
+        suffix.push(ALPHABET[(seed % ALPHABET.len() as u32) as usize] as char);
+    }
+    format!("{}-dec-{suffix}", key.id)
+}
+
+/// Everything a proposal can carry (the TypeScript `Proposal`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposeInput {
+    pub key: EntityKey,
+    pub provenance: String,
+    #[serde(default)]
+    pub theta0: Option<f64>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub evidence_refs: Option<Vec<String>>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    /// The anchor the proposal was made against (e.g. a commit), when it has one.
+    #[serde(default)]
+    pub anchor: Option<Anchor>,
+    pub at: i64,
+}
+
+/// An incident or session retrospective to distil (TypeScript `TrajectoryEvidence`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryEvidence {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lessons: Option<Vec<TrajectoryLesson>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectoryLesson {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A candidate the trajectory distiller proposes (the TypeScript `Proposal` it mines).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DistilledProposal {
+    pub key: EntityKey,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Anchor>,
+    pub provenance: String,
+    pub theta0: f64,
+    pub author: String,
+    pub note: String,
+}
+
+/// The TypeScript `TrajectoryDistillerMiner`: one probation candidate per lesson (kind from the
+/// lesson, default `rule`), or one `recipe` from the incident itself when it has no lessons; all
+/// anchored to the commit when there is one, at theta0 0.35.
+pub fn distill_proposals(item: &TrajectoryEvidence) -> Vec<DistilledProposal> {
+    if item.id.is_empty() {
+        return Vec::new();
+    }
+    let anchor = item.commit_sha.as_ref().map(|sha| Anchor {
+        kind: "commit".to_string(),
+        value: sha.clone(),
+    });
+    let provenance = format!("trajectory-distiller:{}", item.id);
+    let lessons = item.lessons.clone().unwrap_or_default();
+    if !lessons.is_empty() {
+        return lessons
+            .iter()
+            .filter(|l| !l.id.is_empty() && !l.text.is_empty())
+            .map(|l| DistilledProposal {
+                key: EntityKey::new("", l.kind.as_deref().unwrap_or("rule"), &l.id),
+                description: l.text.clone(),
+                anchor: anchor.clone(),
+                provenance: provenance.clone(),
+                theta0: 0.35,
+                author: "trajectory-distiller".to_string(),
+                note: format!("Distilled from incident {}: {}", item.id, item.title),
+            })
+            .collect();
+    }
+    let mut slug = String::new();
+    for c in item.id.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            slug.push(c);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    vec![DistilledProposal {
+        key: EntityKey::new("", "recipe", format!("incident-{slug}")),
+        description: item.title.clone(),
+        anchor,
+        provenance,
+        theta0: 0.35,
+        author: "trajectory-distiller".to_string(),
+        note: format!("Distilled from incident {}", item.id),
+    }]
+}
+
+/// The appended proposal and the promotion decision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProposeOutcome {
+    pub appended: AppendResult,
+    pub promoted: bool,
+    pub promotion_reason: String,
+    /// Every distinct source that has proposed this entity, this one included.
+    pub provenances: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -319,6 +662,20 @@ impl<S: StorePort> MedhaEngine<S> {
         }
     }
 
+    /// Open any store and build an engine on it, keeping how it opened: a log that opened corrupt
+    /// refuses evidence reads (gh-18), as with `open_sqlite`.
+    pub fn open_with(mut store: S, config: MedhaConfig) -> Result<Self, MedhaError> {
+        let opened = store.open()?;
+        Ok(Self {
+            store,
+            sync: Box::new(NoopSyncAdapter),
+            config,
+            signals: medha_core::canonical_signals(),
+            kinds: builtin_kinds(),
+            opened,
+        })
+    }
+
     pub fn new(store: S, sync: Box<dyn SyncPort>, config: MedhaConfig) -> Self {
         let signals = medha_core::canonical_signals();
         let opened = OpenResult::Ok;
@@ -516,8 +873,10 @@ impl<S: StorePort> MedhaEngine<S> {
             .find(|k| k.name == input.key.kind);
 
         let (state_summary, decision_tree) = if let Some(ref s) = state_opt {
+            let trust = self.hint(&input.key, now)?.trust;
             let summary =
-                medha_core::policy_latch::PolicyLatchEntityState::new(s.status, s.evidence.clone());
+                medha_core::policy_latch::PolicyLatchEntityState::new(s.status, s.evidence.clone())
+                    .with_trust(trust);
             (Some(summary), s.decision_tree.clone())
         } else {
             let key_str = input.key.to_string_repr();
@@ -810,7 +1169,42 @@ impl<S: StorePort> MedhaEngine<S> {
     // --- WRITE PLANE ---
 
     pub fn record(&mut self, input: RecordInput) -> Result<AppendResult, MedhaError> {
+        self.record_with_updater(input, None)
+    }
+
+    /// `record`, with the weight updater named (else the entity's own, `ema` by default):
+    /// `ema`, `wilson`, `sliding-window` or `asymmetric-penalty` (alias `asymmetric`), as the
+    /// TypeScript built-ins. An unknown name falls back to `ema`, as the TypeScript registry does.
+    pub fn record_with_updater(
+        &mut self,
+        input: RecordInput,
+        updater: Option<&str>,
+    ) -> Result<AppendResult, MedhaError> {
         self.require_kind(&input.key)?;
+        if let Some(case_id) = &input.case_id {
+            // A typo'd caseId would fold into the entity as usual and leave the named branch
+            // untouched. Refuse it and name the branches that exist (as the TypeScript engine does).
+            let mut known: Vec<String> = self
+                .store
+                .get(&input.key)?
+                .map(|s| s.decision_tree.iter().map(|c| c.id.clone()).collect())
+                .unwrap_or_default();
+            if !known.iter().any(|id| id == case_id) {
+                known.sort();
+                let expected = if known.is_empty() {
+                    "a decision case id (this entity has no decision branches yet)".to_string()
+                } else {
+                    format!(
+                        "an existing decision case id of this entity (has: {})",
+                        known.join(", ")
+                    )
+                };
+                return Err(MedhaError::InvalidArgument {
+                    name: "options.caseId",
+                    reason: format!("expected {expected}, received {case_id}"),
+                });
+            }
+        }
         let spec = self.signals.get(&input.signal).cloned().ok_or_else(|| {
             MedhaError::InvalidArgument {
                 name: "signal",
@@ -826,9 +1220,17 @@ impl<S: StorePort> MedhaEngine<S> {
             None if input.ensure => Some(fresh_state_at(input.key.clone(), input.at)),
             None => None,
         };
-        let weight = match &base {
-            Some(state) => Some(ema_step(Some(state.ema.mu), spec.value, DEFAULT_EMA_ALPHA)?),
+        let computed = match &base {
+            Some(state) => Some(compute_weight(
+                updater.unwrap_or(state.updater.as_str()),
+                state,
+                &spec,
+            )?),
             None => None,
+        };
+        let (updater_name, weight) = match computed {
+            Some((name, w)) => (Some(name), Some(w)),
+            None => (None, None),
         };
 
         let episode_input = EpisodeInput {
@@ -842,7 +1244,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 ensure: input.ensure,
                 run_ref: input.run_ref,
                 note: input.note,
-                updater: weight.map(|_| "ema".to_string()),
+                updater: updater_name,
                 weight,
                 case_id: input.case_id,
             },
@@ -911,6 +1313,18 @@ impl<S: StorePort> MedhaEngine<S> {
         at: i64,
         expect: Option<&EntityKey>,
     ) -> Result<RetractOutcome, MedhaError> {
+        self.retract_checked_by(seq, reason, at, expect, None)
+    }
+
+    /// `retract_checked` with the retracting author recorded on the episode.
+    pub fn retract_checked_by(
+        &mut self,
+        seq: u64,
+        reason: &str,
+        at: i64,
+        expect: Option<&EntityKey>,
+        author: Option<String>,
+    ) -> Result<RetractOutcome, MedhaError> {
         let all_eps = self.store.episodes(None, None)?;
         let target_key = all_eps
             .iter()
@@ -919,12 +1333,14 @@ impl<S: StorePort> MedhaEngine<S> {
             .ok_or_else(|| MedhaError::NotFound(format!("Episode with sequence {}", seq)))?;
         if let Some(expected) = expect {
             if expected != &target_key {
+                // The TypeScript engine's wording; the part after "\nhint: " is the hint.
+                let label = |k: &EntityKey| format!("{}/{}/{}", k.namespace, k.kind, k.id);
                 return Err(MedhaError::InvalidArgument {
-                    name: "seq",
+                    name: "targetSeq",
                     reason: format!(
-                        "episode #{seq} belongs to {}, not {}; check the seq with `medha show`",
-                        target_key.to_string_repr(),
-                        expected.to_string_repr()
+                        "expected an episode of {}, received {seq}\nhint: episode #{seq} belongs to {}; check the seq with 'medha show'",
+                        label(expected),
+                        label(&target_key)
                     ),
                 });
             }
@@ -943,7 +1359,7 @@ impl<S: StorePort> MedhaEngine<S> {
         let episode_input = EpisodeInput {
             key: target_key.clone(),
             at,
-            author: None,
+            author,
             sig: None,
             payload: EpisodePayload::Retract {
                 target_seq: seq,
@@ -1057,25 +1473,119 @@ impl<S: StorePort> MedhaEngine<S> {
         description: Option<String>,
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
-        self.require_kind(key)?;
-        let episode_input = EpisodeInput {
-            key: key.clone(),
-            at,
-            author: None,
-            sig: None,
-            payload: EpisodePayload::Proposal {
+        Ok(self
+            .propose_with(ProposeInput {
+                key: key.clone(),
                 provenance: provenance.to_string(),
                 theta0,
                 description,
                 evidence_refs: None,
-                anchor: None,
-                promoted: None,
-                promotion_reason: None,
+                author: None,
                 note: None,
+                anchor: None,
+                at,
+            })?
+            .appended)
+    }
+
+    /// Distil a trajectory into candidate proposals (TypeScript `Medha#distillTrajectory`); with
+    /// `auto_file` each candidate is proposed, so it enters on probation. Returns the candidates
+    /// and how many were filed.
+    pub fn distill_trajectory(
+        &mut self,
+        trajectory: &TrajectoryEvidence,
+        auto_file: bool,
+        at: i64,
+    ) -> Result<(Vec<DistilledProposal>, usize), MedhaError> {
+        let proposals = distill_proposals(trajectory);
+        let mut filed = 0;
+        if auto_file {
+            for p in &proposals {
+                self.propose_with(ProposeInput {
+                    key: p.key.clone(),
+                    provenance: p.provenance.clone(),
+                    theta0: Some(p.theta0),
+                    description: Some(p.description.clone()),
+                    evidence_refs: None,
+                    author: None,
+                    note: Some(p.note.clone()),
+                    anchor: p.anchor.clone(),
+                    at,
+                })?;
+                filed += 1;
+            }
+        }
+        Ok((proposals, filed))
+    }
+
+    /// Propose with the default promotion policy (spec §7.3, TypeScript `convergingSourcesPolicy`):
+    /// promoted once at least two distinct sources have proposed the entity. Promotion is recorded
+    /// on the episode and reported; it never changes the fold.
+    pub fn propose_with(&mut self, input: ProposeInput) -> Result<ProposeOutcome, MedhaError> {
+        const MIN_SOURCES: usize = 2;
+        self.require_kind(&input.key)?;
+        if input.provenance.trim().is_empty() {
+            return Err(MedhaError::InvalidArgument {
+                name: "provenance",
+                reason: format!("expected a non-empty string, received {}", input.provenance),
+            });
+        }
+        let repr = input.key.to_string_repr();
+        let mut provenances: Vec<String> = Vec::new();
+        for e in self.store.episodes(None, None)? {
+            if e.key.to_string_repr() != repr {
+                continue;
+            }
+            if let EpisodePayload::Proposal { provenance, .. } = &e.payload {
+                if !provenances.contains(provenance) {
+                    provenances.push(provenance.clone());
+                }
+            }
+        }
+        if !provenances.contains(&input.provenance) {
+            provenances.push(input.provenance.clone());
+        }
+        let promoted = provenances.len() >= MIN_SOURCES;
+        let reason = if promoted {
+            format!(
+                "{} converging sources: {} (threshold >= {MIN_SOURCES})",
+                provenances.len(),
+                provenances.join(", ")
+            )
+        } else {
+            format!(
+                "Requires >= {MIN_SOURCES} converging sources; saw {} ({})",
+                provenances.len(),
+                if provenances.is_empty() {
+                    "none".to_string()
+                } else {
+                    provenances.join(", ")
+                }
+            )
+        };
+        let episode_input = EpisodeInput {
+            key: input.key.clone(),
+            at: input.at,
+            author: input.author,
+            sig: None,
+            payload: EpisodePayload::Proposal {
+                provenance: input.provenance,
+                theta0: input.theta0,
+                description: input.description,
+                evidence_refs: input.evidence_refs,
+                anchor: input.anchor,
+                promoted: Some(promoted),
+                promotion_reason: Some(reason.clone()),
+                note: input.note,
             },
         };
-
-        Ok(self.store.append(episode_input)?)
+        let appended = self.store.append(episode_input)?;
+        Ok(ProposeOutcome {
+            appended,
+            promoted,
+            promotion_reason: reason,
+            provenances,
+        })
     }
 
     pub fn define(
@@ -1121,6 +1631,151 @@ impl<S: StorePort> MedhaEngine<S> {
         };
 
         Ok(self.store.append(episode_input)?)
+    }
+
+    /// Grow or edit a branch of an entity's decision tree, validated as the TypeScript engine does
+    /// (`validateDecisionTreeEdit`, medha-arj.4): a given `case_id` must name an existing branch
+    /// (it is an edit); a parent must exist and must not be the branch or one of its descendants;
+    /// no sibling may already use the same (normalized) condition; and a decision type the kind's
+    /// `decisionPolicy.requireHumanFor` gates needs a `human:` author. Returns the case id.
+    pub fn decision_with(
+        &mut self,
+        input: DecisionInput,
+    ) -> Result<(AppendResult, String), MedhaError> {
+        self.require_kind(&input.key)?;
+        let tree = self
+            .store
+            .get(&input.key)?
+            .map(|s| s.decision_tree)
+            .unwrap_or_default();
+        let invalid =
+            |name: &'static str, expected: String, received: &str| MedhaError::InvalidArgument {
+                name,
+                reason: format!("expected {expected}, received {received}"),
+            };
+        let mut known: Vec<String> = tree.iter().map(|c| c.id.clone()).collect();
+        known.sort();
+        let existing = |known: &[String]| {
+            if known.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "an existing decision case id of this entity (has: {})",
+                    known.join(", ")
+                ))
+            }
+        };
+        let case_id = match &input.case_id {
+            Some(id) => {
+                if !known.contains(id) {
+                    return Err(invalid(
+                        "decision.caseId",
+                        existing(&known).unwrap_or_else(|| {
+                            "not supplied: this entity has no decision branches to edit".to_string()
+                        }),
+                        id,
+                    ));
+                }
+                id.clone()
+            }
+            None => new_decision_case_id(&input.key, input.at),
+        };
+        if input.detach && input.parent_id.is_some() {
+            return Err(invalid(
+                "decision.detach",
+                "not combined with a parentId (detach means 'move to the top level')".to_string(),
+                input.parent_id.as_deref().unwrap_or(""),
+            ));
+        }
+        let parent = if input.detach {
+            None
+        } else {
+            input.parent_id.clone().or_else(|| {
+                tree.iter()
+                    .find(|c| c.id == case_id)
+                    .and_then(|c| c.parent_id.clone())
+            })
+        };
+        if let Some(p) = &parent {
+            if p == &case_id {
+                return Err(invalid(
+                    "decision.parentId",
+                    "a branch other than itself".to_string(),
+                    p,
+                ));
+            }
+            if !known.contains(p) {
+                return Err(invalid(
+                    "decision.parentId",
+                    existing(&known).unwrap_or_else(|| {
+                        "a decision case id (this entity has no decision branches yet)".to_string()
+                    }),
+                    p,
+                ));
+            }
+            let mut cursor = Some(p.clone());
+            while let Some(c) = cursor {
+                if c == case_id {
+                    return Err(invalid(
+                        "decision.parentId",
+                        "a branch that is not a descendant of this branch".to_string(),
+                        p,
+                    ));
+                }
+                cursor = tree
+                    .iter()
+                    .find(|k| k.id == c)
+                    .and_then(|k| k.parent_id.clone());
+            }
+        }
+        let normalized = normalize_condition(&input.condition);
+        if let Some(dup) = tree.iter().find(|k| {
+            k.id != case_id
+                && k.parent_id == parent
+                && normalize_condition(&k.condition) == normalized
+        }) {
+            return Err(invalid(
+                "decision.condition",
+                format!(
+                    "a condition no sibling of this branch already uses (sibling {} uses it)",
+                    dup.id
+                ),
+                &input.condition,
+            ));
+        }
+        let decision_type = match &input.decision {
+            Decision::Apply => "apply",
+            Decision::Ignore => "ignore",
+            Decision::Probability { .. } => "probability",
+        };
+        let gated = self
+            .store
+            .registries()
+            .kind_spec(&input.key.kind)
+            .and_then(|ks| ks.decision_policy.as_ref())
+            .and_then(|p| p.require_human_for.as_ref())
+            .is_some_and(|types| types.iter().any(|t| t == decision_type));
+        if gated && !medha_core::decision::is_human_author(input.author.as_deref()) {
+            // The part after the hint separator is the hint (see the CLI's failure mapping).
+            return Err(MedhaError::PermissionDenied(format!(
+                "Permission denied for 'decision:{decision_type}': kind '{}' requires a human to grant a '{decision_type}' branch\nhint: Do not retry with another author: 'human:' is a label the caller sets itself, and passing it is not verification. Escalate to a human, who must run this command themselves.",
+                input.key.kind
+            )));
+        }
+        let appended = self.store.append(EpisodeInput {
+            key: input.key.clone(),
+            at: input.at,
+            author: input.author,
+            sig: None,
+            payload: EpisodePayload::Decision {
+                case_id: case_id.clone(),
+                parent_id: input.parent_id,
+                detach: input.detach.then_some(true),
+                condition: input.condition,
+                decision: input.decision,
+            },
+        })?;
+        Ok((appended, case_id))
     }
 
     pub fn decision(
@@ -1187,23 +1842,110 @@ impl<S: StorePort> MedhaEngine<S> {
         })
     }
 
+    /// Fold the *entire* log into one baseline per entity (the `keys adopt` path). For routine
+    /// maintenance use [`Self::compact_older_than`], which keeps recent history retractable.
     pub fn compact(&mut self, _now: i64) -> Result<CompactionReport, MedhaError> {
-        let eps = self.store.episodes(None, None)?;
+        self.compact_before(i64::MAX)
+    }
+
+    /// Fold only episodes older than `older_than_days` (default [`DEFAULT_FOLD_DAYS`]) into
+    /// baselines, keeping the newer suffix verbatim — mirrors the TypeScript `compactPrefix`.
+    pub fn compact_older_than(
+        &mut self,
+        now: i64,
+        older_than_days: Option<f64>,
+    ) -> Result<CompactionReport, MedhaError> {
+        let days = older_than_days.unwrap_or(DEFAULT_FOLD_DAYS);
+        let cutoff_at = now.saturating_sub((days * DAY_MS) as i64);
+        self.compact_before(cutoff_at)
+    }
+
+    fn compact_before(&mut self, cutoff_at: i64) -> Result<CompactionReport, MedhaError> {
+        let mut eps = self.store.episodes(None, None)?;
+        eps.sort_by_key(|e| e.seq);
         let before_count = eps.len();
-
-        // Baseline compaction of historical states
         let states = self.store.list()?;
-        let mut new_eps = Vec::new();
 
-        for (seq, s) in states.iter().cloned().enumerate() {
+        // The folded prefix is the longest run of episodes strictly older than the cutoff.
+        let border = eps.iter().take_while(|e| e.at < cutoff_at).count();
+        if border == 0 {
+            return Ok(CompactionReport {
+                before_count,
+                after_count: before_count,
+                removed_count: 0,
+            });
+        }
+        let (prefix, suffix) = eps.split_at(border);
+        let max_prefix_seq = prefix.last().map(|e| e.seq).unwrap_or(0);
+
+        // A retraction in the suffix may target the prefix: its effect belongs in the baseline,
+        // so mask that target while folding and drop the spent retraction. A retraction that
+        // targets a kept episode is renumbered below; one that targets nothing is dropped.
+        let suffix_seqs: std::collections::HashSet<u64> = suffix.iter().map(|e| e.seq).collect();
+        let mut spent_on_prefix: std::collections::HashSet<u64> = std::collections::HashSet::new();
+        let kept_suffix: Vec<&Episode> = suffix
+            .iter()
+            .filter(|e| match &e.payload {
+                EpisodePayload::Retract { target_seq, .. } => {
+                    if *target_seq > max_prefix_seq {
+                        suffix_seqs.contains(target_seq)
+                    } else {
+                        spent_on_prefix.insert(*target_seq);
+                        false
+                    }
+                }
+                _ => true,
+            })
+            .collect();
+
+        let prefix_live: Vec<Episode> = prefix
+            .iter()
+            .filter(|e| !spent_on_prefix.contains(&e.seq))
+            .cloned()
+            .collect();
+        let folded = medha_store::folding::fold_log_with_registries(
+            &prefix_live,
+            Some(self.store.registries()),
+        );
+        let mut last_at: HashMap<String, i64> = HashMap::new();
+        for e in prefix {
+            let k = e.key.to_string_repr();
+            let entry = last_at.entry(k).or_insert(e.at);
+            if e.at > *entry {
+                *entry = e.at;
+            }
+        }
+        let mut baseline_states: Vec<EntityState> = folded.into_values().collect();
+        baseline_states.sort_by_key(|s| s.key.to_string_repr());
+
+        let mut new_eps = Vec::with_capacity(baseline_states.len() + kept_suffix.len());
+        for (seq, s) in baseline_states.into_iter().enumerate() {
+            let at = last_at
+                .get(&s.key.to_string_repr())
+                .copied()
+                .unwrap_or(cutoff_at);
             new_eps.push(Episode {
                 seq: seq as u64,
                 key: s.key.clone(),
-                at: s.last_signal_at.unwrap_or(0),
+                at,
                 author: None,
                 sig: None,
                 payload: EpisodePayload::Baseline { state: s },
             });
+        }
+        let offset = new_eps.len() as u64;
+        let new_seq_of: HashMap<u64, u64> = kept_suffix
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.seq, offset + i as u64))
+            .collect();
+        for (i, e) in kept_suffix.iter().enumerate() {
+            let mut ep = (*e).clone();
+            ep.seq = offset + i as u64;
+            if let EpisodePayload::Retract { target_seq, .. } = &mut ep.payload {
+                *target_seq = new_seq_of[target_seq];
+            }
+            new_eps.push(ep);
         }
 
         // Bake-and-verify: verify fold-equivalence in memory before replacing the log
@@ -1276,7 +2018,31 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn pack(&self, options: EnginePackOptions, now: i64) -> Result<PackOutcome, MedhaError> {
+        self.pack_in_context(options, None, now)
+    }
+
+    /// `pack`, keeping only entities whose definition's context targets match the active context
+    /// (TypeScript `Medha#hintsForContext` / `matchesContextTargets`, medha-c8z.1). An entity
+    /// with no definition or no targets always matches.
+    pub fn pack_in_context(
+        &self,
+        options: EnginePackOptions,
+        filter: Option<&ContextFilter>,
+        now: i64,
+    ) -> Result<PackOutcome, MedhaError> {
         self.require_readable()?;
+        let definitions: HashMap<String, Option<medha_store::ContextTargets>> = match filter {
+            None => HashMap::new(),
+            Some(_) => {
+                let mut defs = HashMap::new();
+                for e in self.store.episodes(None, None)? {
+                    if let EpisodePayload::Define { definition } = &e.payload {
+                        defs.insert(e.key.to_string_repr(), definition.context_targets.clone());
+                    }
+                }
+                defs
+            }
+        };
         let entities = self.store.list()?;
         let mut candidates = Vec::new();
         for state in entities {
@@ -1292,6 +2058,15 @@ impl<S: StorePort> MedhaEngine<S> {
             }
             if let Some(ids) = &options.ids {
                 if !ids.iter().any(|id| id == &state.key.id) {
+                    continue;
+                }
+            }
+            if let Some(f) = filter {
+                let targets = definitions
+                    .get(&state.key.to_string_repr())
+                    .cloned()
+                    .flatten();
+                if !matches_context_targets(targets.as_ref(), f) {
                     continue;
                 }
             }
@@ -1317,6 +2092,67 @@ impl<S: StorePort> MedhaEngine<S> {
         };
 
         Ok(pack_entities(&candidates, &policy)?)
+    }
+
+    /// The negative-evidence radar (TypeScript `Medha#detectPitfalls`, medha-c8z.4): retired or
+    /// quarantined entities with at least `min_failures` trials, or a failing guard.
+    pub fn detect_pitfalls(
+        &self,
+        kind: Option<&str>,
+        namespace: Option<&str>,
+        min_failures: f64,
+        limit: Option<usize>,
+        now: i64,
+    ) -> Result<Vec<Pitfall>, MedhaError> {
+        self.require_readable()?;
+        let mut out = Vec::new();
+        for state in self.store.list()? {
+            if kind.is_some_and(|k| state.key.kind != k)
+                || namespace.is_some_and(|n| state.key.namespace != n)
+            {
+                continue;
+            }
+            let hint = self.hint(&state.key, now)?;
+            let status = match hint.status {
+                LifecycleStatus::Retired => "retired",
+                LifecycleStatus::Quarantined => "quarantined",
+                _ => continue,
+            };
+            let trials = state.evidence.n;
+            let guard_failing = hint.breakdown.guard_factor == 0.0;
+            if trials < min_failures && !guard_failing {
+                continue;
+            }
+            let reason = if status == "retired" {
+                format!(
+                    "Retired after {} trials with low trust ({} successes)",
+                    js_number(trials),
+                    js_number(state.evidence.k)
+                )
+            } else {
+                format!(
+                    "Quarantined ({})",
+                    if guard_failing {
+                        "guard failed"
+                    } else {
+                        "downward weight drift"
+                    }
+                )
+            };
+            out.push(Pitfall {
+                key: state.key.clone(),
+                status: status.to_string(),
+                trials,
+                successes: state.evidence.k,
+                failing_guard: guard_failing.then(|| "guard".to_string()),
+                last_note: state.last_note.clone(),
+                reason,
+            });
+        }
+        if let Some(l) = limit {
+            out.truncate(l);
+        }
+        Ok(out)
     }
 
     // --- SYNC PLANE ---
