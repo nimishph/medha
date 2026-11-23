@@ -65,6 +65,11 @@ and the spec plus conformance vectors stay the language-neutral contract.
 - Custom JS/TS updaters in `<home>/updaters/*.ts` remain supported when embedding through Node/Bun environments.
 
 ### 2. @cntxt-labs/medha Library Binding vs Pure TS (medha-dvv.6)
+
+> **Superseded by ADR-0002** (`0002-sdk-binds-rust-engine.md`): the SDK binds to the Rust engine
+> over NAPI and keeps the TypeScript engine only as a fallback until it is retired. Once ADR-0002
+> is accepted, the decision below no longer holds.
+
 - **Decision:** Dual distribution: `@cntxt-labs/medha` remains pure TypeScript for ubiquitous, zero-compilation compatibility across Node, Bun, and browser environments. For performance-critical workloads, `@cntxt-labs/medha-napi` exposes high-throughput native bindings to the Rust engine.
 
 ## Action items
