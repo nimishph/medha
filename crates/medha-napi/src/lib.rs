@@ -1,3 +1,5 @@
+pub mod engine;
+
 use medha_core::formula::{compute_trust_and_status as core_compute_trust, TrustComputationInput};
 use medha_core::types::{
     EmaState, Evidence, GuardState, LifecycleStatus, RecencyConfig, Thresholds,

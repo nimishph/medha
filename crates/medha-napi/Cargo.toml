@@ -15,6 +15,8 @@ doctest = false
 [dependencies]
 napi = { version = "2.16", default-features = false, features = ["napi4", "serde-json"] }
 napi-derive = "2.16"
+medha = { path = "../medha" }
+medha-cli = { path = "../medha-cli" }
 medha-core = { path = "../medha-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }

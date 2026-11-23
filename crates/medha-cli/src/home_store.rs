@@ -171,6 +171,8 @@ impl StorePort for FileDocStore {
 pub enum Backend {
     Sqlite(SqliteStore),
     File(FileDocStore),
+    /// Ephemeral, for `MedhaClient.memory()` through the NAPI binding: nothing is written to disk.
+    Memory(MemoryStore),
 }
 
 /// The home's store, optionally scoped to its namespaces. A scoped store hides other namespaces
@@ -195,6 +197,10 @@ impl HomeStore {
             path.to_path_buf(),
             registries,
         )))
+    }
+
+    pub fn memory(registries: StoreRegistries) -> Self {
+        Self::of(Backend::Memory(MemoryStore::new(Some(registries))))
     }
 
     fn of(backend: Backend) -> Self {
@@ -297,6 +303,7 @@ impl HomeStore {
         match &self.backend {
             Backend::Sqlite(s) => s,
             Backend::File(f) => f,
+            Backend::Memory(m) => m,
         }
     }
 
@@ -304,6 +311,7 @@ impl HomeStore {
         match &mut self.backend {
             Backend::Sqlite(s) => s,
             Backend::File(f) => f,
+            Backend::Memory(m) => m,
         }
     }
 

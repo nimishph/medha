@@ -3,25 +3,25 @@
 #![allow(clippy::result_large_err)]
 
 mod args;
-mod failure;
+pub mod failure;
 mod help;
-mod home_store;
+pub mod home_store;
 mod init;
 mod issue;
 mod keys;
 mod maintain;
 mod mcp;
 mod mcp_config;
-mod mcp_shapes;
+pub mod mcp_shapes;
 mod pack;
 mod params;
 mod policy;
 mod primer;
 mod read;
-mod render;
-mod signing;
+pub mod render;
+pub mod signing;
 mod sync_view;
-mod ts_view;
+pub mod ts_view;
 mod updater;
 mod write;
 
@@ -37,7 +37,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
 
-fn main() {
+/// Parse the command line, run the command and exit with its code.
+pub fn main() {
     let command = Cli::command();
     let command = command
         .clone()
@@ -325,6 +326,22 @@ fn resolve_home(
     )
     .with_context(serde_json::json!({ "home": home.display().to_string() }))
     .with_hint("run 'medha init' first (the ephemeral memory backend leaves nothing to reopen)"))
+}
+
+/// Open the engine home that `dir`/`home` point at, as every CLI command does: find the home,
+/// refuse a malformed signing block, load `config.json` and open its store. `scoped` restricts the
+/// engine to the home's `namespaceScope` (agent-facing use); unscoped is the admin view.
+pub fn open_home(
+    dir: Option<&str>,
+    home: Option<&str>,
+    scoped: bool,
+) -> Result<(MedhaEngine<home_store::HomeStore>, PathBuf, MedhaConfig), Box<dyn std::error::Error>>
+{
+    let home_dir = resolve_home(dir, home)?;
+    validate_signing_config(&home_dir)?;
+    let config = MedhaConfig::load_from_file(home_dir.join(CONFIG_FILE))?;
+    let engine = open_engine(&home_dir, &config, scoped)?;
+    Ok((engine, home_dir, config))
 }
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {

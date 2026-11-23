@@ -470,6 +470,8 @@ dependencies = [
 name = "medha-napi"
 version = "0.8.0-alpha.2"
 dependencies = [
+ "medha",
+ "medha-cli",
  "medha-core",
  "napi",
  "napi-build",

@@ -1,6 +1,6 @@
 # ADR-0002: The SDK binds to the Rust engine over NAPI
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-23)
 **Date:** 2026-11-23
 **Deciders:** Nimish Phalnikar
 **Supersedes:** ADR-0001, resolved decision 2 (`@cntxt-labs/medha` stays pure TypeScript)
