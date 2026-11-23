@@ -252,6 +252,24 @@ fn positive_int(name: &str, raw: &str) -> Result<usize, failure::Failure> {
     }
 }
 
+/// A non-negative integer flag value (`--budget`, `--seed`), as the TypeScript `parseNonNegativeInt`.
+fn non_negative_int(name: &str, raw: &str) -> Result<usize, failure::Failure> {
+    match raw.trim().parse::<f64>() {
+        Ok(v)
+            if !raw.trim().is_empty()
+                && v.fract() == 0.0
+                && (0.0..=9.007_199_254_740_991e15).contains(&v) =>
+        {
+            Ok(v as usize)
+        }
+        _ => Err(failure::Failure::invalid(
+            name,
+            "a non-negative integer",
+            raw,
+        )),
+    }
+}
+
 /// The clock: `MEDHA_NOW` (epoch ms) pins it, as in the TypeScript CLI, so tests and replays are
 /// deterministic; otherwise the system time.
 pub(crate) fn clock_now() -> i64 {
@@ -765,14 +783,35 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Commands::Pack(args) => {
-            let exploration_ratio = args.exploration.unwrap_or(0.15);
+            // As the TypeScript `runPack`: --budget and --seed are non-negative integers,
+            // --exploration a number in [0, 1].
+            let budget = non_negative_int("--budget", &args.budget)?;
+            let exploration_ratio = match args.exploration.as_deref().filter(|r| !r.is_empty()) {
+                None => 0.15,
+                Some(raw) => match raw.trim().parse::<f64>() {
+                    Ok(v) if v.is_finite() && (0.0..=1.0).contains(&v) => v,
+                    _ => {
+                        return Err(Box::new(failure::Failure::invalid(
+                            "--exploration",
+                            "a number in [0, 1]",
+                            raw,
+                        )))
+                    }
+                },
+            };
+            let seed = args
+                .seed
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|s| non_negative_int("--seed", s).map(|v| v as u64))
+                .transpose()?;
             let opts = medha::EnginePackOptions {
-                budget: args.budget,
+                budget,
                 kind: args.kind,
                 namespace: args.namespace,
                 ids: args.ids.as_deref().map(parse_ids).transpose()?,
                 exploration_ratio,
-                seed: args.seed,
+                seed,
                 min_trust: 0.0,
                 allow_quarantined: false,
                 allow_retired: false,
@@ -780,7 +819,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let outcome = engine.pack(opts, now)?;
             let report = pack::PackReport {
                 home: home_dir.display().to_string(),
-                budget: args.budget,
+                budget,
                 outcome,
                 format: args.format.to_lowercase(),
             };

@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MedhaClient } from '../client.ts';
+import { medhaHomeReadme } from '../home-readme.ts';
 
 // MedhaClient.init: the SDK can create a home on disk instead of needing `medha init` first
 // (0.8.0-alpha.1 black-box finding: open() on an empty directory was the only option, and it threw).
@@ -46,6 +47,8 @@ describe('MedhaClient.init', () => {
     const gitignore = readFileSync(join(home, '.gitignore'), 'utf8');
     expect(gitignore).toContain('store.sqlite');
     expect(gitignore).not.toContain('config.json\n');
+    // The same explainer `medha init` writes.
+    expect(readFileSync(join(home, 'README.md'), 'utf8')).toBe(medhaHomeReadme('sqlite'));
 
     const reopened = track(await MedhaClient.open({ dir }));
     expect((await reopened.show('no-console-log')).hint.evidence.successes).toBe(1);
@@ -54,6 +57,17 @@ describe('MedhaClient.init', () => {
 
     const again = track(await MedhaClient.init({ dir }));
     expect((await again.show('no-console-log')).hint.evidence.successes).toBe(1);
+  });
+
+  test('refuses a guard report without a kind on an unguarded entity, as medha guard does', async () => {
+    const client = track(await MedhaClient.init({ dir }));
+    await client.recordAcceptance('r1');
+    await expect(client.recordGuard({ key: 'r1', ok: true })).rejects.toThrow(/guard kind/);
+    const named = await client.recordGuard({ key: 'r1', ok: true, guard: 'ci' });
+    expect(named.components.guard).toBeGreaterThan(0.5);
+    // Once guarded, a report without a kind counts against the current one.
+    const again = await client.recordGuard({ key: 'r1', ok: false });
+    expect(again.components.guard).not.toBe(named.components.guard);
   });
 
   test('creates a file-backend home', async () => {

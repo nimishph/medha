@@ -652,8 +652,13 @@ pub struct IssueArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct PackArgs {
-    #[arg(long, required = true, help = "Maximum token/cost budget")]
-    pub budget: usize,
+    #[arg(
+        long,
+        required = true,
+        allow_hyphen_values = true,
+        help = "Maximum token/cost budget"
+    )]
+    pub budget: String,
 
     #[arg(long, help = "Filter by kind (default: rule)")]
     pub kind: Option<String>,
@@ -669,12 +674,17 @@ pub struct PackArgs {
 
     #[arg(
         long,
+        allow_hyphen_values = true,
         help = "Proportion of budget for exploring probation entities (default: 0.15)"
     )]
-    pub exploration: Option<f64>,
+    pub exploration: Option<String>,
 
-    #[arg(long, help = "Seed for deterministic exploration sampling")]
-    pub seed: Option<u64>,
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        help = "Seed for deterministic exploration sampling"
+    )]
+    pub seed: Option<String>,
 
     #[arg(
         long,

@@ -17,9 +17,12 @@ import {
   type EntityKey,
   type EntityState,
   type EvidentialHint,
+  entityKeyString,
   type Gate,
+  guardFactor,
   InvalidArgumentError,
   type KindSpec,
+  newGuard,
   type PackOutcome,
   type Pitfall,
   type PolicyLatchInput,
@@ -45,6 +48,7 @@ import {
   Medha,
   type WritePermissionsPolicy,
 } from './engine.ts';
+import { medhaHomeReadme } from './home-readme.ts';
 import type { PreflightReport } from './maintenance.ts';
 import type { UpdaterRegistry } from './updaters.ts';
 
@@ -473,6 +477,7 @@ export class MedhaClient {
     if (!existsSync(gitignorePath)) {
       writeFileSync(gitignorePath, gitignoreFor(backend, storeFile), 'utf8');
     }
+    writeFileSync(join(home, 'README.md'), medhaHomeReadme(backend), 'utf8');
     return MedhaClient.open({ ...options, dir: startDir, home });
   }
 
@@ -751,6 +756,10 @@ export class MedhaClient {
 
   /**
    * Record an automated test or check guard outcome into evidential memory.
+   *
+   * Without `guard`, the report counts against the entity's current guard kind. An entity with no
+   * guard yet would store it against kind `none` and change nothing, so that is refused, as
+   * `medha guard` refuses it: name the check that ran.
    */
   async recordGuard(input: {
     readonly key: EntityKey | string;
@@ -761,6 +770,24 @@ export class MedhaClient {
     readonly runRef?: string | undefined;
   }): Promise<EvidentialHint> {
     const parsedKey = this.parseKey(input.key);
+    if (input.guard === undefined || input.guard.trim() === '') {
+      const current = (await this.engine.hints([parsedKey], this.context())).get(
+        entityKeyString(parsedKey),
+      );
+      // G is 0.5 exactly when the guard kind is `none` (guardFactor, model §4.1).
+      if (current === undefined || current.components.guard === guardFactor(newGuard())) {
+        throw new InvalidArgumentError(
+          'guard',
+          'a guard kind (e.g. ci, review, tests)',
+          undefined,
+          {
+            hint:
+              `${entityKeyString(parsedKey)} has no guard yet, so a report without a guard kind ` +
+              'would not count. Pass guard: <kind> naming the check that ran.',
+          },
+        );
+      }
+    }
     const author = input.author ?? this.defaultActor;
     return this.engine.reportGuard(
       parsedKey,
