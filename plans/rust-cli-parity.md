@@ -117,17 +117,19 @@ delegation runs the binary with `spawnSync`, so an interactive stdio session nev
 Rust server lists the TypeScript server's 19 tools; a direct handshake works. The delegation now
 passes `FORCE_COLOR` so the binary knows whether its caller's stdout is a terminal.
 
-Found along the way, not yet addressed:
+Found along the way and fixed since: the three MCP tools that were listed but not implemented
+(`hints_for_context`, `verify_guard`, `detect_pitfalls`), Rust-shaped hints and reports in MCP
+results, the Rust-only built-in signals (`ADOPTED`, `HEURISTIC`, `FLAKY`; the conformance vectors
+register `ADOPTED` as the host signal they are), ema-only updaters (`wilson`, `sliding-window`,
+`asymmetric-penalty` now match the TypeScript weights exactly), `keys adopt` leaving unsigned
+baselines on failure (it now restores the log), and the docs reader's `["mcp"]` example.
 
-- The Rust MCP server lists `hints_for_context`, `verify_guard` and `detect_pitfalls` but answers
-  them with "Unknown tool"; its tool outputs also serialize Rust-shaped hints (not covered by the
-  CLI suite).
-- The Rust core still treats `ADOPTED`, `HEURISTIC` and `FLAKY` as built-in signals when a home has
-  no registries. `init` writes the TypeScript registries (the canonical four), so configured homes
-  match; an engine opened without a config does not.
-- The Rust engine applies only the `ema` weight updater; `record --updater` accepts only `ema`.
-- `keys adopt` compacts before it signs, so a failed signature leaves unsigned baselines; the
-  TypeScript engine signs in memory first.
-- `cli/src/docs.ts` shows an MCP config with `"args": ["mcp"]`; both CLIs need `["mcp", "serve"]`.
+Still open:
+
+- MCP `retract_episode` without `id`: the TypeScript server looks in an empty episode slice and
+  refuses every seq ("found 0 episodes"); the Rust server retracts. The TypeScript behaviour looks
+  like the bug.
+- The TypeScript engine attaches `updater`/`weight` to a signal episode only in some cases (seen on
+  an entity's first signal, not its second); the Rust engine always does. Weights agree.
 - Deliberate difference kept: without `--dir`/`--home`, the Rust CLI also looks for `.medha/` in
   parent directories (hooks run from subdirectories rely on it).

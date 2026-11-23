@@ -12,6 +12,7 @@ mod keys;
 mod maintain;
 mod mcp;
 mod mcp_config;
+mod mcp_shapes;
 mod pack;
 mod params;
 mod policy;

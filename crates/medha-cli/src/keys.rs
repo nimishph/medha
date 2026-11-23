@@ -543,7 +543,15 @@ fn run_adopt(
     let now = crate::clock_now();
     let before = engine.store().episodes(None, None)?;
     engine.compact(now)?;
-    let baselines = engine.store_mut().sign_baselines()?;
+    // Signing happens after the compaction is written, so a baseline that will not verify puts
+    // the original log back: adoption either completes or leaves the store as it was.
+    let baselines = match engine.store_mut().sign_baselines() {
+        Ok(n) => n,
+        Err(e) => {
+            engine.store_mut().replace_log(&before)?;
+            return Err(Box::new(e));
+        }
+    };
     let remaining = engine.store().episodes(None, None)?.len();
     let folded = match (before.first(), before.last()) {
         (Some(a), Some(b)) if baselines > 0 => {

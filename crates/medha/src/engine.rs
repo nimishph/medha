@@ -94,6 +94,185 @@ pub struct RecordInput {
     pub case_id: Option<String>,
 }
 
+/// The built-in weight updaters (TypeScript `BUILTIN_UPDATERS`), by name.
+pub const BUILTIN_UPDATERS: [&str; 4] = ["ema", "wilson", "sliding-window", "asymmetric-penalty"];
+
+/// Whether `name` is a built-in updater (`asymmetric` is the alias of `asymmetric-penalty`).
+pub fn is_builtin_updater(name: &str) -> bool {
+    let n = name.to_lowercase();
+    BUILTIN_UPDATERS.contains(&n.as_str()) || n == "asymmetric"
+}
+
+fn clamp_round(v: f64) -> Result<f64, MedhaError> {
+    Ok(round6(v.clamp(0.0, 1.0))?)
+}
+
+/// One weight update from the entity's state, as the TypeScript built-in updaters compute it.
+/// Returns the updater actually used and the new weight (clamped to [0, 1], rounded to 6 places).
+fn compute_weight(
+    name: &str,
+    state: &medha_store::EntityState,
+    spec: &SignalSpec,
+) -> Result<(String, f64), MedhaError> {
+    let current = state.ema.mu;
+    let initial = state.ema.theta0;
+    let samples = state.evidence.n;
+    let accepted = state.evidence.k;
+    let success = spec.counts_as_trial && spec.counts_as_success;
+    let canonical = name.to_lowercase();
+    let (used, weight) = match canonical.as_str() {
+        "wilson" => {
+            let positive = accepted + if success { 1.0 } else { 0.0 };
+            let total = samples + 1.0;
+            let w = if total < 5.0 {
+                round6(0.5 * initial + 0.5 * (positive / total))?
+            } else {
+                medha_core::wilson::wilson_lower_bound(
+                    positive,
+                    total,
+                    medha_core::thresholds::WILSON_Z,
+                )?
+            };
+            ("wilson", w)
+        }
+        "sliding-window" => {
+            let step = 1.0 / (samples + 1.0).clamp(10.0, 50.0);
+            let delta = if success {
+                step * (1.0 - current)
+            } else if spec.name == "REJECT_CONTEXT" {
+                -step * 0.5 * current
+            } else if spec.counts_as_trial {
+                -step * current
+            } else {
+                0.0
+            };
+            ("sliding-window", current + delta)
+        }
+        "asymmetric-penalty" | "asymmetric" => {
+            let delta = if success {
+                0.04 * (1.0 - current)
+            } else if spec.name == "REJECT_CONTEXT" {
+                -0.05 * current
+            } else if spec.counts_as_trial {
+                -0.25 * current
+            } else {
+                0.0
+            };
+            ("asymmetric-penalty", current + delta)
+        }
+        _ => (
+            "ema",
+            ema_step(Some(current), spec.value, DEFAULT_EMA_ALPHA)?,
+        ),
+    };
+    Ok((used.to_string(), clamp_round(weight)?))
+}
+
+/// The active context a pack is matched against (TypeScript `ContextFilter`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ContextFilter {
+    #[serde(default)]
+    pub files: Option<Vec<String>>,
+    #[serde(default)]
+    pub languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+/// A glob as the TypeScript packer reads it: `**` any path, `*` within a segment, case-insensitive.
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    fn go(p: &[char], t: &[char]) -> bool {
+        match p.first() {
+            None => t.is_empty(),
+            Some('*') if p.get(1) == Some(&'*') => (0..=t.len()).any(|i| go(&p[2..], &t[i..])),
+            Some('*') => {
+                let mut i = 0;
+                loop {
+                    if go(&p[1..], &t[i..]) {
+                        return true;
+                    }
+                    if i >= t.len() || t[i] == '/' {
+                        return false;
+                    }
+                    i += 1;
+                }
+            }
+            Some(c) => t.first().is_some_and(|x| x == c) && go(&p[1..], &t[1..]),
+        }
+    }
+    let p: Vec<char> = pattern.to_lowercase().chars().collect();
+    let t: Vec<char> = text.to_lowercase().chars().collect();
+    go(&p, &t)
+}
+
+/// TypeScript `matchesContextTargets`: no targets (or no filter) match everything; otherwise a
+/// file, a language or a query keyword must match.
+pub fn matches_context_targets(
+    targets: Option<&medha_store::ContextTargets>,
+    filter: &ContextFilter,
+) -> bool {
+    let Some(t) = targets else {
+        return true;
+    };
+    let files = t.files.clone().unwrap_or_default();
+    let langs = t.languages.clone().unwrap_or_default();
+    let keywords = t.keywords.clone().unwrap_or_default();
+    if files.is_empty() && langs.is_empty() && keywords.is_empty() {
+        return true;
+    }
+    if let Some(active) = filter.files.as_ref().filter(|f| !f.is_empty()) {
+        for pattern in &files {
+            for file in active {
+                if file == pattern
+                    || file.ends_with(pattern.as_str())
+                    || pattern.ends_with(file.as_str())
+                    || file.contains(pattern.as_str())
+                    || (pattern.contains('*') && glob_matches(pattern, file))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    if let Some(active) = filter.languages.as_ref().filter(|l| !l.is_empty()) {
+        let targets: Vec<String> = langs.iter().map(|l| l.to_lowercase()).collect();
+        if active.iter().any(|l| targets.contains(&l.to_lowercase())) {
+            return true;
+        }
+    }
+    if let Some(q) = &filter.query {
+        let q = q.to_lowercase();
+        if keywords.iter().any(|k| q.contains(&k.to_lowercase())) {
+            return true;
+        }
+    }
+    false
+}
+
+/// A trap the negative-evidence radar reports (TypeScript `Pitfall`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pitfall {
+    pub key: EntityKey,
+    pub status: String,
+    pub trials: f64,
+    pub successes: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_guard: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_note: Option<String>,
+    pub reason: String,
+}
+
+/// A number as JavaScript prints it in a template string (`5`, not `5.0`).
+fn js_number(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
 /// A decision-tree write (see `MedhaEngine::decision_with`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecisionInput {
@@ -990,6 +1169,17 @@ impl<S: StorePort> MedhaEngine<S> {
     // --- WRITE PLANE ---
 
     pub fn record(&mut self, input: RecordInput) -> Result<AppendResult, MedhaError> {
+        self.record_with_updater(input, None)
+    }
+
+    /// `record`, with the weight updater named (else the entity's own, `ema` by default):
+    /// `ema`, `wilson`, `sliding-window` or `asymmetric-penalty` (alias `asymmetric`), as the
+    /// TypeScript built-ins. An unknown name falls back to `ema`, as the TypeScript registry does.
+    pub fn record_with_updater(
+        &mut self,
+        input: RecordInput,
+        updater: Option<&str>,
+    ) -> Result<AppendResult, MedhaError> {
         self.require_kind(&input.key)?;
         if let Some(case_id) = &input.case_id {
             // A typo'd caseId would fold into the entity as usual and leave the named branch
@@ -1030,9 +1220,17 @@ impl<S: StorePort> MedhaEngine<S> {
             None if input.ensure => Some(fresh_state_at(input.key.clone(), input.at)),
             None => None,
         };
-        let weight = match &base {
-            Some(state) => Some(ema_step(Some(state.ema.mu), spec.value, DEFAULT_EMA_ALPHA)?),
+        let computed = match &base {
+            Some(state) => Some(compute_weight(
+                updater.unwrap_or(state.updater.as_str()),
+                state,
+                &spec,
+            )?),
             None => None,
+        };
+        let (updater_name, weight) = match computed {
+            Some((name, w)) => (Some(name), Some(w)),
+            None => (None, None),
         };
 
         let episode_input = EpisodeInput {
@@ -1046,7 +1244,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 ensure: input.ensure,
                 run_ref: input.run_ref,
                 note: input.note,
-                updater: weight.map(|_| "ema".to_string()),
+                updater: updater_name,
                 weight,
                 case_id: input.case_id,
             },
@@ -1820,7 +2018,31 @@ impl<S: StorePort> MedhaEngine<S> {
     }
 
     pub fn pack(&self, options: EnginePackOptions, now: i64) -> Result<PackOutcome, MedhaError> {
+        self.pack_in_context(options, None, now)
+    }
+
+    /// `pack`, keeping only entities whose definition's context targets match the active context
+    /// (TypeScript `Medha#hintsForContext` / `matchesContextTargets`, medha-c8z.1). An entity
+    /// with no definition or no targets always matches.
+    pub fn pack_in_context(
+        &self,
+        options: EnginePackOptions,
+        filter: Option<&ContextFilter>,
+        now: i64,
+    ) -> Result<PackOutcome, MedhaError> {
         self.require_readable()?;
+        let definitions: HashMap<String, Option<medha_store::ContextTargets>> = match filter {
+            None => HashMap::new(),
+            Some(_) => {
+                let mut defs = HashMap::new();
+                for e in self.store.episodes(None, None)? {
+                    if let EpisodePayload::Define { definition } = &e.payload {
+                        defs.insert(e.key.to_string_repr(), definition.context_targets.clone());
+                    }
+                }
+                defs
+            }
+        };
         let entities = self.store.list()?;
         let mut candidates = Vec::new();
         for state in entities {
@@ -1836,6 +2058,15 @@ impl<S: StorePort> MedhaEngine<S> {
             }
             if let Some(ids) = &options.ids {
                 if !ids.iter().any(|id| id == &state.key.id) {
+                    continue;
+                }
+            }
+            if let Some(f) = filter {
+                let targets = definitions
+                    .get(&state.key.to_string_repr())
+                    .cloned()
+                    .flatten();
+                if !matches_context_targets(targets.as_ref(), f) {
                     continue;
                 }
             }
@@ -1861,6 +2092,67 @@ impl<S: StorePort> MedhaEngine<S> {
         };
 
         Ok(pack_entities(&candidates, &policy)?)
+    }
+
+    /// The negative-evidence radar (TypeScript `Medha#detectPitfalls`, medha-c8z.4): retired or
+    /// quarantined entities with at least `min_failures` trials, or a failing guard.
+    pub fn detect_pitfalls(
+        &self,
+        kind: Option<&str>,
+        namespace: Option<&str>,
+        min_failures: f64,
+        limit: Option<usize>,
+        now: i64,
+    ) -> Result<Vec<Pitfall>, MedhaError> {
+        self.require_readable()?;
+        let mut out = Vec::new();
+        for state in self.store.list()? {
+            if kind.is_some_and(|k| state.key.kind != k)
+                || namespace.is_some_and(|n| state.key.namespace != n)
+            {
+                continue;
+            }
+            let hint = self.hint(&state.key, now)?;
+            let status = match hint.status {
+                LifecycleStatus::Retired => "retired",
+                LifecycleStatus::Quarantined => "quarantined",
+                _ => continue,
+            };
+            let trials = state.evidence.n;
+            let guard_failing = hint.breakdown.guard_factor == 0.0;
+            if trials < min_failures && !guard_failing {
+                continue;
+            }
+            let reason = if status == "retired" {
+                format!(
+                    "Retired after {} trials with low trust ({} successes)",
+                    js_number(trials),
+                    js_number(state.evidence.k)
+                )
+            } else {
+                format!(
+                    "Quarantined ({})",
+                    if guard_failing {
+                        "guard failed"
+                    } else {
+                        "downward weight drift"
+                    }
+                )
+            };
+            out.push(Pitfall {
+                key: state.key.clone(),
+                status: status.to_string(),
+                trials,
+                successes: state.evidence.k,
+                failing_guard: guard_failing.then(|| "guard".to_string()),
+                last_note: state.last_note.clone(),
+                reason,
+            });
+        }
+        if let Some(l) = limit {
+            out.truncate(l);
+        }
+        Ok(out)
     }
 
     // --- SYNC PLANE ---

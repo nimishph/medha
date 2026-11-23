@@ -1,8 +1,8 @@
 //! `medha updater list|show|fork` in the TypeScript CLI's shapes (`cli/src/updater.ts`).
 //!
-//! The catalog lists the TypeScript built-ins. This engine applies `ema` itself; the others are
-//! weight updaters of the TypeScript engine, and custom (project) updaters are TypeScript modules
-//! loaded by the TypeScript CLI (ADR-0001, medha-dvv.5). `fork` scaffolds such a module.
+//! The catalog lists the TypeScript built-ins, which this engine also applies
+//! (`MedhaEngine::record_with_updater`). Custom (project) updaters are TypeScript modules loaded
+//! by the TypeScript CLI (ADR-0001, medha-dvv.5); `fork` scaffolds one.
 
 use crate::args::{UpdaterAction, UpdaterArgs};
 use crate::failure::Failure;

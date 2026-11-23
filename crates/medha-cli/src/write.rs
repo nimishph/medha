@@ -227,31 +227,37 @@ pub fn record<S: StorePort>(
         Some(args.signal.as_str()),
     )?;
     if let Some(u) = args.updater.as_deref().filter(|u| !u.is_empty()) {
-        if u != "ema" {
+        if !medha::is_builtin_updater(u) {
             return Err(Box::new(
                 Failure::cli(
                     "UpdaterNotFoundError",
                     "CLI_UPDATER_UNKNOWN",
                     format!("no updater named '{u}'"),
                 )
-                .with_context(json!({ "name": u, "known": ["ema"] }))
-                .with_hint("known updaters: ema"),
+                .with_context(json!({ "name": u, "known": crate::updater::BUILTIN_UPDATERS }))
+                .with_hint(format!(
+                    "known updaters: {}",
+                    crate::updater::BUILTIN_UPDATERS.join(", ")
+                )),
             ));
         }
     }
     require_kind(engine, &key.kind)?;
     let at = parse_timestamp(args.at.as_deref(), now)?;
-    let res = engine.record(RecordInput {
-        key: key.clone(),
-        signal: args.signal.clone(),
-        at,
-        ensure: args.ensure,
-        author: resolve_author(args.author.as_deref()),
-        anchors: None,
-        run_ref: args.run_ref.clone(),
-        note: args.note.clone(),
-        case_id: args.case_id.clone(),
-    })?;
+    let res = engine.record_with_updater(
+        RecordInput {
+            key: key.clone(),
+            signal: args.signal.clone(),
+            at,
+            ensure: args.ensure,
+            author: resolve_author(args.author.as_deref()),
+            anchors: None,
+            run_ref: args.run_ref.clone(),
+            note: args.note.clone(),
+            case_id: args.case_id.clone(),
+        },
+        args.updater.as_deref().filter(|u| !u.is_empty()),
+    )?;
     let hint = ts_view::hint(engine, &key, at)?;
     let mut report = json!({
         "home": home,
