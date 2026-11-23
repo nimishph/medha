@@ -18,6 +18,7 @@ mod policy;
 mod primer;
 mod read;
 mod render;
+mod signing;
 mod sync_view;
 mod ts_view;
 mod updater;
@@ -39,7 +40,12 @@ fn main() {
     let command = Cli::command();
     let command = command
         .clone()
-        .help_template(help::grouped_template(&command));
+        .help_template(help::grouped_template_styled(&command, help::styled()))
+        .color(if help::styled() {
+            clap::ColorChoice::Always
+        } else {
+            clap::ColorChoice::Never
+        });
     let json_mode = env::args().any(|a| a == "--json");
     let matches = match command.try_get_matches() {
         Ok(m) => m,
@@ -183,6 +189,16 @@ fn open_engine(
         }
     }
     .scoped(if scoped { config.namespace_scope.clone() } else { None });
+    // Signing (medha-nwf.4): the home's key signs every write; `require` counts only verified ones.
+    let raw_config: serde_json::Value = fs::read_to_string(home_dir.join(CONFIG_FILE))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let policy = signing::policy_for(home_dir, &raw_config)?;
+    if policy.signer.is_some() {
+        signing::SIGNING_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let store = store.signed(policy);
     let mut engine = MedhaEngine::open_with(store, config.clone())?;
     engine.use_registries(&config.registries);
     let repo = if home_dir.file_name().is_some_and(|n| n == MEDHA_HOME_DIR) {
@@ -845,6 +861,14 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!("  rationale: {}", args.rationale);
+            }
+        }
+        Commands::Distill(args) => {
+            let report = write::distill(&mut engine, &home_str, &args, now)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{}", write::render_distill(&report));
             }
         }
         Commands::Decision(args) => {

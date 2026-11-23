@@ -35,6 +35,16 @@ pub enum StoreError {
         namespace: String,
         allowed: Vec<String>,
     },
+
+    /// A write the home's signing policy refuses (TypeScript `PermissionDeniedError` from
+    /// `Medha#sign`): an author that is not the key's principal, or an unverifiable episode in
+    /// `require` mode.
+    #[error("Permission denied for '{action}': {reason}")]
+    PermissionDenied {
+        action: String,
+        reason: String,
+        hint: Option<String>,
+    },
 }
 
 impl From<rusqlite::Error> for StoreError {

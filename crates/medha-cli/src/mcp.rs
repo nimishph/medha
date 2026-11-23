@@ -963,6 +963,18 @@ fn run_tool<S: StorePort>(
                 Err(e) => Err(e.to_string()),
             }
         }
+        "distill_trajectory" => {
+            let auto_file = args
+                .get("autoFile")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let trajectory: medha::TrajectoryEvidence =
+                serde_json::from_value(args.clone()).map_err(|e| e.to_string())?;
+            let (proposals, filed) = engine
+                .distill_trajectory(&trajectory, auto_file, now)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "proposals": proposals, "filedCount": filed }))
+        }
         other => Err(format!("Unknown tool: {}", other)),
     }
 }

@@ -157,7 +157,94 @@ pub struct ProposeInput {
     pub author: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
+    /// The anchor the proposal was made against (e.g. a commit), when it has one.
+    #[serde(default)]
+    pub anchor: Option<Anchor>,
     pub at: i64,
+}
+
+/// An incident or session retrospective to distil (TypeScript `TrajectoryEvidence`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrajectoryEvidence {
+    pub id: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lessons: Option<Vec<TrajectoryLesson>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrajectoryLesson {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A candidate the trajectory distiller proposes (the TypeScript `Proposal` it mines).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DistilledProposal {
+    pub key: EntityKey,
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<Anchor>,
+    pub provenance: String,
+    pub theta0: f64,
+    pub author: String,
+    pub note: String,
+}
+
+/// The TypeScript `TrajectoryDistillerMiner`: one probation candidate per lesson (kind from the
+/// lesson, default `rule`), or one `recipe` from the incident itself when it has no lessons; all
+/// anchored to the commit when there is one, at theta0 0.35.
+pub fn distill_proposals(item: &TrajectoryEvidence) -> Vec<DistilledProposal> {
+    if item.id.is_empty() {
+        return Vec::new();
+    }
+    let anchor = item.commit_sha.as_ref().map(|sha| Anchor {
+        kind: "commit".to_string(),
+        value: sha.clone(),
+    });
+    let provenance = format!("trajectory-distiller:{}", item.id);
+    let lessons = item.lessons.clone().unwrap_or_default();
+    if !lessons.is_empty() {
+        return lessons
+            .iter()
+            .filter(|l| !l.id.is_empty() && !l.text.is_empty())
+            .map(|l| DistilledProposal {
+                key: EntityKey::new("", l.kind.as_deref().unwrap_or("rule"), &l.id),
+                description: l.text.clone(),
+                anchor: anchor.clone(),
+                provenance: provenance.clone(),
+                theta0: 0.35,
+                author: "trajectory-distiller".to_string(),
+                note: format!("Distilled from incident {}: {}", item.id, item.title),
+            })
+            .collect();
+    }
+    let mut slug = String::new();
+    for c in item.id.to_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            slug.push(c);
+        } else if !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    vec![DistilledProposal {
+        key: EntityKey::new("", "recipe", format!("incident-{slug}")),
+        description: item.title.clone(),
+        anchor,
+        provenance,
+        theta0: 0.35,
+        author: "trajectory-distiller".to_string(),
+        note: format!("Distilled from incident {}", item.id),
+    }]
 }
 
 /// The appended proposal and the promotion decision.
@@ -1197,9 +1284,40 @@ impl<S: StorePort> MedhaEngine<S> {
                 evidence_refs: None,
                 author: None,
                 note: None,
+                anchor: None,
                 at,
             })?
             .appended)
+    }
+
+    /// Distil a trajectory into candidate proposals (TypeScript `Medha#distillTrajectory`); with
+    /// `auto_file` each candidate is proposed, so it enters on probation. Returns the candidates
+    /// and how many were filed.
+    pub fn distill_trajectory(
+        &mut self,
+        trajectory: &TrajectoryEvidence,
+        auto_file: bool,
+        at: i64,
+    ) -> Result<(Vec<DistilledProposal>, usize), MedhaError> {
+        let proposals = distill_proposals(trajectory);
+        let mut filed = 0;
+        if auto_file {
+            for p in &proposals {
+                self.propose_with(ProposeInput {
+                    key: p.key.clone(),
+                    provenance: p.provenance.clone(),
+                    theta0: Some(p.theta0),
+                    description: Some(p.description.clone()),
+                    evidence_refs: None,
+                    author: None,
+                    note: Some(p.note.clone()),
+                    anchor: p.anchor.clone(),
+                    at,
+                })?;
+                filed += 1;
+            }
+        }
+        Ok((proposals, filed))
     }
 
     /// Propose with the default promotion policy (spec §7.3, TypeScript `convergingSourcesPolicy`):
@@ -1257,7 +1375,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 theta0: input.theta0,
                 description: input.description,
                 evidence_refs: input.evidence_refs,
-                anchor: None,
+                anchor: input.anchor,
                 promoted: Some(promoted),
                 promotion_reason: Some(reason.clone()),
                 note: input.note,

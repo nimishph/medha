@@ -95,7 +95,7 @@ stores `sig: None`; `crates/medha-cli/src/keys.rs` manages keys but nothing sign
 
 ```yojana:claim
 kind: text
-expression: '/sig: Some\(/ in crates/medha/src/engine.rs'
+expression: /fn sign_outgoing/ in crates/medha-cli/src/signing.rs
 ```
 
 ## Requirement: help lists distill and styles on a terminal {#req-help}
@@ -109,21 +109,25 @@ kind: text
 expression: /Distill/ in crates/medha-cli/src/args.rs
 ```
 
-## Status and known gaps (2026-11-22)
+## Status and known gaps (2026-11-23)
 
-Gate: `bun run test:cli-parity` passes 214 of 219 (was 105). Left: 2 `keys` cases
-(req-engine-signing), 2 `--help` cases (req-help), and the MCP subprocess handshake, which cannot
-pass through this gate: the TypeScript CLI's `MEDHA_CLI_BINARY` delegation runs the binary with
-`spawnSync`, so an interactive stdio session never streams. The Rust server lists the TypeScript
-server's 19 tools; a direct handshake works.
+Gate: `bun run test:cli-parity` passes 218 of 219 (was 105). The one left is the MCP subprocess
+handshake, which cannot pass through this gate: the TypeScript CLI's `MEDHA_CLI_BINARY`
+delegation runs the binary with `spawnSync`, so an interactive stdio session never streams. The
+Rust server lists the TypeScript server's 19 tools; a direct handshake works. The delegation now
+passes `FORCE_COLOR` so the binary knows whether its caller's stdout is a terminal.
 
 Found along the way, not yet addressed:
 
+- The Rust MCP server lists `hints_for_context`, `verify_guard` and `detect_pitfalls` but answers
+  them with "Unknown tool"; its tool outputs also serialize Rust-shaped hints (not covered by the
+  CLI suite).
 - The Rust core still treats `ADOPTED`, `HEURISTIC` and `FLAKY` as built-in signals when a home has
-  no registries. `init` now writes the TypeScript registries (the canonical four), so configured
-  homes match; an engine opened without a config does not.
+  no registries. `init` writes the TypeScript registries (the canonical four), so configured homes
+  match; an engine opened without a config does not.
 - The Rust engine applies only the `ema` weight updater; `record --updater` accepts only `ema`.
-- MCP tool outputs (not covered by the CLI suite) still serialize Rust-shaped hints.
+- `keys adopt` compacts before it signs, so a failed signature leaves unsigned baselines; the
+  TypeScript engine signs in memory first.
 - `cli/src/docs.ts` shows an MCP config with `"args": ["mcp"]`; both CLIs need `["mcp", "serve"]`.
 - Deliberate difference kept: without `--dir`/`--home`, the Rust CLI also looks for `.medha/` in
   parent directories (hooks run from subdirectories rely on it).

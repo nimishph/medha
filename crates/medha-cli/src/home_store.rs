@@ -178,6 +178,7 @@ pub enum Backend {
 pub struct HomeStore {
     backend: Backend,
     scope: Option<Vec<String>>,
+    signing: Option<crate::signing::Policy>,
 }
 
 impl HomeStore {
@@ -200,7 +201,86 @@ impl HomeStore {
         Self {
             backend,
             scope: None,
+            signing: None,
         }
+    }
+
+    /// Sign outgoing episodes with the home's key, and under `require` count only verified ones.
+    pub fn signed(mut self, policy: crate::signing::Policy) -> Self {
+        self.signing = Some(policy);
+        self
+    }
+
+    /// Refuse `keys adopt` without a signer, before anything is compacted.
+    pub fn require_signer(&self) -> Result<(), StoreError> {
+        match self.signing.as_ref().and_then(|p| p.signer.as_ref()) {
+            Some(_) => Ok(()),
+            None => Err(StoreError::PermissionDenied {
+                action: "adopt".to_string(),
+                reason: "no signing key is configured".to_string(),
+                hint: None,
+            }),
+        }
+    }
+
+    /// Sign the unsigned baselines in the log (after `keys adopt` compacted it) with this home's
+    /// key, so `require` mode counts them; each must verify (the key needs the maintainer role).
+    /// Returns how many were signed.
+    pub fn sign_baselines(&mut self) -> Result<usize, StoreError> {
+        self.require_signer()?;
+        let policy = self.signing.as_ref().expect("checked above");
+        let mut log = self.port().episodes(None, None)?;
+        let mut signed = 0;
+        for episode in log.iter_mut() {
+            if !matches!(episode.payload, EpisodePayload::Baseline { .. }) || episode.sig.is_some()
+            {
+                continue;
+            }
+            let mut value = serde_json::to_value(&*episode)?;
+            // As TypeScript `sign`: the author becomes the key's principal, then it is signed.
+            policy.sign_outgoing(&mut value)?;
+            if let Some(reason) = policy.rejection(&value) {
+                return Err(StoreError::PermissionDenied {
+                    action: "adopt".to_string(),
+                    reason: format!("the baselines would not verify: {reason}"),
+                    hint: Some(
+                        "Adoption needs a key with the maintainer role in the keyring.".to_string(),
+                    ),
+                });
+            }
+            *episode = serde_json::from_value(value)?;
+            signed += 1;
+        }
+        if signed > 0 {
+            self.port_mut().replace_log(&log)?;
+        }
+        Ok(signed)
+    }
+
+    /// The require-mode policy, when reads must fold only verified episodes.
+    fn requiring(&self) -> Option<&crate::signing::Policy> {
+        self.signing.as_ref().filter(|p| p.require())
+    }
+
+    /// Entity states folded from the verified episodes only (TypeScript `admitFilter`).
+    fn verified_states(&self) -> Result<Vec<EntityState>, StoreError> {
+        let Some(policy) = self.requiring() else {
+            return Ok(Vec::new());
+        };
+        let episodes = self.port().episodes(None, None)?;
+        let admit = |e: &Episode| {
+            serde_json::to_value(e)
+                .map(|v| policy.verified(&v))
+                .unwrap_or(false)
+        };
+        let folded = medha::store::fold_log_filtered(
+            &episodes,
+            Some(self.port().registries()),
+            Some(&admit),
+        );
+        let mut states: Vec<EntityState> = folded.into_values().collect();
+        states.sort_by_key(|s| s.key.to_string_repr());
+        Ok(states)
     }
 
     /// Restrict to these namespaces; `None` or an empty list leaves the store unrestricted.
@@ -278,6 +358,14 @@ impl StorePort for HomeStore {
                 self.check("append (retract target)", &target.key)?;
             }
         }
+        let input = match &self.signing {
+            Some(policy) => {
+                let mut value = serde_json::to_value(&input)?;
+                policy.sign_outgoing(&mut value)?;
+                serde_json::from_value(value)?
+            }
+            None => input,
+        };
         self.port_mut().append(input)
     }
     fn episodes(
@@ -301,12 +389,22 @@ impl StorePort for HomeStore {
     }
     fn get(&self, key: &EntityKey) -> Result<Option<EntityState>, StoreError> {
         self.check("get", key)?;
+        if self.requiring().is_some() {
+            let repr = key.to_string_repr();
+            return Ok(self
+                .verified_states()?
+                .into_iter()
+                .find(|s| s.key.to_string_repr() == repr));
+        }
         self.port().get(key)
     }
     fn list(&self) -> Result<Vec<EntityState>, StoreError> {
-        Ok(self
-            .port()
-            .list()?
+        let states = if self.requiring().is_some() {
+            self.verified_states()?
+        } else {
+            self.port().list()?
+        };
+        Ok(states
             .into_iter()
             .filter(|s| self.in_scope(&s.key))
             .collect())

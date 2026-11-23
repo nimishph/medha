@@ -84,6 +84,11 @@ pub fn resolve_author(explicit: Option<&str>) -> Option<String> {
     if let Some(a) = explicit.map(str::trim).filter(|a| !a.is_empty()) {
         return Some(a.to_string());
     }
+    // A signing home binds authorship to the key: the store fills in the key's principal, and an
+    // ambient $USER would only be refused as "not the key's principal" (medha-nwf.4).
+    if crate::signing::SIGNING_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
     ["MEDHA_AUTHOR", "USER", "USERNAME"]
         .iter()
         .filter_map(|v| std::env::var(v).ok())
@@ -171,6 +176,7 @@ pub fn propose<S: StorePort>(
         evidence_refs: if refs.is_empty() { None } else { Some(refs) },
         author: resolve_author(args.author.as_deref()),
         note: args.note.clone(),
+        anchor: None,
         at,
     })?;
     let hint = ts_view::hint(engine, &key, at)?;
@@ -612,5 +618,116 @@ pub fn render_decision(r: &Value, key: &EntityKey) -> String {
         r["condition"].as_str().unwrap_or("")
     ));
     lines.push(format!("  decision:  {label}"));
+    format!("{}\n", lines.join("\n"))
+}
+
+/// `medha distill` (TypeScript `runDistill`): a trajectory from `--file` (JSON, or plain text as one
+/// lesson) or a placeholder for `--incident`, distilled into candidates; `--auto-file` proposes them.
+pub fn distill<S: StorePort>(
+    engine: &mut MedhaEngine<S>,
+    home: &str,
+    args: &crate::args::DistillArgs,
+    now: i64,
+) -> Res<Value> {
+    use medha::{TrajectoryEvidence, TrajectoryLesson};
+    let incident = args.incident.clone();
+    let trajectory = match &args.file {
+        Some(file) => {
+            let raw = std::fs::read_to_string(file)?;
+            match serde_json::from_str::<Value>(&raw) {
+                Ok(parsed) if parsed.is_object() => TrajectoryEvidence {
+                    id: parsed["id"]
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| incident.clone())
+                        .unwrap_or_else(|| "incident-1".to_string()),
+                    title: parsed["title"]
+                        .as_str()
+                        .unwrap_or("Session Incident")
+                        .to_string(),
+                    commit_sha: parsed["commitSha"]
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| args.commit.clone()),
+                    resolved: None,
+                    lessons: serde_json::from_value(parsed["lessons"].clone()).ok(),
+                },
+                _ => TrajectoryEvidence {
+                    id: incident.clone().unwrap_or_else(|| "incident-1".to_string()),
+                    title: file.clone(),
+                    commit_sha: args.commit.clone(),
+                    resolved: None,
+                    lessons: Some(vec![TrajectoryLesson {
+                        id: format!(
+                            "lesson-{}",
+                            incident.as_deref().unwrap_or("session").to_lowercase()
+                        ),
+                        text: raw.trim().to_string(),
+                        kind: None,
+                    }]),
+                },
+            }
+        }
+        None => {
+            let name = incident.clone().unwrap_or_else(|| "session".to_string());
+            TrajectoryEvidence {
+                id: name.clone(),
+                title: format!("Retrospective distillation for {name}"),
+                commit_sha: args.commit.clone(),
+                resolved: None,
+                lessons: Some(vec![TrajectoryLesson {
+                    id: format!("rule-{}", name.to_lowercase()),
+                    text: format!("Distilled empirical rule from {name}"),
+                    kind: None,
+                }]),
+            }
+        }
+    };
+    let (proposals, filed) = engine.distill_trajectory(&trajectory, args.auto_file, now)?;
+    Ok(json!({
+        "home": home,
+        "incidentId": trajectory.id,
+        "proposals": proposals,
+        "filedCount": filed,
+        "autoFile": args.auto_file,
+    }))
+}
+
+pub fn render_distill(r: &Value) -> String {
+    let proposals = r["proposals"].as_array().cloned().unwrap_or_default();
+    let mut lines = vec![format!(
+        "medha: distilled {} proposal(s) from incident '{}'",
+        proposals.len(),
+        r["incidentId"].as_str().unwrap_or("")
+    )];
+    if r["autoFile"] == true {
+        lines.push(format!(
+            "filed on probation: {} proposal(s)",
+            r["filedCount"]
+        ));
+    } else {
+        lines.push(
+            "mode: dry-run preview (use --auto-file to record directly into store)".to_string(),
+        );
+    }
+    lines.push(String::new());
+    for p in &proposals {
+        let key = format!(
+            "{}:{}",
+            p["key"]["kind"].as_str().unwrap_or(""),
+            p["key"]["id"].as_str().unwrap_or("")
+        );
+        let anchor = match (p["anchor"]["kind"].as_str(), p["anchor"]["value"].as_str()) {
+            (Some(k), Some(v)) => format!(" [anchor: {k}={v}]"),
+            _ => String::new(),
+        };
+        lines.push(format!(
+            "- {key}{anchor}: {}",
+            p["description"]
+                .as_str()
+                .or(p["note"].as_str())
+                .unwrap_or("")
+        ));
+    }
     format!("{}\n", lines.join("\n"))
 }

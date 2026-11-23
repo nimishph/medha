@@ -204,6 +204,23 @@ fn from_store(err: &StoreError) -> Failure {
             err.to_string(),
         )
         .with_context(json!({ "action": action, "namespace": namespace, "allowed": allowed })),
+        StoreError::PermissionDenied {
+            action,
+            reason,
+            hint,
+        } => {
+            let f = Failure::new(
+                "PermissionDeniedError",
+                "CORE_PERMISSION_DENIED",
+                "core",
+                err.to_string(),
+            )
+            .with_context(json!({ "action": action, "reason": reason }));
+            match hint {
+                Some(h) => f.with_hint(h.clone()),
+                None => f,
+            }
+        }
         StoreError::StoreLayout { found, supported } => Failure::new(
             "StoreLayoutError",
             "STORE_LAYOUT_UNSUPPORTED",

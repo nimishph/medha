@@ -9,9 +9,10 @@ pub use config::{
     BackendKind, MedhaConfig, CONFIG_FILE, CONFIG_LAYOUT_VERSION, MEDHA_HOME_DIR, SQLITE_FILE,
 };
 pub use engine::{
-    ConditionStatus, DecisionInput, EnginePackOptions, GateExplanation, GuardInput, LatchEvidence,
-    LiftedStatus, MedhaEngine, ProposeInput, ProposeOutcome, RecordInput, RetractOutcome,
-    ShowReport, SimulationReport, StatusLatch, ThresholdExplanation,
+    ConditionStatus, DecisionInput, DistilledProposal, EnginePackOptions, GateExplanation,
+    GuardInput, LatchEvidence, LiftedStatus, MedhaEngine, ProposeInput, ProposeOutcome,
+    RecordInput, RetractOutcome, ShowReport, SimulationReport, StatusLatch, ThresholdExplanation,
+    TrajectoryEvidence, TrajectoryLesson,
 };
 pub use errors::MedhaError;
 pub use maintenance::{

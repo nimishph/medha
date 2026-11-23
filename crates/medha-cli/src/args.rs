@@ -32,6 +32,11 @@ pub enum Commands {
     #[command(about = "Propose a candidate rule or entity (enters on probation)")]
     Propose(ProposeArgs),
 
+    #[command(
+        about = "Distill an incident trajectory or retrospective trace into candidate rules with commit anchors (medha-c8z.5)."
+    )]
+    Distill(DistillArgs),
+
     #[command(about = "Record a signal observation (APPLY, REJECT_RULE, etc.)")]
     Record(RecordArgs),
 
@@ -257,6 +262,28 @@ pub struct InitArgs {
 
     #[arg(long, help = "Disable default namespace scope")]
     pub no_namespace: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct DistillArgs {
+    #[arg(
+        long,
+        help = "Path to trajectory or incident transcript file (JSON or text)"
+    )]
+    pub file: Option<String>,
+
+    #[arg(long, help = "Incident or session identifier")]
+    pub incident: Option<String>,
+
+    #[arg(long, help = "Resolving commit SHA anchor")]
+    pub commit: Option<String>,
+
+    #[arg(
+        long = "auto-file",
+        alias = "autoFile",
+        help = "Automatically file distilled proposals on probation in the store"
+    )]
+    pub auto_file: bool,
 }
 
 #[derive(Args, Debug)]
