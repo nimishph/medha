@@ -1,6 +1,8 @@
 ---
 id: plan/rust-cli-parity
-status: draft
+title: Rust CLI parity with the TypeScript CLI
+status: accepted
+beads: []
 ---
 
 # Rust CLI parity with the TypeScript CLI

@@ -1,0 +1,10 @@
+{"planId":"plan/sdk-on-rust-engine","status":"in-progress"}
+{"id":"req-adr","revision":"r_f3dda37ac933831d"}
+{"id":"req-cli-direct","revision":"r_0287a7d9d3f5c4d6"}
+{"id":"req-extension-points","revision":"r_fca67ba181a1b9ba"}
+{"id":"req-gate","revision":"r_3e10c0aa272d0fc3"}
+{"id":"req-napi-engine","revision":"r_3d92bdf1d5bcf22b"}
+{"id":"req-no-dead-bridge","revision":"r_6fcfa08f608243b0"}
+{"id":"req-packaging","revision":"r_92b5895b4562c641"}
+{"id":"req-sdk-parity","revision":"r_25597379fee5a7c8"}
+{"id":"req-seam","revision":"r_98c0e24c890df33c"}
