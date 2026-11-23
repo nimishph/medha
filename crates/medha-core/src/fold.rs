@@ -127,7 +127,7 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
             value: 1.0,
             counts_as_trial: true,
             counts_as_success: true,
-            description: Some("Applied and succeeded".to_string()),
+            description: None,
         },
     );
     map.insert(
@@ -137,7 +137,7 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
             value: -1.0,
             counts_as_trial: true,
             counts_as_success: false,
-            description: Some("Rejected as wrong rule".to_string()),
+            description: None,
         },
     );
     map.insert(
@@ -147,7 +147,7 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
             value: -0.2,
             counts_as_trial: false,
             counts_as_success: false,
-            description: Some("Rejected due to context".to_string()),
+            description: None,
         },
     );
     map.insert(
@@ -157,7 +157,7 @@ pub fn canonical_signals() -> HashMap<String, SignalSpec> {
             value: 0.0,
             counts_as_trial: false,
             counts_as_success: false,
-            description: Some("Skipped / not applicable".to_string()),
+            description: None,
         },
     );
     map

@@ -242,7 +242,9 @@ pub struct SignalSpec {
     pub counts_as_trial: bool,
     #[serde(alias = "counts_as_success")]
     pub counts_as_success: bool,
-    #[serde(default)]
+    /// Not part of the TypeScript `SignalSpec`: kept when a config supplies one, never written
+    /// when absent, so episodes match the ones the TypeScript engine writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 

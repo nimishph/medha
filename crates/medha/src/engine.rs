@@ -735,7 +735,32 @@ impl<S: StorePort> MedhaEngine<S> {
         }
     }
 
-    fn require_kind(&self, key: &EntityKey) -> Result<(), MedhaError> {
+    /// Refuse a blank id on a key that names no entity yet, as the TypeScript `freshState` does:
+    /// such an entity could never be created, so every read or write of it is refused.
+    fn require_creatable(&self, key: &EntityKey) -> Result<(), MedhaError> {
+        if key.id.trim().is_empty() && self.store.get(key)?.is_none() {
+            return Err(MedhaError::InvalidArgument {
+                name: "key.id",
+                reason: format!("expected a non-empty string, received {}", key.id),
+            });
+        }
+        Ok(())
+    }
+
+    /// Refuse an episode whose key has a blank id, as the TypeScript store's `validateEpisodeInput`
+    /// does on every append.
+    fn require_episode_key(key: &EntityKey) -> Result<(), MedhaError> {
+        if key.id.trim().is_empty() {
+            return Err(MedhaError::InvalidArgument {
+                name: "episode.key.id",
+                reason: format!("expected a non-empty string, received {}", key.id),
+            });
+        }
+        Ok(())
+    }
+
+    /// Refuse a key whose kind is not registered (TypeScript `requireKind`).
+    pub fn require_kind(&self, key: &EntityKey) -> Result<(), MedhaError> {
         if self.kinds.contains(&key.kind) {
             return Ok(());
         }
@@ -782,6 +807,7 @@ impl<S: StorePort> MedhaEngine<S> {
 
     pub fn hint(&self, key: &EntityKey, now: i64) -> Result<TrustHint, MedhaError> {
         self.require_readable()?;
+        self.require_creatable(key)?;
         let state = self
             .store
             .get(key)?
@@ -1181,6 +1207,17 @@ impl<S: StorePort> MedhaEngine<S> {
         updater: Option<&str>,
     ) -> Result<AppendResult, MedhaError> {
         self.require_kind(&input.key)?;
+        let spec = self.signals.get(&input.signal).cloned().ok_or_else(|| {
+            MedhaError::InvalidArgument {
+                name: "signal",
+                reason: format!("Unknown signal '{}'", input.signal),
+            }
+        })?;
+        // As the TypeScript engine: a new entity's key is checked before the caseId, the episode's
+        // key when it is appended.
+        if input.ensure {
+            self.require_creatable(&input.key)?;
+        }
         if let Some(case_id) = &input.case_id {
             // A typo'd caseId would fold into the entity as usual and leave the named branch
             // untouched. Refuse it and name the branches that exist (as the TypeScript engine does).
@@ -1205,12 +1242,7 @@ impl<S: StorePort> MedhaEngine<S> {
                 });
             }
         }
-        let spec = self.signals.get(&input.signal).cloned().ok_or_else(|| {
-            MedhaError::InvalidArgument {
-                name: "signal",
-                reason: format!("Unknown signal '{}'", input.signal),
-            }
-        })?;
+        Self::require_episode_key(&input.key)?;
 
         // Like the TypeScript write plane, the episode carries the weight-updater's result, so the
         // fold applies it as written. Only the `ema` updater exists here; any other name falls
@@ -1255,6 +1287,13 @@ impl<S: StorePort> MedhaEngine<S> {
 
     pub fn guard(&mut self, input: GuardInput) -> Result<AppendResult, MedhaError> {
         self.require_kind(&input.key)?;
+        Self::require_episode_key(&input.key)?;
+        // A report without a kind counts against the entity's current guard kind, and the episode
+        // says so (TypeScript: `report.kind ?? state.guard.kind`).
+        let kind = match input.kind {
+            Some(kind) => Some(kind),
+            None => self.store.get(&input.key)?.map(|state| state.guard.kind),
+        };
         let episode_input = EpisodeInput {
             key: input.key,
             at: input.at,
@@ -1262,7 +1301,7 @@ impl<S: StorePort> MedhaEngine<S> {
             sig: None,
             payload: EpisodePayload::Guard {
                 ok: input.ok,
-                kind: input.kind,
+                kind,
                 ensure: true,
                 note: input.note,
             },
@@ -1622,6 +1661,7 @@ impl<S: StorePort> MedhaEngine<S> {
         at: i64,
     ) -> Result<AppendResult, MedhaError> {
         self.require_kind(key)?;
+        Self::require_episode_key(key)?;
         let episode_input = EpisodeInput {
             key: key.clone(),
             at,
